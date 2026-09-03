@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logos/hamlet-logo.png" alt="HamLeT — Hamiltonian Learning Toolkit" width="360">
+</p>
+
 # HamLeT
 
 **Hamiltonian Learning Toolkit**

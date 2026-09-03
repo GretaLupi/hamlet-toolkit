@@ -1,3 +1,5 @@
+<img src="../assets/logos/hamlet-icon.png" alt="" width="40" align="left">
+
 # Using HamLeT
 
 This is the complete path from raw per-site spectroscopy files to an inferred
