@@ -54,8 +54,9 @@ python -m pip install -e '.[dev,io]'
 pytest
 ```
 
-Add the `ml` extra for Keras/scikit-learn models and `simulation` for DMRGPy
-dataset generation, or install everything with the `all` extra.
+That already includes the ridge and random-forest models. Add the `ml` extra
+for the Keras MLP and CNN, and `simulation` for DMRGPy dataset generation, or
+install everything with the `all` extra.
 
 ## Quick start
 

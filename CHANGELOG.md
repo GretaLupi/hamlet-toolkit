@@ -29,6 +29,21 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - `examples/l8_demo/`: three small exact-diagonalisation datasets, with recipe
   fingerprints, so that notebook runs immediately after cloning.
 
+### Changed
+
+- `scikit-learn` moved from the optional `ml` extra into the core
+  dependencies. The ridge and random-forest models are documented first-class
+  choices, the workflow advisor and end-to-end recovery tests exercise them,
+  and joblib (which scikit-learn provides) is how every non-Keras artifact is
+  saved. Without it the suite reported 6 failures and 21 errors, so the
+  declared core install described something that could not train at all. The
+  `ml` extra is now TensorFlow only, which is genuinely optional: the suite is
+  135 passed and 2 skipped without it.
+- Non-Keras artifacts are saved with joblib compression. Tree ensembles pickle
+  redundantly — a 600-tree forest on 3000 chains measured 55 MB per seed
+  uncompressed against 21 MB compressed, for identical predictions.
+  `joblib.load` detects compression, so existing artifacts keep loading.
+
 ### Fixed
 
 - **The published package could not be imported.** `.gitignore` entries naming

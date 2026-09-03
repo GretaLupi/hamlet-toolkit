@@ -4,9 +4,13 @@
 
 ```bash
 python -m pip install -e '.[dev,io]'      # core, plotting, pytest
-python -m pip install -e '.[dev,io,ml]'   # add Keras/scikit-learn models
+python -m pip install -e '.[dev,io,ml]'   # add the Keras MLP and CNN
 pytest
 ```
+
+The core install includes scikit-learn, because the ridge and random-forest
+models are part of the ordinary workflow rather than an add-on. TensorFlow is
+genuinely optional: without it the suite is 135 passed and 2 skipped.
 
 The `simulation` extra pulls DMRGPy, which compiles a C++ backend from a git
 checkout. It is only needed to *generate* datasets; everything else, including

@@ -34,6 +34,14 @@ dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
   "scipy>=1.10",
+  # scikit-learn is a core requirement, not an optional extra. The ridge and
+  # random-forest models are first-class documented choices, the workflow
+  # advisor and the end-to-end recovery tests exercise them, and joblib (which
+  # scikit-learn pulls in) is how every non-Keras artifact is saved and
+  # reloaded. Without it the suite reports 6 failures and 21 errors and nothing
+  # can be trained at all, so declaring it optional described an install that
+  # was not actually usable.
+  "scikit-learn>=1.3",
 ]
 
 [project.urls]
@@ -42,13 +50,14 @@ Issues = "https://github.com/GretaLupi/hamlet-toolkit/issues"
 
 [project.optional-dependencies]
 io = ["matplotlib>=3.7", "pandas>=2.0"]
-ml = ["tensorflow>=2.13", "scikit-learn>=1.3"]
+# Genuinely optional: without TensorFlow the suite is 135 passed, 2 skipped,
+# because only the Keras MLP and CNN need it.
+ml = ["tensorflow>=2.13"]
 simulation = ["dmrgpy @ git+https://github.com/joselado/dmrgpy.git"]
 all = [
   "matplotlib>=3.7",
   "pandas>=2.0",
   "tensorflow>=2.13",
-  "scikit-learn>=1.3",
   "dmrgpy @ git+https://github.com/joselado/dmrgpy.git",
 ]
 dev = ["pytest>=7.4"]
