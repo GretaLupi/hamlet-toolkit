@@ -1,0 +1,33 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.coverage
+build/
+dist/
+
+# Source-only migration reference; it remains its own Git checkout.
+reference/
+
+# Generated scientific artifacts.
+data/
+models/
+results/
+
+# Greta's private, local working documentation. Never commit this folder.
+personal_docs/
+
+# Internal planning/status notes, not part of the publishable package.
+ROADMAP_CHECKLIST.txt
+LIMITED_RELEASE_READINESS.md
+VALIDATION_GATE_FINDINGS.txt
+VALIDATION_GATES_1_TO_3.md
+AUGMENTATION_CALIBRATION_FINDINGS.txt
+MODELS_TO_PRETRAIN.txt
+
+# Internal research/pilot scripts and validation-gate runners.
+scripts/
+validation/
+
+# Stray local DMRGPy/MPS solver scratch output.
+.mpsfolder/

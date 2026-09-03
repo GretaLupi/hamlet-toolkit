@@ -1,0 +1,35 @@
+config_schema_version: 1
+name: Generate, train, and analyze an inhomogeneous Heisenberg chain
+system_type: inhomogeneous_heisenberg
+output_dir: ../results/generated_project_demo
+
+dataset:
+  generate:
+    system: inhomogeneous_heisenberg
+    output: ../data/heisenberg_L12_3000.npz
+    n_sites: 12
+    n_samples: 3000
+    coupling_range_mev: [30, 45]
+    bias_range_mev: [0, 100]
+    bias_points: 200
+    broadening_mev: 0.5
+    observable: Sz
+    output_quantity: didv
+    backend: dmrgpy
+    max_bond_dimension: 20
+    kpm_max_bond_dimension: 20
+    seed: 42
+    checkpoint_every: 25
+
+experiment:
+  csv: ../reference/Inhomogeneous-Heisenberg-HL/data/experimental/ChainIH_L6_SYM.csv
+
+training:
+  cutoffs_mev: [50, 70]
+  # Only this manually chosen cutoff is calibrated and trained in this run.
+  manual_cutoff_mev: 50
+  output_points: 200
+  view: local_bonds
+  model: keras_mlp
+  preset: standard
+  verbose: 1

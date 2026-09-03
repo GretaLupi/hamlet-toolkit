@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#ffffff"/>
+  <!-- Hand outline -->
+  <path d="M100 320 C120 280, 150 260, 190 240 C230 220, 260 220, 300 240 C340 260, 370 290, 400 320 C380 340, 350 360, 320 370 C280 382, 240 388, 200 380 C160 372, 120 352, 100 320 Z" fill="#2B2F6B"/>
+  <!-- Floating matrix-like object being examined -->
+  <g transform="translate(200,80)">
+    <rect x="0" y="0" width="160" height="160" rx="18" fill="#f7f8fb" stroke="#e6e9f2"/>
+    <!-- Grid cells -->
+    <g transform="translate(18,18)">
+      <rect x="0" y="0" width="40" height="40" fill="#2B2F6B"/>
+      <rect x="50" y="0" width="40" height="40" fill="#2AB7A9"/>
+      <rect x="100" y="0" width="40" height="40" fill="#E6B655"/>
+      <rect x="0" y="50" width="40" height="40" fill="#2AB7A9"/>
+      <rect x="50" y="50" width="40" height="40" fill="#E6B655"/>
+      <rect x="100" y="50" width="40" height="40" fill="#2B2F6B"/>
+      <rect x="0" y="100" width="40" height="40" fill="#E6B655"/>
+      <rect x="50" y="100" width="40" height="40" fill="#2B2F6B"/>
+      <rect x="100" y="100" width="40" height="40" fill="#2AB7A9"/>
+    </g>
+    <!-- magnifying-beam style ray from hand to matrix -->
+    <path d="M-40 220 C40 160, 120 140, 220 180" stroke="#2AB7A9" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.9"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="28" y="480" font-family="Inter, Arial, sans-serif" font-size="40" fill="#333845">HamLeT</text>
+</svg>

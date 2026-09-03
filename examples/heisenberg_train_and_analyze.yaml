@@ -1,0 +1,24 @@
+config_schema_version: 1
+name: Inhomogeneous Heisenberg experimental analysis
+system_type: inhomogeneous_heisenberg
+
+dataset:
+  format: reference_heisenberg
+  paths:
+    - ../reference/Inhomogeneous-Heisenberg-HL/data/synthetic/dataset_30_40.npz
+    - ../reference/Inhomogeneous-Heisenberg-HL/data/synthetic/dataset_35_45.npz
+
+experiment:
+  csv: ../reference/Inhomogeneous-Heisenberg-HL/data/experimental/ChainIH_L6_SYM.csv
+
+output_dir: ../results/project_interface_demo
+
+training:
+  cutoffs_mev: [50, 70]
+  # The experimentalist chooses this after inspecting the usable measurement.
+  manual_cutoff_mev: 50
+  output_points: 200
+  view: local_bonds
+  model: keras_mlp
+  preset: standard
+  verbose: 1

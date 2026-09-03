@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hamlet-toolkit"
+version = "0.1.0"
+description = "HamLeT: Hamiltonian Learning Toolkit for simulated and experimental data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Greta Lupi"}]
+dependencies = [
+  "numpy>=1.24",
+  "pyyaml>=6.0",
+  "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+io = ["matplotlib>=3.7", "pandas>=2.0"]
+ml = ["tensorflow>=2.13", "scikit-learn>=1.3"]
+simulation = ["dmrgpy @ git+https://github.com/joselado/dmrgpy.git"]
+all = [
+  "matplotlib>=3.7",
+  "pandas>=2.0",
+  "tensorflow>=2.13",
+  "scikit-learn>=1.3",
+  "dmrgpy @ git+https://github.com/joselado/dmrgpy.git",
+]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+hamlet = "hamlet.project_cli:main"
+hamlet-analyze = "hamlet.experimental.cli:main"
+hamlet-calibrate-augmentation = "hamlet.training.calibration_cli:main"
+hamlet-train-cutoff-bank = "hamlet.training.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+  "integration: exercises an installed optional simulation backend",
+  "smoke: fast end-to-end checks for the supported HamLeT workflows",
+]

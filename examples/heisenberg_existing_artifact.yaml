@@ -1,0 +1,14 @@
+config_schema_version: 1
+name: Inhomogeneous Heisenberg artifact demonstration
+system_type: inhomogeneous_heisenberg
+
+artifact: ../models/heisenberg_local_mlp_cut50_standard_v1
+
+experiment:
+  csv: ../reference/Inhomogeneous-Heisenberg-HL/data/experimental/ChainIH_L6_SYM.csv
+
+output_dir: ../results/project_interface_artifact_demo
+
+training:
+  cutoffs_mev: [50]
+  manual_cutoff_mev: 50

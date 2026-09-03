@@ -1,0 +1,53 @@
+# Example only: adapt the exact headers and delimiter to each laboratory export.
+# Recommended guided use:
+# hamlet inspect-experiment this-file.yaml --mode heisenberg \
+#   --variant inhomogeneous --output-dir ../experiments/my_chain
+input:
+  archive: "path/to/example-export.zip"
+  pattern: "*.dat"
+
+format:
+  delimiter: "\t"
+  data_marker: "[DATA]"
+  header_offset: 1
+  encoding: utf-8
+  # Optional metadata fields copied into measurement.npz (never required for inference).
+  metadata_keys: ["X (m)", "Y (m)", "Z (m)", "Saved Date", "Saved Time"]
+
+columns:
+  energy:
+    column: "Bias calc (V)"
+    unit: V
+  primary: didv
+  signals:
+    # This is the only channel passed to the Hamiltonian inverse model.
+    didv:
+      column: "LI Demod 1 X (A)"
+      unit: A
+    # Imported for plotting/QC, but not used for inference.
+    d2idv2:
+      column: "LI Demod 2 X (A)"
+      unit: A
+
+site:
+  # sequential gives chain sites 1...N after natural filename sorting.
+  # Use filename_number to preserve identifiers such as 90...107.
+  mode: sequential
+  start: 1
+
+processing:
+  energy_order: ascending
+  grid: require_equal
+  # Removes only bias rows where dI/dV is missing at one or more sites.
+  # Alternatives are error (strict) and keep (not inference-ready).
+  missing: drop_common
+
+output:
+  directory: ../results/example_dat_import
+  csv: spectroscopy.csv
+  measurement: measurement.npz
+  report: import_report.json
+  preview: import_preview.html
+  include_auxiliary_csv: true
+  # Existing import products are protected unless this is explicitly enabled.
+  overwrite: false

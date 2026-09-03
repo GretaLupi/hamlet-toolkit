@@ -1,0 +1,37 @@
+config_schema_version: 1
+name: L8 XXZ plus J2/J3 development model
+system_type: homogeneous_xxz_j1j2j3
+output_dir: ../results/xxz_j1j2j3_l8_project
+
+dataset:
+  format: generated
+  generate:
+    system: homogeneous_xxz_j1j2j3
+    output: ../data/xxz_j1j2j3_L8.npz
+    n_sites: 8
+    n_samples: 1000
+    # Fixed order: J1_xy, J2, J3, Jz, all in meV.
+    coupling_ranges_mev:
+      - [25, 45]
+      - [-8, 8]
+      - [-5, 5]
+      - [25, 45]
+    bias_range_mev: [0, 60]
+    bias_points: 121
+    broadening_mev: 0.8
+    observable: total_spin
+    observable_weights: [1, 1, 1]  # Sxx, Syy, Szz
+    output_quantity: didv
+    backend: dmrgpy
+    max_bond_dimension: 20
+    kpm_max_bond_dimension: 20
+    checkpoint_every: 25
+    seed: 20260901
+
+training:
+  cutoffs_mev: [40, 50, 60]
+  manual_cutoff_mev: 60
+  output_points: 121
+  view: global
+  model: keras_mlp
+  preset: standard

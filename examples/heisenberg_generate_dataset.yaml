@@ -1,0 +1,22 @@
+config_schema_version: 1
+name: Generate an inhomogeneous Heisenberg training dataset
+system_type: inhomogeneous_heisenberg
+output_dir: ../results/generated_heisenberg_dataset
+
+dataset:
+  generate:
+    system: inhomogeneous_heisenberg
+    output: ../data/heisenberg_L12_3000.npz
+    n_sites: 12
+    n_samples: 3000
+    coupling_range_mev: [30, 45]
+    bias_range_mev: [0, 100]
+    bias_points: 200
+    broadening_mev: 0.5
+    observable: Sz
+    output_quantity: didv
+    backend: dmrgpy
+    max_bond_dimension: 20
+    kpm_max_bond_dimension: 20
+    seed: 42
+    checkpoint_every: 25
