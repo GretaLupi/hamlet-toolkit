@@ -39,7 +39,8 @@ hamlet run examples/heisenberg_train_and_analyze.yaml
 This calibrates the manually selected cutoff against the experiment, freezes
 its preprocessing contract, trains and validates the requested model, performs
 inference, and exports a self-contained HTML analysis report. See
-[docs/project-workflow.md](docs/project-workflow.md).
+[docs/user-guide.md](docs/user-guide.md) for the complete workflow, from raw
+per-site files through retraining to the final report.
 
 New simulation datasets can also be generated directly from YAML:
 
@@ -67,8 +68,7 @@ channels, bias coverage, and cutoff choices, then creates a versioned
 experiment manifest and visual HTML inspection. dI/dV is the primary model
 channel; optional signals such as a second derivative remain available for
 plotting and QC. No model normalization or cropping happens at this stage. See
-[docs/experiment-projects.md](docs/experiment-projects.md),
-[docs/measurement-import.md](docs/measurement-import.md) and
+[docs/user-guide.md](docs/user-guide.md) and
 [examples/import_nanonis_like_dat.yaml](examples/import_nanonis_like_dat.yaml).
 
 The interpretation can be changed after looking at the inspection without
@@ -80,11 +80,9 @@ hamlet select-experiment-mode experiments/my_chain/experiment_manifest.json \
   --output-dir experiments/my_chain_homogeneous
 ```
 
-Engineering, importer, and identifiable known-Hamiltonian recovery gates are
-recorded in [VALIDATION_GATES_1_TO_3.md](VALIDATION_GATES_1_TO_3.md). The
-current suite contains 125 passing tests. A small DMRGPy recovery gate and the
-precise scope of the usable first vertical slice are recorded in
-[LIMITED_RELEASE_READINESS.md](LIMITED_RELEASE_READINESS.md).
+The current suite contains 125 passing tests, covering engineering,
+importer, and identifiable known-Hamiltonian recovery gates plus a small
+DMRGPy recovery gate.
 
 After inspecting an experiment and choosing its cutoff manually, ask the
 package whether to reuse, retrain, regenerate, or revise the measurement:
@@ -95,8 +93,9 @@ hamlet advise experiments/my_chain/experiment_manifest.json --cutoff 50 \
 ```
 
 The decision checks the system, learning view, exact cutoff, observable,
-artifact metrics, and chain-length rule before recommending an existing model. See
-[docs/manual-cutoff-workflow.md](docs/manual-cutoff-workflow.md).
+artifact metrics, and chain-length rule before recommending an existing model.
+See [docs/user-guide.md](docs/user-guide.md) for the full reuse/retrain/
+regenerate decision table.
 
 The supported Heisenberg slice now has two inference views. The
 bond-inhomogeneous spin-1/2 chain was developed in
@@ -167,35 +166,19 @@ The original source-only research repository is retained under `reference/` for
 behavioral comparisons during migration. Large datasets and trained models are
 not duplicated here.
 
-See [docs/architecture.md](docs/architecture.md) for boundaries and the next
-implementation milestones. The extension contract for related spin systems
-and a future QPI vertical slice is in
-[docs/adding-physical-systems.md](docs/adding-physical-systems.md).
-
-Dataset generation now supports both bond-inhomogeneous chains and homogeneous
+Dataset generation supports both bond-inhomogeneous chains and homogeneous
 global `J1-J2-...` chains through the same simulator-independent interface.
-Users can convert a generated dataset to either a three-site local-bond view or
-a full-chain global view, then choose `keras_mlp`, `keras_cnn`, `ridge`, or
-`random_forest`.
-See [docs/supervised-workflows.md](docs/supervised-workflows.md) for complete
-examples.
+A generated dataset converts to either a three-site local-bond view or a
+full-chain global view, then trains `keras_mlp`, `keras_cnn`, `ridge`, or
+`random_forest`. The bias cutoff is selected from the experiment and stored
+as part of the training/inference contract. See
+[docs/user-guide.md](docs/user-guide.md) for the complete workflow.
 
-Model comparison and MLP/CNN tuning are covered in
-[docs/model-selection.md](docs/model-selection.md).
-
-The bias cutoff is selected from the experiment and stored as part of the
-training/inference contract; see
-[docs/experiment-selected-cutoff.md](docs/experiment-selected-cutoff.md).
-
-Experimentalists can now train their own leakage-safe single models or
+Experimentalists can train their own leakage-safe single models or
 multi-seed ensembles with `quick`, `standard`, and `research` presets. The
 saved artifact bundles the trained models with cutoff, preprocessing, target
 scaling, units, seeds, and physical-unit metrics, and opens directly as an
-experimental analyzer. See [docs/guided-training.md](docs/guided-training.md).
-
-For controlled MLP/CNN selection, independently retrained 30/40/50/70/100 meV
-weights, and automatic experiment-compatible artifact selection, see
-[docs/cutoff-model-bank.md](docs/cutoff-model-bank.md).
+experimental analyzer.
 
 Experimentalists can run a trained local ensemble from Python with
 `ExperimentalChainAnalyzer` or use the `hamlet-analyze` command. Both paths
@@ -216,8 +199,6 @@ For the diagnostics-first experimental workflow using the real
 The executed simulation-to-experiment research study—including spectral
 distribution scoring, nearest synthetic windows, inference diagnostics, and DMRGPy forward residuals—
 is [notebooks/03_simulation_experiment_validation.ipynb](notebooks/03_simulation_experiment_validation.ipynb).
-Its current decision is summarized in
-[VALIDATION_GATE_FINDINGS.txt](VALIDATION_GATE_FINDINGS.txt).
 
 Label-free nuisance calibration is available from the command line:
 
@@ -239,5 +220,3 @@ The optional calibration command uses measured spectral compatibility only; it
 never uses experimental Hamiltonian labels or inverse-model predictions. It is
 an advanced research utility and is not required for ordinary model reuse or
 inference.
-The completed calibration and standard-ensemble results are summarized in
-[AUGMENTATION_CALIBRATION_FINDINGS.txt](AUGMENTATION_CALIBRATION_FINDINGS.txt).
