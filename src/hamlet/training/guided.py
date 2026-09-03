@@ -135,7 +135,13 @@ class TrainingRun:
                 except ImportError as exc:  # pragma: no cover
                     raise ImportError("saving sklearn artifacts requires scikit-learn") from exc
                 filename = f"model_seed_{self.preset.seeds[index]}.joblib"
-                joblib.dump(model, destination / filename)
+                # Compressed because tree ensembles dominate artifact size and
+                # pickle them very redundantly: a 600-tree forest trained on
+                # 3000 chains measured 55 MB per seed uncompressed and 21 MB at
+                # this level, for the same predictions. joblib.load detects
+                # compression from the file, so artifacts written either way
+                # keep loading.
+                joblib.dump(model, destination / filename, compress=3)
                 model_format = "joblib"
             model_records.append(
                 {"seed": self.preset.seeds[index], "file": filename, "format": model_format}

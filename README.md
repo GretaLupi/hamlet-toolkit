@@ -25,13 +25,24 @@ name.)
   predicts local exchange couplings and works on any chain length. Validated
   end-to-end against a real experimental chain and a small physical DMRGPy
   recovery benchmark.
-- **Homogeneous chain family** (`global` view) — implemented end to end
-  (dataset generation, training, artifact reuse, experimental analysis and
-  reports all work) for plain `J1-J2-...` chains, the anisotropic
-  XXZ+J2+J3 extension, and the XXZ+J2+J3+DMI extension, each with a
-  configurable simulated observable (`Sz` or `total_spin`). Currently being
-  tested and validated against genuine DMRGPy data — not yet release-quality,
-  so treat as development-only for now. Coming soon.
+- **Homogeneous `J1-J2` chains at L=8** (`global` view) — a first reference
+  model ships in
+  [models/published/](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1),
+  trained on 3000 exact-diagonalisation chains: 0.114 meV held-out test MAE,
+  with both couplings recovered well clear of a training-mean baseline across
+  five resampled splits. Validated against simulated spectra only — not yet
+  against a measurement with independently known parameters. See its
+  [model card](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1/MODEL_CARD.md)
+  for the valid parameter ranges and the conditions under which it must not be
+  reused.
+- **Anisotropic homogeneous extensions** (XXZ+J2+J3, and the same plus a
+  uniform DMI magnitude) — implemented end to end with a configurable
+  simulated observable (`Sz` or `total_spin`), and improving steadily with
+  data: at 500 chains the exchange couplings reach 0.36–0.87 skill over a
+  training-mean baseline. The DMI magnitude does not: it stays at or below
+  that baseline even at fifteen times the pilot dataset, which suggests it is
+  not identifiable from unpolarised total-spin spectra at this chain length
+  rather than merely undersampled. Development-only.
 
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.

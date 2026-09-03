@@ -15,14 +15,17 @@ __pycache__/
 
 # Generated scientific artifacts.
 /data/
-/models/
 /results/
+
+# models/ is excluded by its *contents* rather than as a directory, because git
+# never descends into an excluded directory and so cannot re-include anything
+# beneath one. Writing "/models/" here would make the exception below dead.
+/models/*
 
 # Exception: artifacts under models/published/ are the distributable reference
 # models that ship with the package, so they are tracked deliberately. Keep
 # them small and accompanied by a MODEL_CARD.md recording provenance.
 !/models/published/
-!/models/published/**
 
 # Greta's private, local working documentation. Never commit this folder.
 /personal_docs/

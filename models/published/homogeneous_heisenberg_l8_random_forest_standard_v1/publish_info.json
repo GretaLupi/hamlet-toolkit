@@ -1,0 +1,65 @@
+{
+  "artifact_name": "homogeneous_heisenberg_l8_random_forest_standard_v1",
+  "artifact_relpath": "models/published/homogeneous_heisenberg_l8_random_forest_standard_v1",
+  "headline": "Reference global-view model for the `homogeneous_heisenberg` system at L = 8, trained on 3000 exact-diagonalisation chains.",
+  "dataset_name": "homogeneous_heisenberg_l8_ed.npz",
+  "system_type": "homogeneous_heisenberg",
+  "n_chains": 3000,
+  "n_sites": 8,
+  "target_names": [
+    "J1",
+    "J2"
+  ],
+  "parameter_ranges": [
+    {
+      "parameter": "J1",
+      "min_mev": 30.01693344116211,
+      "max_mev": 44.99756622314453
+    },
+    {
+      "parameter": "J2",
+      "min_mev": 0.013477372005581856,
+      "max_mev": 9.995575904846191
+    }
+  ],
+  "observable": "Sz",
+  "output_quantity": "didv",
+  "broadening_mev": 1.0,
+  "bias_cutoff_mev": 60.0,
+  "output_points": 61,
+  "model": "random_forest",
+  "model_options": {
+    "n_estimators": 200,
+    "min_samples_leaf": 2,
+    "n_jobs": -1
+  },
+  "preset": "standard",
+  "n_seeds": 3,
+  "aggregation": "validation_weighted",
+  "validation_mae_mev": 0.11282913386821747,
+  "test_mae_mev": 0.11395741999149323,
+  "test_rmse_mev": 0.1638411283493042,
+  "test_correlation_fidelity": 0.9999515175567735,
+  "split_sizes": {
+    "train_groups": 2100,
+    "validation_groups": 600,
+    "test_groups": 300,
+    "split_seed": 42
+  },
+  "per_parameter": [
+    {
+      "parameter": "J1",
+      "test_mae_mev": 0.07729742676019669,
+      "skill": 0.9782001008839609
+    },
+    {
+      "parameter": "J2",
+      "test_mae_mev": 0.15061739087104797,
+      "skill": 0.9369683905623271
+    }
+  ],
+  "benchmark_note": "Chosen by `scripts/benchmark_homogeneous.py` over 5 resampled splits on validation MAE (mean validation MAE by model: `random_forest` 0.124, `ridge` 0.157). See `homogeneous_heisenberg_l8_ed_benchmark.json`.",
+  "created": "2026-09-03",
+  "hamlet_version": "0.1.0",
+  "python_version": "3.11.5"
+}

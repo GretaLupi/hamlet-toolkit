@@ -1,0 +1,480 @@
+{
+  "artifact_schema_version": 1,
+  "coupling_unit": "meV",
+  "dataset_metadata": {
+    "chunk_seeds": [
+      4026010626,
+      1608384121,
+      993707957,
+      414543594,
+      1428970029,
+      564367593
+    ],
+    "family": "HomogeneousHeisenbergFamily",
+    "generation_fingerprint": "6076de68d04a54810ff75914369a59ca3c43384d3399b5233a144bb2155f82ed",
+    "generation_recipe": {
+      "backend": "dmrgpy",
+      "bias_points": 61,
+      "bias_range_mev": [
+        0.0,
+        60.0
+      ],
+      "broadening_mev": 1.0,
+      "coupling_ranges_mev": [
+        [
+          30.0,
+          45.0
+        ],
+        [
+          0.0,
+          10.0
+        ]
+      ],
+      "dynamics_mode": "ED",
+      "n_samples": 30,
+      "n_shards": 100,
+      "n_sites": 8,
+      "observable": "Sz",
+      "observable_weights": null,
+      "output_quantity": "didv",
+      "seed": 77260903,
+      "shard": 0,
+      "system_type": "homogeneous_heisenberg"
+    },
+    "merged_from": [
+      "shard_000.npz",
+      "shard_001.npz",
+      "shard_002.npz",
+      "shard_003.npz",
+      "shard_004.npz",
+      "shard_005.npz",
+      "shard_006.npz",
+      "shard_007.npz",
+      "shard_008.npz",
+      "shard_009.npz",
+      "shard_010.npz",
+      "shard_011.npz",
+      "shard_012.npz",
+      "shard_013.npz",
+      "shard_014.npz",
+      "shard_015.npz",
+      "shard_016.npz",
+      "shard_017.npz",
+      "shard_018.npz",
+      "shard_019.npz",
+      "shard_020.npz",
+      "shard_021.npz",
+      "shard_022.npz",
+      "shard_023.npz",
+      "shard_024.npz",
+      "shard_025.npz",
+      "shard_026.npz",
+      "shard_027.npz",
+      "shard_028.npz",
+      "shard_029.npz",
+      "shard_030.npz",
+      "shard_031.npz",
+      "shard_032.npz",
+      "shard_033.npz",
+      "shard_034.npz",
+      "shard_035.npz",
+      "shard_036.npz",
+      "shard_037.npz",
+      "shard_038.npz",
+      "shard_039.npz",
+      "shard_040.npz",
+      "shard_041.npz",
+      "shard_042.npz",
+      "shard_043.npz",
+      "shard_044.npz",
+      "shard_045.npz",
+      "shard_046.npz",
+      "shard_047.npz",
+      "shard_048.npz",
+      "shard_049.npz",
+      "shard_050.npz",
+      "shard_051.npz",
+      "shard_052.npz",
+      "shard_053.npz",
+      "shard_054.npz",
+      "shard_055.npz",
+      "shard_056.npz",
+      "shard_057.npz",
+      "shard_058.npz",
+      "shard_059.npz",
+      "shard_060.npz",
+      "shard_061.npz",
+      "shard_062.npz",
+      "shard_063.npz",
+      "shard_064.npz",
+      "shard_065.npz",
+      "shard_066.npz",
+      "shard_067.npz",
+      "shard_068.npz",
+      "shard_069.npz",
+      "shard_070.npz",
+      "shard_071.npz",
+      "shard_072.npz",
+      "shard_073.npz",
+      "shard_074.npz",
+      "shard_075.npz",
+      "shard_076.npz",
+      "shard_077.npz",
+      "shard_078.npz",
+      "shard_079.npz",
+      "shard_080.npz",
+      "shard_081.npz",
+      "shard_082.npz",
+      "shard_083.npz",
+      "shard_084.npz",
+      "shard_085.npz",
+      "shard_086.npz",
+      "shard_087.npz",
+      "shard_088.npz",
+      "shard_089.npz",
+      "shard_090.npz",
+      "shard_091.npz",
+      "shard_092.npz",
+      "shard_093.npz",
+      "shard_094.npz",
+      "shard_095.npz",
+      "shard_096.npz",
+      "shard_097.npz",
+      "shard_098.npz",
+      "shard_099.npz"
+    ],
+    "merged_shard_samples": [
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30,
+      30
+    ],
+    "n_samples": 30,
+    "protocol": {
+      "broadening_mev": 1.0,
+      "observable": "Sz",
+      "observable_contract": {
+        "components": [
+          "Szz"
+        ],
+        "kind": "Sz",
+        "weights": [
+          1.0
+        ]
+      },
+      "output_quantity": "didv"
+    },
+    "seed": 4026010626,
+    "simulator": "DmrgpySimulator",
+    "training_preprocessing": {
+      "baseline_range_mev": [
+        0.0,
+        3.0
+      ],
+      "bias_cutoff_mev": 60.0,
+      "bias_min_mev": 0.0,
+      "clip": null,
+      "output_points": 61,
+      "resolved_scale_range_mev": [
+        50.0,
+        60.0
+      ],
+      "scale_bandwidth_mev": 10.0,
+      "scale_range_mev": null
+    }
+  },
+  "energy_convention": {
+    "dmrgpy_energy_unit_mev": 10.0
+  },
+  "ensemble_aggregation": {
+    "method": "validation_weighted",
+    "selection_metric": "validation_mae",
+    "weights": [
+      0.3352139594827467,
+      0.33115534235744676,
+      0.3336306981598066
+    ]
+  },
+  "metrics": {
+    "aggregation_selection": {
+      "candidates": {
+        "mean": {
+          "correlation_fidelity": 0.9999548134616643,
+          "mae": 0.11283104121685028,
+          "rmse": 0.15873131155967712,
+          "weights": null
+        },
+        "median": {
+          "correlation_fidelity": 0.999954624761032,
+          "mae": 0.11312630027532578,
+          "rmse": 0.1590695083141327,
+          "weights": null
+        },
+        "validation_weighted": {
+          "correlation_fidelity": 0.9999548161924257,
+          "mae": 0.11282913386821747,
+          "rmse": 0.15872645378112793,
+          "weights": [
+            0.3352139594827467,
+            0.33115534235744676,
+            0.3336306981598066
+          ]
+        }
+      },
+      "selected": "validation_weighted",
+      "selection_metric": "mae",
+      "selection_split": "validation"
+    },
+    "split": {
+      "split_seed": 42,
+      "test_groups": 300,
+      "train_groups": 2100,
+      "validation_groups": 600
+    },
+    "test": {
+      "ensemble": {
+        "correlation_fidelity": 0.9999515175567735,
+        "mae": 0.11395741999149323,
+        "rmse": 0.1638411283493042
+      },
+      "ensemble_aggregation": "validation_weighted",
+      "n_examples": 300,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.9999503891044188,
+          "mae": 0.11437777429819107,
+          "rmse": 0.16580559313297272
+        },
+        {
+          "correlation_fidelity": 0.9999502428148538,
+          "mae": 0.11735761165618896,
+          "rmse": 0.16608576476573944
+        },
+        {
+          "correlation_fidelity": 0.9999507606260243,
+          "mae": 0.11485648900270462,
+          "rmse": 0.16489830613136292
+        }
+      ],
+      "unit": "meV"
+    },
+    "validation": {
+      "ensemble": {
+        "correlation_fidelity": 0.9999548161924257,
+        "mae": 0.11282913386821747,
+        "rmse": 0.15872645378112793
+      },
+      "ensemble_aggregation": "validation_weighted",
+      "n_examples": 600,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.9999545519261971,
+          "mae": 0.11370041221380234,
+          "rmse": 0.15917041897773743
+        },
+        {
+          "correlation_fidelity": 0.9999531801955028,
+          "mae": 0.11509391665458679,
+          "rmse": 0.16159039735794067
+        },
+        {
+          "correlation_fidelity": 0.9999538755014223,
+          "mae": 0.11423998326063156,
+          "rmse": 0.16037282347679138
+        }
+      ],
+      "unit": "meV"
+    }
+  },
+  "model_name": "random_forest",
+  "model_options": {
+    "min_samples_leaf": 2,
+    "n_estimators": 200,
+    "n_jobs": -1
+  },
+  "models": [
+    {
+      "file": "model_seed_42.joblib",
+      "format": "joblib",
+      "seed": 42
+    },
+    {
+      "file": "model_seed_43.joblib",
+      "format": "joblib",
+      "seed": 43
+    },
+    {
+      "file": "model_seed_44.joblib",
+      "format": "joblib",
+      "seed": 44
+    }
+  ],
+  "n_sites": 8,
+  "package_version": "0.1.0",
+  "preprocessing": {
+    "baseline_range_mev": [
+      0.0,
+      3.0
+    ],
+    "bias_cutoff_mev": 60.0,
+    "bias_min_mev": 0.0,
+    "clip": null,
+    "output_points": 61,
+    "resolved_scale_range_mev": [
+      50.0,
+      60.0
+    ],
+    "scale_bandwidth_mev": 10.0,
+    "scale_range_mev": null
+  },
+  "system_type": "homogeneous_heisenberg",
+  "target_names": [
+    "J1",
+    "J2"
+  ],
+  "target_scaler": {
+    "maximum": [
+      44.99756622314453,
+      9.991445541381836
+    ],
+    "minimum": [
+      30.01693344116211,
+      0.013477372005581856
+    ]
+  },
+  "toolkit": {
+    "distribution": "hamlet-toolkit",
+    "full_name": "Hamiltonian Learning Toolkit",
+    "name": "HamLeT"
+  },
+  "training_distribution": {
+    "feature_count": 488,
+    "file": "training_distribution.npz",
+    "method": "diagonal_rms_z_score",
+    "quantile_levels": [
+      0.5,
+      0.8999999761581421,
+      0.949999988079071,
+      0.9900000095367432
+    ],
+    "reference_count": 256,
+    "score_quantiles": [
+      0.7880815267562866,
+      1.2069753408432007,
+      1.4331873655319214,
+      1.782724380493164
+    ],
+    "threshold_95": 1.4331873655319214
+  },
+  "training_preset": {
+    "batch_size": 32,
+    "epochs": 100,
+    "name": "standard",
+    "patience": 12,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "split_seed": 42,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.2
+  },
+  "view": "global"
+}
