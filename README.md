@@ -25,13 +25,13 @@ name.)
   predicts local exchange couplings and works on any chain length. Validated
   end-to-end against a real experimental chain and a small physical DMRGPy
   recovery benchmark.
-- **Homogeneous `J1-J2-...` chains** (`global` view) — implemented (dataset
-  generation, training, artifact reuse, experimental analysis and reports all
-  work), but not yet validated against a genuine DMRGPy dataset or a real
-  experimental chain. Coming soon.
-- **Anisotropic XXZ / DMI variants** — development-only research modes for
-  exploring longer-range and Dzyaloshinskii–Moriya physics. Not yet
-  identifiable enough to be release-quality.
+- **Homogeneous chain family** (`global` view) — implemented end to end
+  (dataset generation, training, artifact reuse, experimental analysis and
+  reports all work) for plain `J1-J2-...` chains, the anisotropic
+  XXZ+J2+J3 extension, and the XXZ+J2+J3+DMI extension, each with a
+  configurable simulated observable (`Sz` or `total_spin`). Currently being
+  tested and validated against genuine DMRGPy data — not yet release-quality,
+  so treat as development-only for now. Coming soon.
 
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.
