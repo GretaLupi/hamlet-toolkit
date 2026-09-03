@@ -28,6 +28,14 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
   sliding-window inference on a held-out chain.
 - `examples/l8_demo/`: three small exact-diagonalisation datasets, with recipe
   fingerprints, so that notebook runs immediately after cloning.
+- `models/published/homogeneous_heisenberg_l8_random_forest_standard_v1`: the
+  first reference artifact for a homogeneous system, trained on 3000 L=8
+  exact-diagonalisation chains. 0.114 meV held-out test MAE, accepted by the
+  advisor, and documented by a model card recording provenance, valid
+  parameter ranges and the conditions under which it must not be reused.
+- `scripts/benchmark_homogeneous.py`, which repeats training over several
+  split seeds and reports the spread, because single-split per-parameter
+  scores at these dataset sizes are noisy enough to invert a conclusion.
 
 ### Changed
 

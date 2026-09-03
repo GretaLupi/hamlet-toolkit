@@ -35,14 +35,25 @@ name.)
   [model card](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1/MODEL_CARD.md)
   for the valid parameter ranges and the conditions under which it must not be
   reused.
-- **Anisotropic homogeneous extensions** (XXZ+J2+J3, and the same plus a
-  uniform DMI magnitude) — implemented end to end with a configurable
-  simulated observable (`Sz` or `total_spin`), and improving steadily with
-  data: at 500 chains the exchange couplings reach 0.36–0.87 skill over a
-  training-mean baseline. The DMI magnitude does not: it stays at or below
-  that baseline even at fifteen times the pilot dataset, which suggests it is
-  not identifiable from unpolarised total-spin spectra at this chain length
-  rather than merely undersampled. Development-only.
+- **Anisotropic XXZ+J2+J3 at L=8** (`global` view) — implemented end to end
+  with a configurable simulated observable (`Sz` or `total_spin`). At 3000
+  exact-diagonalisation chains every one of the four couplings carries real
+  signal, with skill over a training-mean baseline of 0.76 (`J1_xy`), 0.80
+  (`J2`), 0.77 (`J3`) and 0.59 (`Jz`) for the better of the two models. `Jz` is
+  the hardest, not `J3` — an earlier 64-chain pilot reported the opposite, and
+  that was small-sample noise. Development-only: no reference artifact is
+  published yet, and the accuracy is an order of magnitude behind the isotropic
+  case above.
+- **Uniform DMI magnitude** (`heisenberg/xxz_dmi`) — implemented, and
+  **measured as not identifiable** from this observable. Across 32, 500 and
+  3000 chains, with both ridge and random forest, `D_z_magnitude` never beats
+  simply predicting the training mean (skill 0.11, −0.36, −0.06 and −0.02,
+  −0.02, −0.03), while every other parameter in the very same spectra improves
+  monotonically with data over that 100-fold range. Adding chains fixes the
+  exchange couplings and does nothing for DMI, so the limitation looks
+  structural rather than statistical: unpolarised total-spin autocorrelations
+  appear to carry no usable DMI-magnitude information at this chain length.
+  Resolving it likely needs a spin-resolved observable, not more compute.
 
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.
