@@ -296,7 +296,7 @@ class ExperimentalGlobalAnalyzer:
         target_scaler: MinMaxTargetScaler,
         coupling_unit: str = "meV",
         model_names: Sequence[str] | None = None,
-        disagreement_warning_fraction: float = 0.1,
+        disagreement_warning_fraction: float = 0.25,
         aggregation: EnsembleAggregation | None = None,
     ) -> None:
         if not models:
@@ -412,7 +412,7 @@ class ExperimentalChainAnalyzer:
         target_scaler: MinMaxTargetScaler | None = None,
         coupling_unit: str = "model units",
         model_names: Sequence[str] | None = None,
-        disagreement_warning_fraction: float = 0.1,
+        disagreement_warning_fraction: float = 0.25,
         flatten_inputs: bool = False,
         aggregation: EnsembleAggregation | None = None,
     ) -> None:
