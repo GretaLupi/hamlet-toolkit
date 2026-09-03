@@ -1,33 +1,37 @@
+# Patterns below that name a directory are anchored with a leading slash when
+# they mean "this directory at the repository root". Without the slash git
+# matches the name at ANY depth, which silently swallowed the src/hamlet/data
+# and src/hamlet/models source packages.
 __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
 .coverage
-build/
-dist/
+/build/
+/dist/
 
 # Source-only migration reference; it remains its own Git checkout.
-reference/
+/reference/
 
 # Generated scientific artifacts.
-data/
-models/
-results/
+/data/
+/models/
+/results/
 
 # Greta's private, local working documentation. Never commit this folder.
-personal_docs/
+/personal_docs/
 
 # Internal planning/status notes, not part of the publishable package.
-ROADMAP_CHECKLIST.txt
-LIMITED_RELEASE_READINESS.md
-VALIDATION_GATE_FINDINGS.txt
-VALIDATION_GATES_1_TO_3.md
-AUGMENTATION_CALIBRATION_FINDINGS.txt
-MODELS_TO_PRETRAIN.txt
+/ROADMAP_CHECKLIST.txt
+/LIMITED_RELEASE_READINESS.md
+/VALIDATION_GATE_FINDINGS.txt
+/VALIDATION_GATES_1_TO_3.md
+/AUGMENTATION_CALIBRATION_FINDINGS.txt
+/MODELS_TO_PRETRAIN.txt
 
 # Internal research/pilot scripts and validation-gate runners.
-scripts/
-validation/
+/scripts/
+/validation/
 
 # Stray local DMRGPy/MPS solver scratch output.
 .mpsfolder/
@@ -36,14 +40,14 @@ validation/
 # Developer-facing docs (architecture, extending with new systems, model
 # tuning, bank management). Kept locally; docs/user-guide.md is the only
 # doc users need and stays tracked.
-docs/architecture.md
-docs/adding-physical-systems.md
-docs/model-selection.md
-docs/supervised-workflows.md
-docs/cutoff-model-bank.md
-docs/experiment-projects.md
-docs/measurement-import.md
-docs/experiment-selected-cutoff.md
-docs/manual-cutoff-workflow.md
-docs/project-workflow.md
-docs/guided-training.md
+/docs/architecture.md
+/docs/adding-physical-systems.md
+/docs/model-selection.md
+/docs/supervised-workflows.md
+/docs/cutoff-model-bank.md
+/docs/experiment-projects.md
+/docs/measurement-import.md
+/docs/experiment-selected-cutoff.md
+/docs/manual-cutoff-workflow.md
+/docs/project-workflow.md
+/docs/guided-training.md
