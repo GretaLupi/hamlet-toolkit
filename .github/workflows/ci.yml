@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: tests (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      # The core plus io and dev extras. TensorFlow lives in the ml extra and
+      # is exercised by the separate job below; the two neural tests skip
+      # themselves cleanly when it is absent. The simulation extra is left out
+      # entirely because DMRGPy compiles a C++ backend from a git checkout.
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,io]'
+      - run: python -m pytest -v
+
+  tests-ml:
+    name: tests (neural models)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -e '.[dev,io,ml]'
+      # Confirm the Keras paths actually run rather than silently skipping.
+      - run: python -m pytest -v -k "keras or model" --no-header
+      - run: python -m pytest -q
+
+  packaging:
+    name: wheel contains the whole package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip build
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # A .gitignore rule naming a directory without a leading slash matches at
+      # every depth, which once excluded src/hamlet/data and src/hamlet/models
+      # from version control and shipped a package that could not be imported.
+      # Compare the built wheel against the source tree so that can never
+      # reach a release again.
+      - name: Every subpackage present in the wheel
+        run: |
+          python - <<'PY'
+          import pathlib, sys, zipfile
+
+          wheels = sorted(pathlib.Path("dist").glob("*.whl"))
+          assert len(wheels) == 1, f"expected exactly one wheel, got {wheels}"
+          names = set(zipfile.ZipFile(wheels[0]).namelist())
+
+          source_root = pathlib.Path("src/hamlet")
+          expected = {
+              str(path.relative_to("src")).replace("\\", "/")
+              for path in source_root.rglob("*.py")
+              if "__pycache__" not in path.parts
+          }
+          missing = sorted(expected - names)
+          if missing:
+              print(f"{wheels[0].name} is missing {len(missing)} module(s):")
+              for item in missing:
+                  print(f"  {item}")
+              sys.exit(1)
+          print(f"{wheels[0].name}: all {len(expected)} modules present")
+          PY
+
+      - name: Install the wheel in a clean environment and import it
+        run: |
+          python -m venv /tmp/fresh
+          /tmp/fresh/bin/pip install --upgrade pip
+          /tmp/fresh/bin/pip install dist/*.whl
+          # Import from outside the checkout so the installed package is used
+          # rather than the source tree.
+          cd /tmp
+          /tmp/fresh/bin/python - <<'PY'
+          import hamlet
+          from hamlet.data import SpectroscopyDataset, as_supervised, generate_dataset
+          from hamlet.models import create_supervised_model
+          from hamlet.training import train_supervised
+          from hamlet.simulation import SpectroscopyProtocol
+          from hamlet.systems import HomogeneousHeisenbergFamily
+
+          missing = [name for name in hamlet.__all__ if not hasattr(hamlet, name)]
+          assert not missing, f"hamlet.__all__ advertises missing objects: {missing}"
+          print("installed wheel imports cleanly, version", hamlet.__version__)
+          PY
+
+      - name: Console scripts are installed and runnable
+        run: |
+          /tmp/fresh/bin/hamlet modes
+          /tmp/fresh/bin/hamlet --help > /dev/null
+          for script in hamlet-analyze hamlet-calibrate-augmentation hamlet-train-cutoff-bank; do
+            test -x "/tmp/fresh/bin/$script" || { echo "missing console script: $script"; exit 1; }
+          done
+          echo "all console scripts present"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    # Gating, not advisory: the configured rules catch real defects such as
+    # undefined names and unused imports, and the tree is clean under them.
+    # Style opinions are excluded in pyproject.toml precisely so that a red
+    # lint job always means something is actually wrong.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: python -m pip install --upgrade pip ruff
+      # Rule selection lives in pyproject.toml. No formatter check: this
+      # project has not adopted ruff format, so diffing against it every run
+      # would report the whole tree rather than anything actionable.
+      - run: ruff check src tests --output-format=github

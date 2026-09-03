@@ -148,7 +148,12 @@ class Measurement:
         allow_missing: bool = False,
     ) -> Path:
         """Write the package's long-form ``site,bias_meV,didv_A`` schema."""
-        energy, primary = self.site_spectra(require_complete=not allow_missing)
+        # This call is kept for its completeness check as well as the shared
+        # energy axis: it raises when the primary channel has gaps and the
+        # caller did not opt into them. Each channel's values are re-read below
+        # with require_complete=False, because auxiliary channels may legitimately
+        # have gaps and are masked point by point instead.
+        energy, _primary = self.site_spectra(require_complete=not allow_missing)
         sites = np.asarray(self.axes["site"])
         channel_names = [self.primary_channel]
         if include_auxiliary:

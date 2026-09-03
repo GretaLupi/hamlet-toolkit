@@ -18,6 +18,12 @@ __pycache__/
 /models/
 /results/
 
+# Exception: artifacts under models/published/ are the distributable reference
+# models that ship with the package, so they are tracked deliberately. Keep
+# them small and accompanied by a MODEL_CARD.md recording provenance.
+!/models/published/
+!/models/published/**
+
 # Greta's private, local working documentation. Never commit this folder.
 /personal_docs/
 

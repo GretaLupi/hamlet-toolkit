@@ -38,6 +38,22 @@ hamlet-train-cutoff-bank = "hamlet.training.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Only rules that indicate a real defect: pyflakes (undefined names, unused
+# imports, shadowed bindings) and pycodestyle's syntax/runtime errors. The
+# codebase is clean under these, so CI can fail on a violation and the signal
+# means something.
+#
+# Style families are deliberately excluded rather than reported and ignored.
+# Import order and line length are available on demand with
+#   ruff check src tests --select I,E501
+# and opinionated families such as TRY and BLE flag patterns this code uses on
+# purpose, like raising ValueError from a physical-contract type check.
+select = ["F", "E9"]
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]
