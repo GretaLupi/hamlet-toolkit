@@ -82,7 +82,7 @@ hamlet select-experiment-mode experiments/my_chain/experiment_manifest.json \
 
 Engineering, importer, and identifiable known-Hamiltonian recovery gates are
 recorded in [VALIDATION_GATES_1_TO_3.md](VALIDATION_GATES_1_TO_3.md). The
-current suite contains 122 passing tests. A small DMRGPy recovery gate and the
+current suite contains 125 passing tests. A small DMRGPy recovery gate and the
 precise scope of the usable first vertical slice are recorded in
 [LIMITED_RELEASE_READINESS.md](LIMITED_RELEASE_READINESS.md).
 
@@ -120,6 +120,11 @@ Simulation observables are explicit model contracts. `Sz` preserves the
 original workflow; `total_spin` produces a configurable weighted sum of
 `Sxx + Syy + Szz` and is recommended for new anisotropic/DMI studies. The
 advisor rejects silent observable substitutions.
+
+A paired L=8 exact-diagonalization screen shows why both observables remain:
+total spin improved J2/J3, while Sz improved J1_xy/Jz. A separate five-target
+total-spin DMI screen found that J3 and DMI magnitude were not yet reliably
+identifiable. Both artifacts remain development-only.
 
 Physical energy inputs and outputs use meV. The DMRGPy adapter applies the
 project convention `1 DMRGPy energy unit = 10 meV` internally.

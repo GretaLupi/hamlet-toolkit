@@ -135,3 +135,10 @@ Hamiltonian semantics. See
 For this anisotropic family, `total_spin` computes the weighted sum of the
 `Sxx`, `Syy`, and `Szz` dynamical autocorrelators before forming the dI/dV-like
 integrated response. `Sz` remains selectable for controlled ablations.
+
+The `heisenberg/xxz_dmi` variant adds a fifth non-negative target,
+`D_z_magnitude`, with the uniform nearest-neighbour term
+`D_z*(Sx_i Sy_{i+1} - Sy_i Sx_{i+1})`. Its sign is deliberately outside the
+unpolarized-autocorrelation contract. The first 32-chain total-spin screening
+found weak DMI-magnitude recovery and does not qualify as an experimental
+artifact; see `results/xxz_dmi_l8_total_spin_ed_pilot`.

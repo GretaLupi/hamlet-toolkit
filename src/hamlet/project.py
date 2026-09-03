@@ -70,7 +70,8 @@ class DatasetGenerationConfig:
         }:
             raise ValueError(
                 "generated system must be inhomogeneous_heisenberg, "
-                "homogeneous_heisenberg, or homogeneous_xxz_j1j2j3"
+                "homogeneous_heisenberg, homogeneous_xxz_j1j2j3, or "
+                "homogeneous_xxz_j1j2j3_dmi"
             )
         if self.n_sites < 2 or self.n_samples < 1:
             raise ValueError("n_sites must be at least 2 and n_samples positive")

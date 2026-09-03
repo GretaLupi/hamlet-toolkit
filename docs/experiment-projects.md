@@ -31,6 +31,7 @@ physically.
 | `heisenberg` | `inhomogeneous` | `inhomogeneous_heisenberg` | `local_bonds` | `Sz` (historical approximation) |
 | `heisenberg` | `homogeneous` | `homogeneous_heisenberg` | `global` | `Sz` by default |
 | `heisenberg` | `xxz_long_range` | `homogeneous_xxz_j1j2j3` | `global` | `total_spin` recommended |
+| `heisenberg` | `xxz_dmi` | `homogeneous_xxz_j1j2j3_dmi` | `global` | `total_spin` required by the mode contract |
 
 The inhomogeneous profile requires at least three sites because its estimator
 consumes three adjacent spectra and can slide over different chain lengths.
