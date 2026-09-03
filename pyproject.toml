@@ -10,11 +10,35 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [{name = "Greta Lupi"}]
+keywords = [
+  "hamiltonian-learning",
+  "spin-chains",
+  "heisenberg-model",
+  "spectroscopy",
+  "inverse-problems",
+  "scanning-tunneling-microscopy",
+  "dmrg",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
   "scipy>=1.10",
 ]
+
+[project.urls]
+Repository = "https://github.com/GretaLupi/hamlet-toolkit"
+Issues = "https://github.com/GretaLupi/hamlet-toolkit/issues"
 
 [project.optional-dependencies]
 io = ["matplotlib>=3.7", "pandas>=2.0"]

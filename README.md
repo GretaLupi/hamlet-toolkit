@@ -126,6 +126,12 @@ This optional command compares measured spectral compatibility only; it never
 uses experimental Hamiltonian labels or inverse-model predictions. It's a
 research utility, not required for ordinary model reuse or inference.
 
+## Contributing
+
+Setup, the conventions that protect scientific results, and the versioning
+policy are in [CONTRIBUTING.md](CONTRIBUTING.md). Notable changes are recorded
+in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
