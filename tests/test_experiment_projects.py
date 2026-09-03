@@ -165,6 +165,52 @@ def test_guided_cli_imports_inspects_and_creates_advisor_ready_manifest(
         )
 
 
+def test_guided_output_override_preserves_explicit_input_files(tmp_path):
+    source = tmp_path / "raw"
+    source.mkdir()
+    files = []
+    for site in (1, 2, 3):
+        path = source / f"site{site}.dat"
+        path.write_text(
+            "Bias (mV),LI Demod 1 X (A)\n0,1\n10,2\n20,3\n",
+            encoding="utf-8",
+        )
+        files.append(str(path))
+    payload = {
+        "input": {"files": files},
+        "format": {"delimiter": ","},
+        "columns": {
+            "energy": {"column": "Bias (mV)", "unit": "mV"},
+            "signals": {"didv": {"column": "LI Demod 1 X (A)", "unit": "A"}},
+        },
+        "site": {"mode": "sequential", "start": 1},
+        "output": {"directory": str(tmp_path / "unused")},
+    }
+    recipe = tmp_path / "explicit-files.yaml"
+    recipe.write_text(yaml.safe_dump(payload), encoding="utf-8")
+
+    output = tmp_path / "redirected"
+    assert (
+        project_cli_main(
+            [
+                "inspect-experiment",
+                str(recipe),
+                "--mode",
+                "heisenberg",
+                "--variant",
+                "inhomogeneous",
+                "--output-dir",
+                str(output),
+                "--candidate-cutoffs",
+                "10",
+            ]
+        )
+        == 0
+    )
+    measurement, _ = load_experiment_project(output / "experiment_manifest.json")
+    np.testing.assert_array_equal(measurement.axes["site"], [1, 2, 3])
+
+
 def test_mode_can_be_selected_after_inspection_without_reimport(tmp_path, capsys):
     recipe = _write_raw_experiment(tmp_path, n_sites=6)
     inspected = tmp_path / "inspected-local"

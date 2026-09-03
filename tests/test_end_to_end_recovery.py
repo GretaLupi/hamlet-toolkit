@@ -204,7 +204,7 @@ def test_global_j1_j2_pipeline_recovers_known_parameters(tmp_path):
     report_path = tmp_path / "report.json"
     result.save_couplings_csv(csv_path)
     result.save_report_json(report_path)
-    assert csv_path.read_text().startswith("parameter,interaction_distance")
+    assert csv_path.read_text().startswith("parameter,coupling,uncertainty,unit")
     report = json.loads(report_path.read_text())
     assert report["view"] == "global"
     assert report["parameter_names"] == ["J1", "J2"]

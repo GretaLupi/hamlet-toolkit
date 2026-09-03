@@ -78,6 +78,11 @@ class TextImportRecipe:
     output_preview: Path | None
     include_auxiliary_csv: bool
     overwrite: bool
+    # Keep explicit file inputs as real dataclass state.  Experiment inspection
+    # uses dataclasses.replace() when redirecting outputs, so dynamically added
+    # attributes would otherwise disappear during that perfectly valid copy.
+    file_values: tuple[str, ...]
+    base: Path
 
     @classmethod
     def from_file(cls, path: str | Path) -> "TextImportRecipe":
@@ -181,10 +186,14 @@ class TextImportRecipe:
             output_preview=output_preview,
             include_auxiliary_csv=bool(output.get("include_auxiliary_csv", True)),
             overwrite=bool(output.get("overwrite", False)),
+            file_values=(
+                tuple(str(item) for item in source_value)
+                if source_kind == "files"
+                else ()
+            ),
+            base=base,
         )
         recipe._validate()
-        object.__setattr__(recipe, "_file_values", tuple(source_value) if source_kind == "files" else ())
-        object.__setattr__(recipe, "_base", base)
         return recipe
 
     def _validate(self) -> None:
@@ -215,7 +224,7 @@ class TextImportRecipe:
         if self.source_kind == "directory":
             paths = sorted(self.source_path.glob(self.pattern), key=lambda item: _natural_key(item.name))
         else:
-            paths = [_resolve(self._base, item) for item in self._file_values]
+            paths = [_resolve(self.base, item) for item in self.file_values]
         return [(str(path), path.read_text(encoding=self.encoding, errors="replace")) for path in paths]
 
 

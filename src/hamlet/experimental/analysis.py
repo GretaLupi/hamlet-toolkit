@@ -31,6 +31,7 @@ class ExperimentalDiagnostics:
 @dataclass(frozen=True)
 class ExperimentalChainResult:
     source: str
+    site_labels: NDArray[Any]
     raw_bias_mev: NDArray[np.float64]
     raw_spectra: NDArray[np.float64]
     processed_bias_mev: NDArray[np.float64]
@@ -58,13 +59,23 @@ class ExperimentalChainResult:
                 ["bond", "left_site", "right_site", "coupling", "uncertainty", "unit"]
             )
             for bond, (mean, std) in enumerate(zip(self.coupling_mean, self.coupling_std)):
-                writer.writerow([bond, bond, bond + 1, float(mean), float(std), self.coupling_unit])
+                writer.writerow(
+                    [
+                        bond,
+                        self.site_labels[bond],
+                        self.site_labels[bond + 1],
+                        float(mean),
+                        float(std),
+                        self.coupling_unit,
+                    ]
+                )
 
     def save_report_json(self, path: str | Path) -> None:
         report = {
             "toolkit": brand_manifest(),
             "source": self.source,
             "n_sites": self.n_sites,
+            "site_labels": self.site_labels.tolist(),
             "n_bonds": self.n_bonds,
             "coupling_unit": self.coupling_unit,
             "coupling_mean": self.coupling_mean.astype(float).tolist(),
@@ -184,15 +195,15 @@ class ExperimentalGlobalResult:
     def save_couplings_csv(self, path: str | Path) -> None:
         with open(path, "w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
-            writer.writerow(
-                ["parameter", "interaction_distance", "coupling", "uncertainty", "unit"]
-            )
-            for distance, (name, mean, std) in enumerate(
-                zip(self.parameter_names, self.coupling_mean, self.coupling_std), start=1
+            # Parameter order is not generally an interaction distance: for
+            # example J1_xy and Jz are both nearest-neighbour terms, while D_z
+            # may follow J3 in the target vector. Preserve the exact physical
+            # names instead of exporting a misleading inferred distance.
+            writer.writerow(["parameter", "coupling", "uncertainty", "unit"])
+            for name, mean, std in zip(
+                self.parameter_names, self.coupling_mean, self.coupling_std
             ):
-                writer.writerow(
-                    [name, distance, float(mean), float(std), self.coupling_unit]
-                )
+                writer.writerow([name, float(mean), float(std), self.coupling_unit])
 
     def save_report_json(self, path: str | Path) -> None:
         report = {
@@ -464,16 +475,29 @@ class ExperimentalChainAnalyzer:
         unit = measurement.axis_units.get("bias", "meV")
         if unit != "meV":
             raise ValueError(f"inference requires a canonical meV bias axis, got {unit!r}")
-        return self.analyze(spectra, bias, source=source)
+        return self.analyze(
+            spectra,
+            bias,
+            source=source,
+            site_labels=np.asarray(measurement.axes["site"]),
+        )
 
     def analyze(
         self,
         spectra: ArrayLike,
         bias_mev: ArrayLike,
         source: str = "in-memory",
+        site_labels: ArrayLike | None = None,
     ) -> ExperimentalChainResult:
         raw_spectra = np.asarray(spectra, dtype=float)
         raw_bias = np.asarray(bias_mev, dtype=float)
+        resolved_site_labels = (
+            np.arange(raw_spectra.shape[0])
+            if site_labels is None
+            else np.asarray(site_labels)
+        )
+        if resolved_site_labels.ndim != 1 or len(resolved_site_labels) != raw_spectra.shape[0]:
+            raise ValueError("site_labels must contain one label per spectrum")
         processed = self.preprocessor.transform_map(raw_spectra, raw_bias)
         windows = make_local_windows(processed)
         model_inputs = windows.reshape(windows.shape[0], -1) if self.flatten_inputs else windows
@@ -507,6 +531,7 @@ class ExperimentalChainAnalyzer:
         diagnostics = self._diagnose(raw_stack, coupling_std, overlap)
         return ExperimentalChainResult(
             source=source,
+            site_labels=resolved_site_labels,
             raw_bias_mev=raw_bias,
             raw_spectra=raw_spectra,
             processed_bias_mev=self.preprocessor.output_bias_mev,

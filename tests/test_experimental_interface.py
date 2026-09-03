@@ -48,8 +48,12 @@ def test_high_level_analyzer_loads_predicts_diagnoses_and_exports(tmp_path):
     result.save_couplings_csv(csv_path)
     result.save_report_json(json_path)
     assert "uncertainty" in csv_path.read_text()
+    exported = pd.read_csv(csv_path)
+    assert exported["left_site"].tolist() == [1, 2, 3, 4]
+    assert exported["right_site"].tolist() == [2, 3, 4, 5]
     report = json.loads(json_path.read_text())
     assert report["n_bonds"] == 4
+    assert report["site_labels"] == [1, 2, 3, 4, 5]
     assert len(report["coupling_mean"]) == 4
 
 
