@@ -31,6 +31,7 @@ validation/
 
 # Stray local DMRGPy/MPS solver scratch output.
 .mpsfolder/
+.pychainfolder/
 
 # Developer-facing docs (architecture, extending with new systems, model
 # tuning, bank management). Kept locally; docs/user-guide.md is the only

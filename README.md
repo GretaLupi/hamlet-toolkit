@@ -91,6 +91,11 @@ print(result.couplings_mev)  # length = n_sites - 1
 
 ## Demos
 
+- [notebooks/04_l8_three_mode_workflow.ipynb](notebooks/04_l8_three_mode_workflow.ipynb) —
+  **start here.** One L=8 chain length run through all three interpretations
+  (bond-inhomogeneous, homogeneous XXZ, homogeneous XXZ+DMI), scored against known
+  ground truth, including sliding-window inference on a held-out chain. Runs in
+  seconds on the small datasets in [examples/l8_demo/](examples/l8_demo/).
 - [notebooks/01_supervised_workflows.ipynb](notebooks/01_supervised_workflows.ipynb) —
   an executed end-to-end supervised workflow with saved plots and outputs.
 - [notebooks/02_full_potential_experimental_interface.ipynb](notebooks/02_full_potential_experimental_interface.ipynb) —

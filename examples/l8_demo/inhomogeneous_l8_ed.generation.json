@@ -1,0 +1,29 @@
+{
+  "fingerprint": "b141986234a50843f134a26b40b85c5d583d57becc08d1c22d7c747d7800b2d6",
+  "generation_schema_version": 1,
+  "recipe": {
+    "backend": "dmrgpy",
+    "bias_points": 61,
+    "bias_range_mev": [
+      0.0,
+      60.0
+    ],
+    "broadening_mev": 1.0,
+    "coupling_range_mev": [
+      30.0,
+      45.0
+    ],
+    "dynamics_mode": "ED",
+    "n_samples": 64,
+    "n_sites": 8,
+    "observable": "Sz",
+    "output_quantity": "didv",
+    "seed": 20260903,
+    "system_type": "inhomogeneous_heisenberg"
+  },
+  "toolkit": {
+    "distribution": "hamlet-toolkit",
+    "full_name": "Hamiltonian Learning Toolkit",
+    "name": "HamLeT"
+  }
+}

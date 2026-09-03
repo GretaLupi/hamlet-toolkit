@@ -1,0 +1,62 @@
+{
+  "fingerprint": "7d40e0cab3d3e6f2945c7914ca4cd795a0c7def6a05813265d064c3d875151ec",
+  "generation_schema_version": 1,
+  "recipe": {
+    "bias_points": 61,
+    "bias_range_mev": [
+      0.0,
+      60.0
+    ],
+    "broadening_mev": 1.0,
+    "dynamics_mode": "ED",
+    "max_relative_imaginary_residue": 0.001,
+    "n_samples": 32,
+    "n_sites": 8,
+    "observable": {
+      "components": [
+        "Sxx",
+        "Syy",
+        "Szz"
+      ],
+      "kind": "total_spin",
+      "weights": [
+        1.0,
+        1.0,
+        1.0
+      ]
+    },
+    "output_quantity": "didv",
+    "parameter_names": [
+      "J1_xy",
+      "J2",
+      "J3",
+      "Jz"
+    ],
+    "parameter_ranges_mev": [
+      [
+        25.0,
+        45.0
+      ],
+      [
+        -8.0,
+        8.0
+      ],
+      [
+        -5.0,
+        5.0
+      ],
+      [
+        25.0,
+        45.0
+      ]
+    ],
+    "purpose": "total-spin identifiability screening pilot",
+    "seed": 20260901,
+    "system": "homogeneous_xxz_j1j2j3"
+  },
+  "toolkit": {
+    "distribution": "hamlet-toolkit",
+    "full_name": "Hamiltonian Learning Toolkit",
+    "name": "HamLeT"
+  }
+}
