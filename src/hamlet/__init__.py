@@ -14,8 +14,10 @@ from .systems import (
 from .project import (
     DatasetGenerationConfig,
     HamiltonianLearningProject,
+    PlannedOutput,
     ProjectConfig,
     ProjectOutcome,
+    ProjectPlan,
 )
 from .measurements import Measurement
 from .experiments import (
@@ -42,7 +44,9 @@ __all__ = [
     "InhomogeneousHeisenbergFamily",
     "HamiltonianLearningProject",
     "DatasetGenerationConfig",
+    "PlannedOutput",
     "ProjectConfig",
+    "ProjectPlan",
     "ProjectOutcome",
     "Measurement",
     "ExperimentInspectionResult",

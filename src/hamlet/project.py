@@ -342,6 +342,83 @@ class ProjectOutcome:
     status: str
 
 
+# Order-of-magnitude anchor for the generation budget, measured on this
+# project's own reference runs: one L=8 chain on a 61-point 0-60 meV grid with
+# DMRGPy `dynamics_mode="ED"` costs roughly this per evaluated correlator on
+# one core. `total_spin` evaluates Sxx, Syy and Szz and so costs about three
+# times a single `Sz` run. It is a scale anchor, not a promise: a different
+# chain length, bias resolution, bond dimension, or DMRG rather than ED moves
+# it substantially. Override with `seconds_per_chain` when a local measurement
+# is available.
+REFERENCE_SECONDS_PER_CORRELATOR_L8 = 25.0
+
+
+@dataclass(frozen=True)
+class PlannedOutput:
+    """One path the run would write, and whether it already exists."""
+
+    path: Path
+    description: str
+    exists: bool
+    blocks_run: bool
+
+
+@dataclass(frozen=True)
+class ProjectPlan:
+    """What a project would do, resolved without executing or writing anything.
+
+    Answers the questions worth asking before starting a job that may run for
+    hours: which stages execute, how much simulation is implied, what gets
+    written, and which existing files would make the run refuse partway
+    through.
+    """
+
+    name: str
+    system_type: str
+    view: str
+    stages: tuple[str, ...]
+    dataset_source: str
+    dataset_detail: dict[str, Any]
+    generation_chains: int | None
+    estimated_generation_seconds: float | None
+    seconds_per_chain: float | None
+    outputs: tuple[PlannedOutput, ...]
+    notes: tuple[str, ...]
+    blocking_issues: tuple[str, ...]
+
+    @property
+    def would_refuse(self) -> bool:
+        return bool(self.blocking_issues) or any(item.blocks_run for item in self.outputs)
+
+    def to_dict(self) -> dict[str, Any]:
+        payload = {
+            "plan_schema_version": 1,
+            "toolkit": brand_manifest(),
+            "name": self.name,
+            "system_type": self.system_type,
+            "view": self.view,
+            "stages": list(self.stages),
+            "dataset_source": self.dataset_source,
+            "dataset_detail": _json_safe(self.dataset_detail),
+            "generation_chains": self.generation_chains,
+            "estimated_generation_seconds": self.estimated_generation_seconds,
+            "seconds_per_chain": self.seconds_per_chain,
+            "outputs": [
+                {
+                    "path": str(item.path),
+                    "description": item.description,
+                    "exists": item.exists,
+                    "blocks_run": item.blocks_run,
+                }
+                for item in self.outputs
+            ],
+            "notes": list(self.notes),
+            "blocking_issues": list(self.blocking_issues),
+            "would_refuse": self.would_refuse,
+        }
+        return payload
+
+
 class HamiltonianLearningProject:
     """Stateful façade over calibration, training, inference, and reporting."""
 
@@ -452,6 +529,218 @@ class HamiltonianLearningProject:
         )
         self.dataset = self.generation_result.dataset
         return self.generation_result
+
+    def plan(self, *, seconds_per_chain: float | None = None) -> ProjectPlan:
+        """Resolve what ``run`` would do, without executing or writing anything.
+
+        Deliberately side-effect free: it does not create the output directory,
+        touch the experiment, load a dataset, or import a simulation backend.
+        Everything reported comes from the configuration plus what already
+        exists on disk.
+        """
+        config = self.config
+        output_dir = config.output_dir
+        reuses_artifact = config.artifact_path is not None
+
+        stages: list[str] = []
+        notes: list[str] = []
+        blocking: list[str] = []
+        outputs: list[PlannedOutput] = []
+
+        def add_output(path: Path, description: str, *, blocks: bool) -> None:
+            exists = path.exists()
+            outputs.append(
+                PlannedOutput(
+                    path=path,
+                    description=description,
+                    exists=exists,
+                    blocks_run=exists and blocks,
+                )
+            )
+
+        # --- dataset stage -------------------------------------------------
+        generation_chains: int | None = None
+        estimated_seconds: float | None = None
+        rate = seconds_per_chain
+        dataset_detail: dict[str, Any] = {}
+
+        if config.generation is not None:
+            recipe = config.generation
+            dataset_source = "generate"
+            generation_chains = recipe.n_samples
+            correlators = 3 if recipe.observable == "total_spin" else 1
+            if rate is None:
+                rate = REFERENCE_SECONDS_PER_CORRELATOR_L8 * correlators
+            estimated_seconds = generation_chains * rate
+            dataset_detail = {
+                "system": recipe.system_type,
+                "n_sites": recipe.n_sites,
+                "n_samples": recipe.n_samples,
+                "bias_range_mev": list(recipe.bias_range_mev),
+                "bias_points": recipe.bias_points,
+                "broadening_mev": recipe.broadening_mev,
+                "observable": recipe.observable,
+                "evaluated_correlators": correlators,
+                "backend": recipe.backend,
+                "seed": recipe.seed,
+                "output_path": recipe.output_path,
+            }
+            already_generated = recipe.output_path.exists()
+            outputs.append(
+                PlannedOutput(
+                    path=recipe.output_path,
+                    description=(
+                        "generated dataset (exists: reused when the recipe fingerprint "
+                        "matches, refused when it differs)"
+                        if already_generated
+                        else "generated dataset"
+                    ),
+                    exists=already_generated,
+                    blocks_run=False,
+                )
+            )
+            add_output(
+                recipe.output_path.with_suffix(".generation.json"),
+                "recipe fingerprint sidecar",
+                blocks=False,
+            )
+            if already_generated:
+                notes.append(
+                    f"{recipe.output_path} already exists; an identical recipe is a cache "
+                    "hit and costs nothing, while a changed recipe is refused rather than "
+                    "overwritten. The generation estimate below assumes a full run."
+                )
+            stages.append("generate simulations")
+            if recipe.n_sites < 3 and config.view == "local_bonds":
+                blocking.append(
+                    f"local_bonds needs at least three sites, recipe generates {recipe.n_sites}"
+                )
+        elif config.dataset_path is not None:
+            dataset_source = "portable"
+            dataset_detail = {"path": config.dataset_path}
+            if not config.dataset_path.exists():
+                blocking.append(f"dataset does not exist: {config.dataset_path}")
+        elif config.reference_npz:
+            dataset_source = "reference_heisenberg"
+            dataset_detail = {"paths": list(config.reference_npz)}
+            for item in config.reference_npz:
+                if not item.exists():
+                    blocking.append(f"reference dataset does not exist: {item}")
+        else:
+            dataset_source = "none (inference from a saved artifact)"
+
+        # --- experiment stage ----------------------------------------------
+        if config.experiment_csv is not None:
+            stages.append("inspect experiment")
+            add_output(
+                output_dir / "experiment_inspection.json", "experiment inspection", blocks=False
+            )
+            if not config.experiment_csv.exists():
+                blocking.append(f"experiment input does not exist: {config.experiment_csv}")
+        else:
+            notes.append(
+                "no experiment configured: this project can only generate or train, not infer"
+            )
+
+        add_output(
+            output_dir / "resolved_project_config.json",
+            "resolved configuration (refuses a directory holding a different one)",
+            blocks=False,
+        )
+
+        # --- training or reuse ---------------------------------------------
+        if reuses_artifact:
+            stages.append("preflight the saved artifact")
+            artifact_dir = config.artifact_path
+            dataset_detail.setdefault("artifact", artifact_dir)
+            if not (artifact_dir / "manifest.json").exists():
+                blocking.append(f"artifact has no manifest.json: {artifact_dir}")
+            for name in ("workflow_decision.json", "workflow_decision.html"):
+                add_output(output_dir / "preflight" / name, "preflight decision", blocks=True)
+        else:
+            if config.experiment_csv is not None:
+                stages.append("calibrate the manual cutoff")
+                cutoffs = (
+                    (config.manual_cutoff_mev,)
+                    if config.manual_cutoff_mev is not None
+                    else config.cutoffs_mev
+                )
+                for cutoff in cutoffs:
+                    add_output(
+                        output_dir / "calibration" / f"cutoff-{_cutoff_tag(cutoff)}.json",
+                        f"calibration at {cutoff:g} meV",
+                        blocks=False,
+                    )
+                add_output(
+                    output_dir / "calibration" / "summary.json",
+                    "calibration summary",
+                    blocks=False,
+                )
+            stages.append(f"train {config.model} ({config.preset} preset, view={config.view})")
+            artifact_dir = output_dir / "artifact"
+            artifact_populated = artifact_dir.exists() and any(artifact_dir.iterdir())
+            outputs.append(
+                PlannedOutput(
+                    path=artifact_dir,
+                    description="trained artifact (refuses a non-empty directory)",
+                    exists=artifact_populated,
+                    blocks_run=artifact_populated,
+                )
+            )
+
+        # --- inference ------------------------------------------------------
+        if config.experiment_csv is not None:
+            stages.append("infer and report")
+            analysis = output_dir / "analysis"
+            for name, description in (
+                ("couplings.csv", "coupling table"),
+                ("report.json", "machine-readable report"),
+                ("report.html", "self-contained HTML report"),
+                ("summary.png", "quality-control figure"),
+            ):
+                add_output(analysis / name, description, blocks=True)
+            add_output(output_dir / "project_summary.json", "project summary", blocks=False)
+
+        # --- static contract checks ----------------------------------------
+        # A missing manual cutoff alongside an experiment is not checked here:
+        # ProjectConfig already refuses to construct in that case, so the
+        # configuration cannot reach this method.
+        if reuses_artifact and config.manual_cutoff_mev is not None:
+            manifest_path = config.artifact_path / "manifest.json"
+            if manifest_path.exists():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                    stored = float(manifest["preprocessing"]["bias_cutoff_mev"])
+                except (KeyError, TypeError, ValueError, OSError):
+                    notes.append(f"could not read the stored cutoff from {manifest_path}")
+                else:
+                    if not np.isclose(stored, config.manual_cutoff_mev, rtol=0.0, atol=1e-8):
+                        blocking.append(
+                            f"artifact was trained at {stored:g} meV but manual_cutoff_mev is "
+                            f"{config.manual_cutoff_mev:g} meV; cutoff-specific weights are "
+                            "never substituted"
+                        )
+                    stored_system = manifest.get("system_type")
+                    if stored_system is not None and stored_system != config.system_type:
+                        blocking.append(
+                            f"artifact system {stored_system!r} does not match project "
+                            f"system {config.system_type!r}"
+                        )
+
+        return ProjectPlan(
+            name=config.name,
+            system_type=config.system_type,
+            view=config.view,
+            stages=tuple(stages),
+            dataset_source=dataset_source,
+            dataset_detail=dataset_detail,
+            generation_chains=generation_chains,
+            estimated_generation_seconds=estimated_seconds,
+            seconds_per_chain=rate,
+            outputs=tuple(outputs),
+            notes=tuple(notes),
+            blocking_issues=tuple(blocking),
+        )
 
     def inspect_experiment(self) -> dict[str, Any]:
         if self.config.experiment_csv is None:

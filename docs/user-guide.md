@@ -99,6 +99,34 @@ training preset.
 
 ## 3. Run the workflow
 
+### Check first: what would this run actually do?
+
+Simulation is the expensive part of this workflow, so look before you leap:
+
+```bash
+hamlet run project.yaml --dry-run
+```
+
+This writes nothing. It reports the stages that would execute, how many chains
+would be simulated and roughly what that costs, every file that would be
+written, and — importantly — which existing files would make the run **refuse**
+partway through, which is otherwise only discovered after the expensive part
+has already happened. It exits non-zero when the real run would be refused, so
+it works as a precondition check in a script.
+
+The cost figure is an order-of-magnitude anchor from this project's own L=8
+exact-diagonalisation runs, scaled by how many correlators the observable
+needs (`total_spin` evaluates `Sxx`, `Syy` and `Szz`, so about three times
+`Sz`). Once you have measured your own rate, pass it:
+
+```bash
+hamlet run project.yaml --dry-run --seconds-per-chain 25 --plan-json plan.json
+```
+
+`--plan-json` writes the same information as a versioned machine-readable
+plan, alongside the workflow-decision JSON as something a future interface can
+render directly.
+
 ### The default path: one config, one command
 
 ```bash

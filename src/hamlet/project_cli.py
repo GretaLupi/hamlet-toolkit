@@ -3,9 +3,78 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-from .project import HamiltonianLearningProject, ProjectConfig
+from .project import HamiltonianLearningProject, ProjectConfig, ProjectPlan
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f} s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f} min"
+    return f"{seconds / 3600:.1f} h"
+
+
+def _render_plan(plan: ProjectPlan, *, command: str) -> str:
+    lines = [
+        f"DRY RUN — `hamlet {command}` would do the following. Nothing was written.",
+        "",
+        f"project : {plan.name}",
+        f"system  : {plan.system_type}   view: {plan.view}",
+        "",
+        "Stages",
+    ]
+    for index, stage in enumerate(plan.stages, start=1):
+        lines.append(f"  {index}. {stage}")
+    if not plan.stages:
+        lines.append("  (nothing to do)")
+
+    lines += ["", f"Dataset source: {plan.dataset_source}"]
+    for key, value in plan.dataset_detail.items():
+        lines.append(f"  {key}: {value}")
+
+    if plan.generation_chains is not None:
+        lines += [
+            "",
+            "Compute budget",
+            f"  chains to simulate    : {plan.generation_chains}",
+            f"  assumed cost per chain: {plan.seconds_per_chain:.0f} s",
+            f"  serial estimate       : "
+            f"{_format_duration(plan.estimated_generation_seconds)}",
+            "  This is an order-of-magnitude anchor from the project's own L=8 ED runs.",
+            "  Pass --seconds-per-chain with a local measurement for a real estimate;",
+            "  generation is checkpointed, so it can be resumed rather than restarted.",
+        ]
+
+    lines += ["", "Outputs"]
+    for item in plan.outputs:
+        if item.blocks_run:
+            marker = "REFUSES"
+        elif item.exists:
+            marker = "exists "
+        else:
+            marker = "new    "
+        lines.append(f"  [{marker}] {item.path}")
+        lines.append(f"            {item.description}")
+
+    if plan.notes:
+        lines += ["", "Notes"]
+        lines += [f"  - {note}" for note in plan.notes]
+
+    lines.append("")
+    if plan.blocking_issues:
+        lines.append("WOULD NOT RUN — configuration problems:")
+        lines += [f"  - {issue}" for issue in plan.blocking_issues]
+    elif plan.would_refuse:
+        lines.append(
+            "WOULD NOT COMPLETE — existing outputs marked REFUSES above would stop the "
+            "run. Choose a new output_dir to keep the previous results."
+        )
+    else:
+        lines.append("Ready to run.")
+    return "\n".join(lines)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,8 +88,36 @@ def build_parser() -> argparse.ArgumentParser:
         "generate", help="generate or resume the configured simulation dataset"
     )
     generate.add_argument("config", help="YAML or JSON project configuration")
+    generate.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the simulation budget and outputs without generating anything",
+    )
+    generate.add_argument(
+        "--seconds-per-chain",
+        type=float,
+        help="measured simulation cost per chain, for the --dry-run budget estimate",
+    )
+    generate.add_argument(
+        "--plan-json",
+        help="with --dry-run, also write the machine-readable plan to this path",
+    )
     run = commands.add_parser("run", help="calibrate, train, infer, and report")
     run.add_argument("config", help="YAML or JSON project configuration")
+    run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report the stages, compute budget, and outputs without running anything",
+    )
+    run.add_argument(
+        "--seconds-per-chain",
+        type=float,
+        help="measured simulation cost per chain, for the --dry-run budget estimate",
+    )
+    run.add_argument(
+        "--plan-json",
+        help="with --dry-run, also write the machine-readable plan to this path",
+    )
     inspect = commands.add_parser("inspect", help="inspect an experiment without training")
     inspect.add_argument("config", help="YAML or JSON project configuration")
     import_command = commands.add_parser(
@@ -204,6 +301,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"HTML: {html_path}")
         return 0
     project = HamiltonianLearningProject(ProjectConfig.from_file(args.config))
+    if getattr(args, "dry_run", False):
+        plan = project.plan(seconds_per_chain=args.seconds_per_chain)
+        print(_render_plan(plan, command=args.command))
+        if args.plan_json:
+            destination = Path(args.plan_json)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(json.dumps(plan.to_dict(), indent=2), encoding="utf-8")
+            print(f"\nplan JSON: {destination}")
+        # A plan that the real run would refuse is reported as a failure, so a
+        # dry run is usable as a precondition check in a script.
+        return 1 if plan.would_refuse else 0
     if args.command == "generate":
         result = project.generate_training_dataset()
         action = "reused cached" if result.cache_hit else "generated"
