@@ -50,10 +50,20 @@ name.)
   simply predicting the training mean (skill 0.11, −0.36, −0.06 and −0.02,
   −0.02, −0.03), while every other parameter in the very same spectra improves
   monotonically with data over that 100-fold range. Adding chains fixes the
-  exchange couplings and does nothing for DMI, so the limitation looks
-  structural rather than statistical: unpolarised total-spin autocorrelations
-  appear to carry no usable DMI-magnitude information at this chain length.
-  Resolving it likely needs a spin-resolved observable, not more compute.
+  exchange couplings and does nothing for DMI, because the limitation is
+  structural rather than statistical: a uniform DM vector along z is removable
+  from a nearest-neighbour chain by a gauge rotation that leaves every on-site
+  autocorrelator invariant, so these spectra constrain only
+  `sqrt(J1_xy^2 + D_z^2)`. Measured directly, a gauge pair agrees to one part
+  in 10^13.
+
+  A field transverse to the DM axis breaks that symmetry and is implemented as
+  `HomogeneousXXZDMIFieldFamily`, with the field treated as a known condition
+  rather than a target. The requirement is a ratio: recovering `D_z` needs
+  roughly `B/J >= 10%`, so it is realistic for chains with exchange of a few
+  meV and out of reach for the tens-of-meV chains measured so far. A field
+  along the DM axis does not help at any strength, being invariant under the
+  same rotation.
 
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.
