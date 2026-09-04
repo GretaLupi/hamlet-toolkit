@@ -8,6 +8,7 @@ from .base import HeisenbergSystem, SpectroscopyProtocol, SpectroscopyResult
 from ..systems.heisenberg import (
     HomogeneousHeisenbergChain,
     HomogeneousXXZLongRangeChain,
+    HomogeneousXXZDMIFieldChain,
     HomogeneousXXZDMILongRangeChain,
     InhomogeneousHeisenbergChain,
 )
@@ -98,6 +99,36 @@ class DmrgpySimulator:
                         + chain.Sy[i] * chain.Sy[i + distance]
                         + chain.Sz[i] * chain.Sz[i + distance]
                     )
+            interactions = ()
+        elif isinstance(system, HomogeneousXXZDMIFieldChain):
+            j1_xy, j2, j3, jz, d_z = mev_to_dmrgpy_energy(system.as_array())
+            b_x = float(mev_to_dmrgpy_energy(system.transverse_field_mev))
+            for i in range(system.n_sites - 1):
+                hamiltonian += j1_xy * (
+                    chain.Sx[i] * chain.Sx[i + 1]
+                    + chain.Sy[i] * chain.Sy[i + 1]
+                )
+                hamiltonian += jz * chain.Sz[i] * chain.Sz[i + 1]
+                hamiltonian += d_z * (
+                    chain.Sx[i] * chain.Sy[i + 1]
+                    - chain.Sy[i] * chain.Sx[i + 1]
+                )
+            for distance, coupling in ((2, j2), (3, j3)):
+                for i in range(system.n_sites - distance):
+                    hamiltonian += coupling * (
+                        chain.Sx[i] * chain.Sx[i + distance]
+                        + chain.Sy[i] * chain.Sy[i + distance]
+                        + chain.Sz[i] * chain.Sz[i + distance]
+                    )
+            # Zeeman term -B_x sum_i S^x_i, with g and mu_B absorbed into a
+            # field already expressed as an energy in meV. The axis is x, i.e.
+            # transverse to the DM vector along z, which is the whole point: a
+            # field along z is invariant under the rotation that removes a
+            # uniform D_z and would leave it just as unmeasurable as at zero
+            # field.
+            if b_x:
+                for i in range(system.n_sites):
+                    hamiltonian += -b_x * chain.Sx[i]
             interactions = ()
         else:
             raise TypeError(f"unsupported system type: {type(system).__name__}")

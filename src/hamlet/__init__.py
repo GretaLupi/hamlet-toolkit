@@ -10,6 +10,8 @@ from .systems import (
     HomogeneousXXZLongRangeFamily,
     HomogeneousXXZDMILongRangeChain,
     HomogeneousXXZDMILongRangeFamily,
+    HomogeneousXXZDMIFieldChain,
+    HomogeneousXXZDMIFieldFamily,
 )
 from .project import (
     DatasetGenerationConfig,
@@ -41,6 +43,8 @@ __all__ = [
     "HomogeneousXXZLongRangeFamily",
     "HomogeneousXXZDMILongRangeChain",
     "HomogeneousXXZDMILongRangeFamily",
+    "HomogeneousXXZDMIFieldChain",
+    "HomogeneousXXZDMIFieldFamily",
     "InhomogeneousHeisenbergFamily",
     "HamiltonianLearningProject",
     "DatasetGenerationConfig",
