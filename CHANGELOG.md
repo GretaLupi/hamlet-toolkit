@@ -15,6 +15,15 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- Measured condition sensitivity for the published DMI model, on 1600 fresh
+  chains across eight perturbed configurations. A 10% error in the impurity
+  transverse anisotropy removes all `D_z` skill (0.50 -> 0.02); 20% is worse
+  than predicting the training mean; moving one impurity by one lattice site
+  costs 11 meV on a parameter ranging 0.3-2.5 meV; and an unmodelled axial
+  anisotropy of 1 meV also reaches zero skill. Novelty detection does not
+  catch any of it -- the mismatched spectra score as in-distribution, so the
+  declared-condition check is the only defence. Recorded in the model card and
+  in `condition_sensitivity.json`.
 - `hamlet advise` now compares the fixed impurity and transverse-field
   conditions an artifact was trained under, via a new `experiment_conditions`
   argument. `system_type` is identical for every impurity chain regardless of

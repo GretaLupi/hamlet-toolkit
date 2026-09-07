@@ -71,6 +71,55 @@ conditions must be declared explicitly via `experiment_conditions`; an
 undeclared or differing configuration blocks reuse rather than being assumed
 to match.
 
+## Measured condition sensitivity — read this before reusing the model
+
+The impurity configuration above is not a formality. It was measured directly:
+200 fresh chains were generated at each perturbed condition, identical to the
+training recipe in every other respect, and this published model was run on
+them unchanged. `D_z` skill is against the same training-mean baseline as the
+published number, so the rows are directly comparable to it.
+
+| condition | change from training | `D_z` MAE [meV] | `D_z` skill |
+|---|---|---|---|
+| control | none (fresh chains) | 0.263 | 0.50 |
+| `E` = 1.8 meV | -10% | 0.517 | 0.02 |
+| `E` = 2.2 meV | +10% | 0.504 | 0.04 |
+| `E` = 1.6 meV | -20% | 0.887 | -0.69 |
+| `E` = 2.4 meV | +20% | 0.951 | -0.81 |
+| axial `D` = 1.0 meV | added | 0.544 | -0.04 |
+| axial `D` = 2.0 meV | added | 0.798 | -0.52 |
+| sites 2/4/6 | one impurity moved one site | **11.191** | **-20.33** |
+
+The control row reproduces the published accuracy on unseen chains, so the
+degradation in the other rows is caused by the condition mismatch alone.
+
+Three consequences:
+
+1. **A 10% error in `E` removes all DMI skill.** At 20% the model is worse than
+   predicting the training average. `E` must be characterised to a few percent,
+   not estimated.
+2. **Moving a single impurity by one lattice site is catastrophic** — an 11 meV
+   error on a parameter whose entire trained range is 0.3 to 2.5 meV. Impurity
+   positions are part of the model's identity.
+3. **Axial anisotropy cannot be ignored.** This model was trained with `D = 0`,
+   and real adatoms have substantial `D`. A chain whose impurities carry
+   `D = 1 meV` already scores zero. Any production use should train with the
+   measured `D`.
+
+**Novelty detection does not protect against this.** The stored
+training-distribution profile flags only 6-7% of the `E`-mismatched and
+axial-mismatched chains, against 5% for the control — statistically
+indistinguishable. Even the catastrophic site-shift case has a median novelty
+score just below the 95th-percentile threshold, with 48% flagged. The spectra
+look entirely ordinary; it is the mapping from spectra to couplings that has
+changed. So a wrong answer here arrives with confident-looking inputs and no
+distributional warning.
+
+The declared-condition check in `hamlet advise` is therefore the only defence,
+and it should not be bypassed. Treat this artifact as a reference result and a
+worked example of the method; for a real sample, characterise the impurities
+and retrain for that exact configuration.
+
 ## Honest limits
 
 The quoted accuracy is against **simulated** spectra drawn from the same generator that produced the training set. It says nothing about whether the simulator describes any particular real material, and it is not a calibrated uncertainty: ensemble spread reported at inference measures agreement between seeds, not distance from truth.
