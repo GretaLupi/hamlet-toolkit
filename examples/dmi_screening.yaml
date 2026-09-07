@@ -1,0 +1,56 @@
+screening_schema_version: 1
+name: Which impurity arrangement can measure DMI in my chain?
+
+# Screening answers "can this sample measure D_z, and well enough to bother?"
+# before any dataset is generated. It costs two simulations per candidate.
+#
+#   hamlet screen-dmi examples/dmi_screening.yaml
+
+# The host chain you can actually build.
+chain:
+  n_sites: 8
+  # The gauge-invariant combination sqrt(J1_xy^2 + D_z^2), i.e. the exchange
+  # scale a zero-field measurement already reports.
+  j_eff_mev: 5.0
+  # The DMI you are trying to resolve. Identifiability depends on the ratio
+  # d_z_mev / j_eff_mev, not on d_z_mev alone.
+  d_z_mev: 1.5
+  jz_mev: 5.5
+  j2_mev: 0.0
+  j3_mev: 0.0
+
+# Match this to the measurement you can actually take.
+protocol:
+  bias_range_mev: [0, 20]
+  bias_points: 81
+  broadening_mev: 0.25
+  observable: total_spin
+  observable_weights: [1, 1, 1]
+  output_quantity: didv
+
+# A sweep expands into one candidate per combination. Use this when choosing
+# what to build.
+sweep:
+  # Each entry is one arrangement of impurity sites, zero-based.
+  sites:
+    - [3]
+    - [1, 6]
+    - [1, 4, 6]
+  # Transverse anisotropy is the mechanism that breaks the symmetry. It is
+  # non-monotonic, so sweep it rather than assuming larger is better.
+  transverse_mev: [1.0, 2.0]
+  spin: S=1
+  # Real adatoms have axial anisotropy. It cannot expose D_z by itself, but it
+  # changes the spectra, so screen with your measured value.
+  axial_mev: 0.0
+  transverse_field_mev: [0.0]
+
+# Alternatively list candidates explicitly, which is the form to use when the
+# impurities are already characterised and differ from one another.
+# candidates:
+#   - label: measured Fe/Fe/Mn chain
+#     impurities:
+#       - {site: 1, spin: "S=1",   transverse_mev: 1.8, axial_mev: 1.4}
+#       - {site: 4, spin: "S=1",   transverse_mev: 1.9, axial_mev: 1.4}
+#       - {site: 6, spin: "S=3/2", transverse_mev: 2.2, axial_mev: 2.1}
+#     transverse_field_mev: 0.0

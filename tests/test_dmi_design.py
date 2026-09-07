@@ -208,3 +208,149 @@ def test_screening_reproduces_the_measured_ranking_on_the_real_backend():
     assert by_name["1 impurity"].imprint < HIDDEN_IMPRINT
     assert by_name["3 impurities"].imprint > 1e-2
     assert ranked[0].design.label == "3 impurities"
+
+
+# --- configuration interface -------------------------------------------------
+# Screening is a decision taken before any code is written, so it has to be
+# reachable from a config file rather than only the Python API.
+
+import json as _json
+from pathlib import Path as _Path
+
+import yaml as _yaml
+
+from hamlet.dmi_design import SCREENING_SCHEMA_VERSION, load_screening_config
+from hamlet.project_cli import main as _cli_main
+
+BASE_CONFIG = {
+    "screening_schema_version": SCREENING_SCHEMA_VERSION,
+    "chain": {"n_sites": 8, "j_eff_mev": 5.0, "d_z_mev": 1.5, "jz_mev": 5.5},
+    "protocol": {"bias_range_mev": [0, 20], "bias_points": 21, "broadening_mev": 0.25},
+}
+
+
+def write_config(tmp_path, **sections):
+    payload = {**BASE_CONFIG, **sections}
+    path = tmp_path / "screening.yaml"
+    path.write_text(_yaml.safe_dump(payload))
+    return path
+
+
+def test_shipped_example_config_expands_into_candidates():
+    designs, protocol = load_screening_config(
+        _Path(__file__).resolve().parents[1] / "examples" / "dmi_screening.yaml"
+    )
+    assert len(designs) == 6
+    # The single-impurity entries must be recognised as hopeless for free.
+    assert sum(1 for design in designs if design.breaks_symmetry) == 4
+    assert len(protocol.bias_mev) == 81
+
+
+def test_sweep_expands_over_sites_anisotropy_and_field(tmp_path):
+    path = write_config(
+        tmp_path,
+        sweep={
+            "sites": [[1, 6], [1, 4, 6]],
+            "transverse_mev": [1.0, 2.0],
+            "transverse_field_mev": [0.0, 0.5],
+            "spin": "S=1",
+            "axial_mev": 1.4,
+        },
+    )
+    designs, _ = load_screening_config(path)
+    assert len(designs) == 8
+    # Measured axial anisotropy must reach the impurities, not be dropped.
+    assert all(imp.axial_mev == 1.4 for d in designs for imp in d.impurities)
+    assert {d.transverse_field_mev for d in designs} == {0.0, 0.5}
+
+
+def test_explicit_candidates_allow_impurities_that_differ(tmp_path):
+    """Real characterised impurities are not identical to one another."""
+    path = write_config(
+        tmp_path,
+        candidates=[
+            {
+                "label": "measured chain",
+                "impurities": [
+                    {"site": 1, "spin": "S=1", "transverse_mev": 1.8, "axial_mev": 1.4},
+                    {"site": 6, "spin": "S=3/2", "transverse_mev": 2.2, "axial_mev": 2.1},
+                ],
+            }
+        ],
+    )
+    designs, _ = load_screening_config(path)
+    assert len(designs) == 1
+    spins = [imp.spin for imp in designs[0].impurities]
+    assert spins == ["S=1", "S=3/2"]
+    assert designs[0].label == "measured chain"
+
+
+def test_config_requires_candidates_or_sweep(tmp_path):
+    with pytest.raises(ValueError, match="requires candidates or sweep"):
+        load_screening_config(write_config(tmp_path))
+
+
+def test_unknown_fields_are_rejected_not_ignored(tmp_path):
+    """A typo must not silently screen a different design than was written."""
+    path = write_config(
+        tmp_path, sweep={"sites": [[1, 6]], "transvrse_mev": [2.0]}
+    )
+    with pytest.raises(ValueError, match="unknown fields"):
+        load_screening_config(path)
+
+    path = write_config(
+        tmp_path,
+        candidates=[{"impurities": [{"site": 1, "transverse_meV": 2.0}]}],
+    )
+    with pytest.raises(ValueError, match="unknown fields"):
+        load_screening_config(path)
+
+
+def test_future_schema_version_is_refused(tmp_path):
+    payload = {**BASE_CONFIG, "screening_schema_version": 99, "sweep": {"sites": [[1, 6]]}}
+    path = tmp_path / "future.yaml"
+    path.write_text(_yaml.safe_dump(payload))
+    with pytest.raises(ValueError, match="unsupported screening_schema_version"):
+        load_screening_config(path)
+
+
+def test_cli_reports_a_hopeless_configuration_without_simulating(tmp_path, capsys):
+    """Every candidate symmetric: the CLI must say so and fail, not run DMRGPy.
+
+    Exiting non-zero matters so a scripted design sweep cannot read a hopeless
+    outcome as success.
+    """
+    path = write_config(tmp_path, sweep={"sites": [[3]], "transverse_mev": [2.0]})
+    exit_code = _cli_main(["screen-dmi", str(path)])
+    output = capsys.readouterr().out
+    assert exit_code == 1
+    assert "No candidate breaks the S^z symmetry" in output
+    assert "0 can break" in output
+
+
+def test_cli_writes_machine_readable_results(tmp_path, monkeypatch, capsys):
+    """The JSON output records each design with its verdict."""
+    import hamlet.simulation as simulation
+
+    class StubSim:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def simulate(self, system, protocol):
+            base = np.ones((system.n_sites, np.asarray(protocol.bias_mev).size))
+            return StubResult(base * (1.0 + 0.5 * float(system.as_array()[4])))
+
+    monkeypatch.setattr(simulation, "DmrgpySimulator", StubSim)
+    path = write_config(
+        tmp_path, sweep={"sites": [[1, 6], [3]], "transverse_mev": [2.0]}
+    )
+    destination = tmp_path / "out" / "results.json"
+    exit_code = _cli_main(["screen-dmi", str(path), "--json", str(destination)])
+    assert exit_code == 0, capsys.readouterr().out
+    payload = _json.loads(destination.read_text())
+    assert len(payload) == 2
+    by_label = {entry["label"]: entry for entry in payload}
+    hopeless = next(e for e in payload if not e["predicted_to_break_symmetry"])
+    assert hopeless["verdict"] == "hidden"
+    assert all("imprint" in entry and "impurities" in entry for entry in payload)
+    assert any(entry["verdict"] != "hidden" for entry in payload)

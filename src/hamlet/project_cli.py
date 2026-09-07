@@ -181,11 +181,117 @@ def build_parser() -> argparse.ArgumentParser:
     advise.add_argument("--max-validation-mae", type=float, help="optional artifact validation-MAE limit [meV]")
     advise.add_argument("--max-test-mae", type=float, help="optional artifact held-out test-MAE limit [meV]")
     advise.add_argument("--overwrite", action="store_true")
+
+    screen = commands.add_parser(
+        "screen-dmi",
+        help="rank candidate impurity designs by how well each exposes DMI",
+    )
+    screen.add_argument("config", help="YAML or JSON screening configuration")
+    screen.add_argument(
+        "--json", dest="json_path", help="also write the ranked results here"
+    )
+    screen.add_argument(
+        "--verify-symmetric",
+        action="store_true",
+        help=(
+            "simulate designs the symmetry rule already rules out, instead of "
+            "reporting them as hidden without simulating"
+        ),
+    )
+    screen.add_argument(
+        "--dynamics-mode",
+        choices=["ED", "DMRG"],
+        default="ED",
+        help="ED is exact and appropriate for the short chains screening uses",
+    )
     return parser
+
+
+def _run_screen_dmi(args) -> int:
+    """Rank candidate DMI sample designs declared in a configuration file."""
+    import json
+
+    from .dmi_design import (
+        format_screening_table,
+        load_screening_config,
+        screen_dmi_designs,
+    )
+    from .simulation import DmrgpySimulator
+
+    designs, protocol = load_screening_config(args.config)
+    print(f"screening {len(designs)} candidate design(s)")
+    viable = sum(1 for design in designs if design.breaks_symmetry)
+    # Reported up front because it is free, and because a configuration where
+    # nothing breaks the symmetry is a design error worth seeing immediately
+    # rather than after a simulation run.
+    print(
+        f"  {viable} can break the S^z symmetry; "
+        f"{len(designs) - viable} cannot and "
+        + ("will be simulated anyway" if args.verify_symmetric else "will be skipped")
+    )
+    if viable == 0 and not args.verify_symmetric:
+        print(
+            "\nNo candidate breaks the S^z symmetry, so none can constrain D_z. "
+            "Two impurities carrying transverse anisotropy at distinct sites, or "
+            "a transverse field, are the mechanisms that work."
+        )
+        return 1
+
+    results = screen_dmi_designs(
+        designs,
+        DmrgpySimulator(dynamics_mode=args.dynamics_mode),
+        protocol,
+        skip_symmetric=not args.verify_symmetric,
+        progress=lambda item: print(
+            f"    {item.design.name}: {item.imprint:.3e} ({item.verdict})", flush=True
+        ),
+    )
+    print()
+    print(format_screening_table(results))
+
+    if args.json_path:
+        payload = [
+            {
+                "label": item.design.name,
+                "n_sites": item.design.n_sites,
+                "impurities": [
+                    {
+                        "site": impurity.site,
+                        "spin": impurity.spin,
+                        "axial_mev": impurity.axial_mev,
+                        "transverse_mev": impurity.transverse_mev,
+                        "transverse_angle_rad": impurity.transverse_angle_rad,
+                    }
+                    for impurity in item.design.impurities
+                ],
+                "transverse_field_mev": item.design.transverse_field_mev,
+                "imprint": item.imprint,
+                "verdict": item.verdict,
+                "predicted_to_break_symmetry": item.predicted_to_break_symmetry,
+            }
+            for item in results
+        ]
+        destination = Path(args.json_path)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        print(f"\nwrote {destination}")
+
+    best = results[0]
+    if best.verdict in {"hidden", "too weak"}:
+        # A non-zero exit so a scripted design sweep does not read a hopeless
+        # outcome as success.
+        print(
+            f"\nBest candidate is {best.verdict!r}. No design here is worth "
+            "generating a dataset for; see docs/dmi-experiment-spec.md."
+        )
+        return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "screen-dmi":
+        return _run_screen_dmi(args)
     if args.command == "modes":
         from .experiments import available_experiment_modes, resolve_experiment_mode
 

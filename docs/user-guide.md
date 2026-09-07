@@ -306,8 +306,19 @@ along `z` is exactly unidentifiable in any chain that conserves total `S^z`,
 measured here as agreement to one part in 10^13 between chains differing only
 in how `sqrt(J1_xy^2 + D_z^2)` splits between exchange and DMI.
 
-Three impurities carrying transverse magnetic anisotropy break that symmetry and
-make `D_z` recoverable, with no magnetic field required. The sample requirements,
+Impurities carrying transverse magnetic anisotropy break that symmetry and make
+`D_z` recoverable, with no magnetic field required. Which arrangement works best
+depends on your chain, so the package screens candidates for you:
+
+```bash
+cp examples/dmi_screening.yaml my_screening.yaml   # edit chain and candidates
+hamlet screen-dmi my_screening.yaml
+```
+
+Each candidate is ranked by how well it separates a gauge pair, with verdicts
+calibrated against the `D_z` skill models trained on such designs actually
+reached. Arrangements that cannot break the symmetry are identified and skipped
+without simulating, so sweeping counts and positions is cheap. The sample requirements,
 the measurement protocol, and the precision needed on the impurity
 characterisation are in
 [dmi-experiment-spec.md](dmi-experiment-spec.md). Read the precision section

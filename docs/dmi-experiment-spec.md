@@ -110,6 +110,59 @@ separate that pair cannot yield `D_z`, whatever model is trained on it.
 
 Two simulations per candidate, against thousands of chains for a training set.
 
+### From a configuration file
+
+No Python needed. Declare the chain, the measurement, and the candidates:
+
+```bash
+cp examples/dmi_screening.yaml my_screening.yaml
+hamlet screen-dmi my_screening.yaml --json screening.json
+```
+
+```yaml
+chain:
+  n_sites: 8
+  j_eff_mev: 5.0      # the sqrt(J1_xy^2 + D_z^2) a zero-field measurement gives
+  d_z_mev: 1.5        # the DMI you are trying to resolve
+  jz_mev: 5.5
+
+sweep:                            # use this when choosing what to build
+  sites: [[3], [1, 6], [1, 4, 6]]
+  transverse_mev: [1.0, 2.0]
+  spin: S=1
+  axial_mev: 0.0                  # your measured axial anisotropy
+
+# candidates:                     # use this when the impurities are measured
+#   - label: measured Fe/Fe/Mn chain
+#     impurities:
+#       - {site: 1, spin: "S=1",   transverse_mev: 1.8, axial_mev: 1.4}
+#       - {site: 6, spin: "S=3/2", transverse_mev: 2.2, axial_mev: 2.1}
+```
+
+Real output from the shipped example:
+
+```
+                            design    imprint  verdict
+--------------------------------------------------------------
+           3 imp at [1, 4, 6], E=2  2.286e-01  strong
+              2 imp at [1, 6], E=2  1.358e-01  promising
+           3 imp at [1, 4, 6], E=1  9.010e-02  marginal
+              2 imp at [1, 6], E=1  8.004e-02  marginal
+                 1 imp at [3], E=1  0.000e+00  hidden
+                 1 imp at [3], E=2  0.000e+00  hidden
+```
+
+Note what that shows beyond the ranking: `E` is **non-monotonic and
+interacts with impurity count** — three impurities at `E`=1 (9.0e-02) are worse
+than two at `E`=2 (1.36e-01). There is no rule of thumb to substitute for
+screening your own case.
+
+Unknown fields in the configuration are rejected rather than ignored, and a
+configuration in which nothing can break the symmetry exits non-zero without
+simulating anything.
+
+### From Python
+
 ```python
 from hamlet import DmiDesign, screen_dmi_designs, transverse_impurities
 from hamlet import format_screening_table

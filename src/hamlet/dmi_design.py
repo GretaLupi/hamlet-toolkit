@@ -22,7 +22,8 @@ arbitrarily; see :data:`IMPRINT_CALIBRATION`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Sequence
+from pathlib import Path
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -250,3 +251,214 @@ def format_screening_table(results: Sequence[DmiImprint]) -> str:
     for value, note in IMPRINT_CALIBRATION:
         lines.append(f"  {value:9.2e}  {note}")
     return "\n".join(lines)
+
+
+SCREENING_SCHEMA_VERSION = 1
+
+_ALLOWED_IMPURITY_KEYS = {
+    "site",
+    "spin",
+    "axial_mev",
+    "transverse_mev",
+    "transverse_angle_rad",
+}
+_ALLOWED_TOP_KEYS = {
+    "screening_schema_version",
+    "name",
+    "chain",
+    "protocol",
+    "candidates",
+    "sweep",
+}
+_ALLOWED_CHAIN_KEYS = {
+    "n_sites",
+    "j_eff_mev",
+    "d_z_mev",
+    "jz_mev",
+    "j2_mev",
+    "j3_mev",
+}
+_ALLOWED_PROTOCOL_KEYS = {
+    "bias_range_mev",
+    "bias_points",
+    "broadening_mev",
+    "observable",
+    "observable_weights",
+    "output_quantity",
+}
+_ALLOWED_SWEEP_KEYS = {
+    "sites",
+    "transverse_mev",
+    "spin",
+    "axial_mev",
+    "transverse_angle_rad",
+    "transverse_field_mev",
+}
+
+
+def _require_mapping(value: Any, what: str) -> "Mapping[str, Any]":
+    from collections.abc import Mapping as _Mapping
+
+    if not isinstance(value, _Mapping):
+        raise ValueError(f"{what} must be a mapping")
+    return value
+
+
+def _reject_unknown(payload: "Mapping[str, Any]", allowed: set[str], what: str) -> None:
+    # Unknown keys are rejected rather than ignored: a typo in an impurity
+    # position or anisotropy would otherwise silently screen a different design
+    # from the one the user wrote down.
+    unknown = set(payload) - allowed
+    if unknown:
+        raise ValueError(f"{what} has unknown fields: {sorted(unknown)}")
+
+
+def _build_impurity(payload: Any, what: str) -> SiteImpurity:
+    mapping = _require_mapping(payload, what)
+    _reject_unknown(mapping, _ALLOWED_IMPURITY_KEYS, what)
+    if "site" not in mapping:
+        raise ValueError(f"{what} requires site")
+    return SiteImpurity(**mapping)
+
+
+def load_screening_config(
+    path: str | Path,
+) -> tuple[tuple[DmiDesign, ...], SpectroscopyProtocol]:
+    """Read candidate designs and a measurement protocol from YAML or JSON.
+
+    Screening is a design decision taken before any code is written, so it is
+    available from a configuration file rather than only the Python API. The
+    file declares the host chain once, the measurement protocol once, and then
+    either explicit ``candidates`` or a ``sweep`` that expands into them.
+
+    See ``examples/dmi_screening.yaml``.
+    """
+    import json
+    from pathlib import Path as _Path
+
+    config_path = _Path(path).resolve()
+    text = config_path.read_text(encoding="utf-8")
+    if config_path.suffix.lower() == ".json":
+        payload = json.loads(text)
+    else:
+        try:
+            import yaml
+        except ImportError as exc:  # pragma: no cover
+            raise ImportError("YAML configuration requires PyYAML") from exc
+        payload = yaml.safe_load(text)
+
+    payload = _require_mapping(payload, "screening configuration")
+    _reject_unknown(payload, _ALLOWED_TOP_KEYS, "screening configuration")
+
+    version = int(payload.get("screening_schema_version", SCREENING_SCHEMA_VERSION))
+    if version != SCREENING_SCHEMA_VERSION:
+        raise ValueError(
+            f"unsupported screening_schema_version {version}; "
+            f"this build reads {SCREENING_SCHEMA_VERSION}"
+        )
+
+    chain = _require_mapping(payload.get("chain", {}), "chain")
+    _reject_unknown(chain, _ALLOWED_CHAIN_KEYS, "chain")
+    for required in ("n_sites", "j_eff_mev", "d_z_mev", "jz_mev"):
+        if required not in chain:
+            raise ValueError(f"chain requires {required}")
+
+    protocol_payload = _require_mapping(payload.get("protocol", {}), "protocol")
+    _reject_unknown(protocol_payload, _ALLOWED_PROTOCOL_KEYS, "protocol")
+    bias_range = tuple(protocol_payload.get("bias_range_mev", (0.0, 20.0)))
+    if len(bias_range) != 2:
+        raise ValueError("protocol.bias_range_mev must contain low and high values")
+    weights = protocol_payload.get("observable_weights")
+    protocol = SpectroscopyProtocol.uniform(
+        bias_range,
+        points=int(protocol_payload.get("bias_points", 81)),
+        broadening_mev=float(protocol_payload.get("broadening_mev", 0.25)),
+        observable=str(protocol_payload.get("observable", "total_spin")),
+        observable_weights=tuple(weights) if weights is not None else None,
+        output_quantity=str(protocol_payload.get("output_quantity", "didv")),
+    )
+
+    if "candidates" not in payload and "sweep" not in payload:
+        raise ValueError("screening configuration requires candidates or sweep")
+
+    base = dict(
+        n_sites=int(chain["n_sites"]),
+        j_eff_mev=float(chain["j_eff_mev"]),
+        d_z_mev=float(chain["d_z_mev"]),
+        jz_mev=float(chain["jz_mev"]),
+        j2_mev=float(chain.get("j2_mev", 0.0)),
+        j3_mev=float(chain.get("j3_mev", 0.0)),
+    )
+
+    designs: list[DmiDesign] = []
+
+    listed = payload.get("candidates") or []
+    if not isinstance(listed, (list, tuple)):
+        raise ValueError("candidates must be a list")
+    for index, entry in enumerate(listed):
+        mapping = _require_mapping(entry, f"candidates[{index}]")
+        _reject_unknown(
+            mapping,
+            {"label", "impurities", "transverse_field_mev"},
+            f"candidates[{index}]",
+        )
+        impurities = tuple(
+            _build_impurity(item, f"candidates[{index}].impurities[{position}]")
+            for position, item in enumerate(mapping.get("impurities") or [])
+        )
+        designs.append(
+            DmiDesign(
+                **base,
+                impurities=impurities,
+                transverse_field_mev=float(mapping.get("transverse_field_mev", 0.0)),
+                label=str(mapping.get("label", "")),
+            )
+        )
+
+    sweep = payload.get("sweep")
+    if sweep is not None:
+        sweep = _require_mapping(sweep, "sweep")
+        _reject_unknown(sweep, _ALLOWED_SWEEP_KEYS, "sweep")
+        site_groups = sweep.get("sites")
+        if not site_groups:
+            raise ValueError("sweep requires sites, a list of site lists")
+        transverse_values = sweep.get("transverse_mev", [2.0])
+        if not isinstance(transverse_values, (list, tuple)):
+            transverse_values = [transverse_values]
+        field_values = sweep.get("transverse_field_mev", [0.0])
+        if not isinstance(field_values, (list, tuple)):
+            field_values = [field_values]
+        spin = str(sweep.get("spin", "S=1"))
+        axial = float(sweep.get("axial_mev", 0.0))
+        angle = float(sweep.get("transverse_angle_rad", 0.0))
+        for sites in site_groups:
+            if not isinstance(sites, (list, tuple)):
+                raise ValueError("sweep.sites must be a list of site lists")
+            for transverse in transverse_values:
+                for field in field_values:
+                    impurities = tuple(
+                        SiteImpurity(
+                            int(site), spin,
+                            axial_mev=axial,
+                            transverse_mev=float(transverse),
+                            transverse_angle_rad=angle,
+                        )
+                        for site in sites
+                    )
+                    label = (
+                        f"{len(sites)} imp at {list(sites)}, E={float(transverse):g}"
+                    )
+                    if float(field):
+                        label += f", B={float(field):g}"
+                    designs.append(
+                        DmiDesign(
+                            **base,
+                            impurities=impurities,
+                            transverse_field_mev=float(field),
+                            label=label,
+                        )
+                    )
+
+    if not designs:
+        raise ValueError("screening configuration produced no candidate designs")
+    return tuple(designs), protocol
