@@ -298,3 +298,18 @@ and artifact provenance.
 **Ensemble spread and overlap disagreement are diagnostics, not a calibrated
 confidence interval** — see the README for the current scientific status and
 limitations before treating a result as final.
+
+## Measuring DMI
+
+DMI needs a purpose-built sample rather than a different analysis: a DM vector
+along `z` is exactly unidentifiable in any chain that conserves total `S^z`,
+measured here as agreement to one part in 10^13 between chains differing only
+in how `sqrt(J1_xy^2 + D_z^2)` splits between exchange and DMI.
+
+Three impurities carrying transverse magnetic anisotropy break that symmetry and
+make `D_z` recoverable, with no magnetic field required. The sample requirements,
+the measurement protocol, and the precision needed on the impurity
+characterisation are in
+[dmi-experiment-spec.md](dmi-experiment-spec.md). Read the precision section
+before committing beam time: a 10% error in the impurity transverse anisotropy
+removes all DMI skill, and out-of-distribution detection does not catch it.

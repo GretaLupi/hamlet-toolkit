@@ -107,6 +107,12 @@ The full path — importing raw per-site files, choosing a cutoff, letting the
 package decide whether to reuse, retrain, or generate a model, and reading the
 report — is in [docs/user-guide.md](docs/user-guide.md).
 
+Measuring DMI needs a specific sample, because a DM vector along `z` is exactly
+unidentifiable in any chain conserving total `S^z`.
+[docs/dmi-experiment-spec.md](docs/dmi-experiment-spec.md) specifies the chain
+to build, the measurement to take, and the precision required of the impurity
+characterisation — including the measured cost of getting each one wrong.
+
 ## Python API
 
 ```python
