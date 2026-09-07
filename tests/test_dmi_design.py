@@ -349,7 +349,6 @@ def test_cli_writes_machine_readable_results(tmp_path, monkeypatch, capsys):
     assert exit_code == 0, capsys.readouterr().out
     payload = _json.loads(destination.read_text())
     assert len(payload) == 2
-    by_label = {entry["label"]: entry for entry in payload}
     hopeless = next(e for e in payload if not e["predicted_to_break_symmetry"])
     assert hopeless["verdict"] == "hidden"
     assert all("imprint" in entry and "impurities" in entry for entry in payload)
