@@ -395,6 +395,8 @@ class SiteImpurity:
     transverse_angle_rad: float = 0.0
 
     def __post_init__(self) -> None:
+        if isinstance(self.site, bool) or not isinstance(self.site, (int, np.integer)):
+            raise ValueError("impurity site must be an integer")
         if self.spin not in _SPIN_MAGNITUDES:
             raise ValueError(f"spin must be one of {sorted(_SPIN_MAGNITUDES)}")
         for name in ("axial_mev", "transverse_mev", "transverse_angle_rad"):

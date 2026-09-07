@@ -65,6 +65,18 @@ name.)
   along the DM axis does not help at any strength, being invariant under the
   same rotation.
 
+  A field-free route is now validated too. Three `S=1` impurities at sites
+  1/4/6 with 2 meV transverse anisotropy resolve `D_z` on a 3000-chain L=8
+  benchmark: ridge reaches 0.258 +/- 0.004 meV held-out MAE and 0.539 +/- 0.005
+  skill over the training-mean baseline across five splits. Impurities are not
+  hard-coded to that recipe: `dataset.generate.impurities` accepts any number
+  of distinct, zero-based sites, each with its experimentally measured spin,
+  axial/transverse anisotropy, and in-plane angle. Each configuration is a
+  different dataset contract and needs a matching model. See
+  [the configurable example](examples/heisenberg_xxz_dmi_impurities_l8.yaml)
+  and the validated
+  [L=8 reference artifact](models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1).
+
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.
 

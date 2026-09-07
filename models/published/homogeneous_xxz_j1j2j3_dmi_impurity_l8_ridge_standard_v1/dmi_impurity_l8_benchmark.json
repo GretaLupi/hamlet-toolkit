@@ -1,0 +1,584 @@
+{
+  "dataset": "/scratch/work/lupig1/hamlet-overnight/out-dmiimp/dmi_impurity_l8.npz",
+  "dataset_name": "dmi_impurity_l8.npz",
+  "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+  "view": "global",
+  "n_chains": 3000,
+  "n_sites": 8,
+  "target_names": [
+    "J1_xy",
+    "J2",
+    "J3",
+    "Jz",
+    "D_z_magnitude"
+  ],
+  "bias_cutoff_mev": 20.0,
+  "output_points": 61,
+  "split_seeds": [
+    42,
+    43,
+    44,
+    45,
+    46
+  ],
+  "model_seeds": [
+    42,
+    43,
+    44
+  ],
+  "selected_model": "ridge",
+  "selection_metric": "mean validation MAE over split seeds",
+  "skipped_models": {},
+  "models": [
+    {
+      "model": "ridge",
+      "n_splits": 5,
+      "validation_mae_mev_mean": 0.17801587283611298,
+      "validation_mae_mev_std": 0.002611593702375438,
+      "test_mae_mev_mean": 0.17824171483516693,
+      "test_mae_mev_std": 0.001955387309929447,
+      "train_seconds_mean": 0.6159999999999999,
+      "inference_seconds_mean": 0.00452,
+      "ensemble_parameters": null,
+      "per_parameter": [
+        {
+          "parameter": "J1_xy",
+          "test_mae_mev_mean": 0.16863206923007965,
+          "test_mae_mev_std": 0.004260570007789318,
+          "skill_mean": 0.8312181871002885,
+          "skill_std": 0.007230845228917402,
+          "skill_lower": 0.8239873418713711,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "J2",
+          "test_mae_mev_mean": 0.09300827831029893,
+          "test_mae_mev_std": 0.0024771469075533276,
+          "skill_mean": 0.8769964159355164,
+          "skill_std": 0.002769365745903555,
+          "skill_lower": 0.8742270501896128,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "J3",
+          "test_mae_mev_mean": 0.13576018810272217,
+          "test_mae_mev_std": 0.002853925567265403,
+          "skill_mean": 0.7297482283613821,
+          "skill_std": 0.002384920804722497,
+          "skill_lower": 0.7273633075566596,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "Jz",
+          "test_mae_mev_mean": 0.23549303114414216,
+          "test_mae_mev_std": 0.006931353613438224,
+          "skill_mean": 0.7659136245807184,
+          "skill_std": 0.010093285543470845,
+          "skill_lower": 0.7558203390372475,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "D_z_magnitude",
+          "test_mae_mev_mean": 0.2583150267601013,
+          "test_mae_mev_std": 0.004118094326029705,
+          "skill_mean": 0.5393898673518467,
+          "skill_std": 0.005332674239082344,
+          "skill_lower": 0.5340571931127643,
+          "verdict": "resolved"
+        }
+      ],
+      "splits": [
+        {
+          "split_seed": 42,
+          "validation_mae_mev": 0.1763026863336563,
+          "test_mae_mev": 0.17718756198883057,
+          "test_rmse_mev": 0.2518610656261444,
+          "test_correlation_fidelity": 0.9923279157397874,
+          "aggregation": "mean",
+          "train_seconds": 2.8,
+          "inference_seconds": 0.0034,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.17293688654899597,
+              "baseline_mae_mev": 0.9981144070625305,
+              "skill": 0.8267364088472058
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.09663074463605881,
+              "baseline_mae_mev": 0.7733516693115234,
+              "skill": 0.8750494135196161
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.13440413773059845,
+              "baseline_mae_mev": 0.5010512471199036,
+              "skill": 0.7317557066204947
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.22860506176948547,
+              "baseline_mae_mev": 1.0197988748550415,
+              "skill": 0.775833188870717
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.2533610165119171,
+              "baseline_mae_mev": 0.5521954894065857,
+              "skill": 0.5411751429114526
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 43,
+          "validation_mae_mev": 0.18211616575717926,
+          "test_mae_mev": 0.17733125388622284,
+          "test_rmse_mev": 0.25191569328308105,
+          "test_correlation_fidelity": 0.9922562856841312,
+          "aggregation": "mean",
+          "train_seconds": 0.07,
+          "inference_seconds": 0.0048,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.16530556976795197,
+              "baseline_mae_mev": 0.9682719111442566,
+              "skill": 0.8292777391708059
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.08951586484909058,
+              "baseline_mae_mev": 0.7550137042999268,
+              "skill": 0.8814380926607251
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.13634386658668518,
+              "baseline_mae_mev": 0.4973999559879303,
+              "skill": 0.7258868543406272
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.24065610766410828,
+              "baseline_mae_mev": 1.0113028287887573,
+              "skill": 0.7620335859711345
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.254834920167923,
+              "baseline_mae_mev": 0.5424327850341797,
+              "skill": 0.5302000041316357
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 44,
+          "validation_mae_mev": 0.17434139549732208,
+          "test_mae_mev": 0.18173201382160187,
+          "test_rmse_mev": 0.26561084389686584,
+          "test_correlation_fidelity": 0.9912455287490958,
+          "aggregation": "mean",
+          "train_seconds": 0.07,
+          "inference_seconds": 0.0045,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.1733778566122055,
+              "baseline_mae_mev": 0.9704605937004089,
+              "skill": 0.8213447740818531
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.09257543832063675,
+              "baseline_mae_mev": 0.7465694546699524,
+              "skill": 0.8759988936842279
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.1361704170703888,
+              "baseline_mae_mev": 0.5032745599746704,
+              "skill": 0.7294311536882727
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.2464999407529831,
+              "baseline_mae_mev": 0.9924595952033997,
+              "skill": 0.7516272280057263
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.2600364089012146,
+              "baseline_mae_mev": 0.5735225677490234,
+              "skill": 0.546597773960644
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 45,
+          "validation_mae_mev": 0.17854943871498108,
+          "test_mae_mev": 0.17609477043151855,
+          "test_rmse_mev": 0.2473711222410202,
+          "test_correlation_fidelity": 0.9924095104575071,
+          "aggregation": "median",
+          "train_seconds": 0.07,
+          "inference_seconds": 0.0051,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.16243384778499603,
+              "baseline_mae_mev": 1.023389458656311,
+              "skill": 0.84127856075607
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.09155828505754471,
+              "baseline_mae_mev": 0.7552378177642822,
+              "skill": 0.8787689348918157
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.13156455755233765,
+              "baseline_mae_mev": 0.4922167956829071,
+              "skill": 0.7327101417378423
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.22988072037696838,
+              "baseline_mae_mev": 0.9624646902084351,
+              "skill": 0.761154125740255
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.265036404132843,
+              "baseline_mae_mev": 0.5769467949867249,
+              "skill": 0.540622451782679
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 46,
+          "validation_mae_mev": 0.17876967787742615,
+          "test_mae_mev": 0.17886297404766083,
+          "test_rmse_mev": 0.26483869552612305,
+          "test_correlation_fidelity": 0.9915719034813807,
+          "aggregation": "mean",
+          "train_seconds": 0.07,
+          "inference_seconds": 0.0048,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.16910618543624878,
+              "baseline_mae_mev": 1.0403554439544678,
+              "skill": 0.8374534526455077
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.09476105868816376,
+              "baseline_mae_mev": 0.7504444122314453,
+              "skill": 0.873726744921197
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.14031796157360077,
+              "baseline_mae_mev": 0.5176968574523926,
+              "skill": 0.7289572854196735
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.23182332515716553,
+              "baseline_mae_mev": 1.0485947132110596,
+              "skill": 0.7789199943157595
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.2583063840866089,
+              "baseline_mae_mev": 0.559533417224884,
+              "skill": 0.5383539639728219
+            }
+          ],
+          "n_test_chains": 600
+        }
+      ]
+    },
+    {
+      "model": "random_forest",
+      "n_splits": 5,
+      "validation_mae_mev_mean": 0.234384623169899,
+      "validation_mae_mev_std": 0.004062078183822988,
+      "test_mae_mev_mean": 0.23479881882667542,
+      "test_mae_mev_std": 0.0031076241739374597,
+      "train_seconds_mean": 67.886,
+      "inference_seconds_mean": 0.35917999999999994,
+      "ensemble_parameters": null,
+      "per_parameter": [
+        {
+          "parameter": "J1_xy",
+          "test_mae_mev_mean": 0.21438225507736205,
+          "test_mae_mev_std": 0.004125911350398682,
+          "skill_mean": 0.7855250480249483,
+          "skill_std": 0.005501039733765642,
+          "skill_lower": 0.7800240082911827,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "J2",
+          "test_mae_mev_mean": 0.2058942049741745,
+          "test_mae_mev_std": 0.006768313145627396,
+          "skill_mean": 0.7277042489429031,
+          "skill_std": 0.008093907864465665,
+          "skill_lower": 0.7196103410784375,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "J3",
+          "test_mae_mev_mean": 0.19584118723869323,
+          "test_mae_mev_std": 0.003946737821617448,
+          "skill_mean": 0.6100704043253986,
+          "skill_std": 0.008196387405006172,
+          "skill_lower": 0.6018740169203924,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "Jz",
+          "test_mae_mev_mean": 0.2634968400001526,
+          "test_mae_mev_std": 0.005517107937214701,
+          "skill_mean": 0.7382250226710704,
+          "skill_std": 0.0046024171895369245,
+          "skill_lower": 0.7336226054815335,
+          "verdict": "resolved"
+        },
+        {
+          "parameter": "D_z_magnitude",
+          "test_mae_mev_mean": 0.29437963366508485,
+          "test_mae_mev_std": 0.010919397240946972,
+          "skill_mean": 0.4753113234240737,
+          "skill_std": 0.010734835576579449,
+          "skill_lower": 0.4645764878474942,
+          "verdict": "marginal"
+        }
+      ],
+      "splits": [
+        {
+          "split_seed": 42,
+          "validation_mae_mev": 0.23435378074645996,
+          "test_mae_mev": 0.23636294901371002,
+          "test_rmse_mev": 0.30909493565559387,
+          "test_correlation_fidelity": 0.9887546061535396,
+          "aggregation": "median",
+          "train_seconds": 68.59,
+          "inference_seconds": 0.3471,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.22043754160404205,
+              "baseline_mae_mev": 0.9981144070625305,
+              "skill": 0.779146017686696
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.21284663677215576,
+              "baseline_mae_mev": 0.7733516693115234,
+              "skill": 0.724773805736215
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.18947666883468628,
+              "baseline_mae_mev": 0.5010512471199036,
+              "skill": 0.6218417378984314
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.26362159848213196,
+              "baseline_mae_mev": 1.0197988748550415,
+              "skill": 0.7414964803529478
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.29543232917785645,
+              "baseline_mae_mev": 0.5521954894065857,
+              "skill": 0.4649859789775874
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 43,
+          "validation_mae_mev": 0.24100187420845032,
+          "test_mae_mev": 0.2304755449295044,
+          "test_rmse_mev": 0.29601043462753296,
+          "test_correlation_fidelity": 0.9896007218159533,
+          "aggregation": "median",
+          "train_seconds": 66.59,
+          "inference_seconds": 0.3469,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.20924288034439087,
+              "baseline_mae_mev": 0.9682719111442566,
+              "skill": 0.7839007019246094
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.2109411507844925,
+              "baseline_mae_mev": 0.7550137042999268,
+              "skill": 0.7206128185711755
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.20017847418785095,
+              "baseline_mae_mev": 0.4973999559879303,
+              "skill": 0.5975502776427499
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.2585586905479431,
+              "baseline_mae_mev": 1.0113028287887573,
+              "skill": 0.7443310913531012
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.27345651388168335,
+              "baseline_mae_mev": 0.5424327850341797,
+              "skill": 0.49587023235615757
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 44,
+          "validation_mae_mev": 0.23546966910362244,
+          "test_mae_mev": 0.2356088012456894,
+          "test_rmse_mev": 0.3086894452571869,
+          "test_correlation_fidelity": 0.9884229053482207,
+          "aggregation": "median",
+          "train_seconds": 68.66,
+          "inference_seconds": 0.3469,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.21278119087219238,
+              "baseline_mae_mev": 0.9704605937004089,
+              "skill": 0.7807420597462403
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.20333892107009888,
+              "baseline_mae_mev": 0.7465694546699524,
+              "skill": 0.7276356274715363
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.1954420953989029,
+              "baseline_mae_mev": 0.5032745599746704,
+              "skill": 0.6116591003353331
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.26363471150398254,
+              "baseline_mae_mev": 0.9924595952033997,
+              "skill": 0.7343622725014292
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.30284714698791504,
+              "baseline_mae_mev": 0.5735225677490234,
+              "skill": 0.47195251936373217
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 45,
+          "validation_mae_mev": 0.22853513062000275,
+          "test_mae_mev": 0.23226670920848846,
+          "test_rmse_mev": 0.3015843331813812,
+          "test_correlation_fidelity": 0.9889538394735572,
+          "aggregation": "validation_weighted",
+          "train_seconds": 67.66,
+          "inference_seconds": 0.3474,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.2116233855485916,
+              "baseline_mae_mev": 1.023389458656311,
+              "skill": 0.7932132447148237
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.19395698606967926,
+              "baseline_mae_mev": 0.7552378177642822,
+              "skill": 0.743184224217152
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.19427390396595,
+              "baseline_mae_mev": 0.4922167956829071,
+              "skill": 0.6053082591454194
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.25819122791290283,
+              "baseline_mae_mev": 0.9624646902084351,
+              "skill": 0.7317395323282063
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.3032880425453186,
+              "baseline_mae_mev": 0.5769467949867249,
+              "skill": 0.4743223375522919
+            }
+          ],
+          "n_test_chains": 600
+        },
+        {
+          "split_seed": 46,
+          "validation_mae_mev": 0.23256266117095947,
+          "test_mae_mev": 0.2392800897359848,
+          "test_rmse_mev": 0.3122929632663727,
+          "test_correlation_fidelity": 0.9885955450981477,
+          "aggregation": "median",
+          "train_seconds": 67.93,
+          "inference_seconds": 0.4076,
+          "per_parameter": [
+            {
+              "parameter": "J1_xy",
+              "test_mae_mev": 0.21782627701759338,
+              "baseline_mae_mev": 1.0403554439544678,
+              "skill": 0.7906232160523718
+            },
+            {
+              "parameter": "J2",
+              "test_mae_mev": 0.2083873301744461,
+              "baseline_mae_mev": 0.7504444122314453,
+              "skill": 0.7223147687184361
+            },
+            {
+              "parameter": "J3",
+              "test_mae_mev": 0.19983479380607605,
+              "baseline_mae_mev": 0.5176968574523926,
+              "skill": 0.6139926466050591
+            },
+            {
+              "parameter": "Jz",
+              "test_mae_mev": 0.2734779715538025,
+              "baseline_mae_mev": 1.0485947132110596,
+              "skill": 0.7391957368196675
+            },
+            {
+              "parameter": "D_z_magnitude",
+              "test_mae_mev": 0.29687413573265076,
+              "baseline_mae_mev": 0.559533417224884,
+              "skill": 0.4694255488705994
+            }
+          ],
+          "n_test_chains": 600
+        }
+      ]
+    }
+  ]
+}

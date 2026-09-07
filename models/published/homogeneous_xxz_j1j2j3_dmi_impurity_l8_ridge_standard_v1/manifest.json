@@ -1,0 +1,464 @@
+{
+  "artifact_schema_version": 1,
+  "coupling_unit": "meV",
+  "dataset_metadata": {
+    "chunk_seeds": [
+      3064686929,
+      4204957655,
+      728789639,
+      1978704183,
+      665231968,
+      1104485071,
+      1312263305,
+      4053693859,
+      2363562594,
+      4139908406
+    ],
+    "family": "HomogeneousXXZDMIImpurityFamily",
+    "generation_fingerprint": "19b3c1b68371c856573e21204109bac5c2a1b4d9026e5cb83af04425b3ccc146",
+    "generation_recipe": {
+      "backend": "dmrgpy",
+      "bias_points": 81,
+      "bias_range_mev": [
+        0.0,
+        20.0
+      ],
+      "broadening_mev": 0.25,
+      "coupling_ranges_mev": [
+        [
+          2.0,
+          6.0
+        ],
+        [
+          -1.5,
+          1.5
+        ],
+        [
+          -1.0,
+          1.0
+        ],
+        [
+          2.0,
+          6.0
+        ],
+        [
+          0.3,
+          2.5
+        ]
+      ],
+      "dynamics_mode": "ED",
+      "impurity_sites": [
+        1,
+        4,
+        6
+      ],
+      "impurity_spin": "S=1",
+      "impurity_transverse_mev": 2.0,
+      "n_samples": 20,
+      "n_shards": 150,
+      "n_sites": 8,
+      "observable": "total_spin",
+      "observable_weights": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "output_quantity": "didv",
+      "seed": 71260904,
+      "shard": 0,
+      "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+      "transverse_field_mev": 0.0
+    },
+    "merged_from": [
+      "shard_000.npz",
+      "shard_001.npz",
+      "shard_002.npz",
+      "shard_003.npz",
+      "shard_004.npz",
+      "shard_005.npz",
+      "shard_006.npz",
+      "shard_007.npz",
+      "shard_008.npz",
+      "shard_009.npz",
+      "shard_010.npz",
+      "shard_011.npz",
+      "shard_012.npz",
+      "shard_013.npz",
+      "shard_014.npz",
+      "shard_015.npz",
+      "shard_016.npz",
+      "shard_017.npz",
+      "shard_018.npz",
+      "shard_019.npz",
+      "shard_020.npz",
+      "shard_021.npz",
+      "shard_022.npz",
+      "shard_023.npz",
+      "shard_024.npz",
+      "shard_025.npz",
+      "shard_026.npz",
+      "shard_027.npz",
+      "shard_028.npz",
+      "shard_029.npz",
+      "shard_030.npz",
+      "shard_031.npz",
+      "shard_032.npz",
+      "shard_033.npz",
+      "shard_034.npz",
+      "shard_035.npz",
+      "shard_036.npz",
+      "shard_037.npz",
+      "shard_038.npz",
+      "shard_039.npz",
+      "shard_040.npz",
+      "shard_041.npz",
+      "shard_042.npz",
+      "shard_043.npz",
+      "shard_044.npz",
+      "shard_045.npz",
+      "shard_046.npz",
+      "shard_047.npz",
+      "shard_048.npz",
+      "shard_049.npz",
+      "shard_050.npz",
+      "shard_051.npz",
+      "shard_052.npz",
+      "shard_053.npz",
+      "shard_054.npz",
+      "shard_055.npz",
+      "shard_056.npz",
+      "shard_057.npz",
+      "shard_058.npz",
+      "shard_059.npz",
+      "shard_060.npz",
+      "shard_061.npz",
+      "shard_062.npz",
+      "shard_063.npz",
+      "shard_064.npz",
+      "shard_065.npz",
+      "shard_066.npz",
+      "shard_067.npz",
+      "shard_068.npz",
+      "shard_069.npz",
+      "shard_070.npz",
+      "shard_071.npz",
+      "shard_072.npz",
+      "shard_073.npz",
+      "shard_074.npz",
+      "shard_075.npz",
+      "shard_076.npz",
+      "shard_077.npz",
+      "shard_078.npz",
+      "shard_079.npz",
+      "shard_080.npz",
+      "shard_081.npz",
+      "shard_082.npz",
+      "shard_083.npz",
+      "shard_084.npz",
+      "shard_085.npz",
+      "shard_086.npz",
+      "shard_087.npz",
+      "shard_088.npz",
+      "shard_089.npz",
+      "shard_090.npz",
+      "shard_091.npz",
+      "shard_092.npz",
+      "shard_093.npz",
+      "shard_094.npz",
+      "shard_095.npz",
+      "shard_096.npz",
+      "shard_097.npz",
+      "shard_098.npz",
+      "shard_099.npz",
+      "shard_100.npz",
+      "shard_101.npz",
+      "shard_102.npz",
+      "shard_103.npz",
+      "shard_104.npz",
+      "shard_105.npz",
+      "shard_106.npz",
+      "shard_107.npz",
+      "shard_108.npz",
+      "shard_109.npz",
+      "shard_110.npz",
+      "shard_111.npz",
+      "shard_112.npz",
+      "shard_113.npz",
+      "shard_114.npz",
+      "shard_115.npz",
+      "shard_116.npz",
+      "shard_117.npz",
+      "shard_118.npz",
+      "shard_119.npz",
+      "shard_120.npz",
+      "shard_121.npz",
+      "shard_122.npz",
+      "shard_123.npz",
+      "shard_124.npz",
+      "shard_125.npz",
+      "shard_126.npz",
+      "shard_127.npz",
+      "shard_128.npz",
+      "shard_129.npz",
+      "shard_130.npz",
+      "shard_131.npz",
+      "shard_132.npz",
+      "shard_133.npz",
+      "shard_134.npz",
+      "shard_135.npz",
+      "shard_136.npz",
+      "shard_137.npz",
+      "shard_138.npz",
+      "shard_139.npz",
+      "shard_140.npz",
+      "shard_141.npz",
+      "shard_142.npz",
+      "shard_143.npz",
+      "shard_144.npz",
+      "shard_145.npz",
+      "shard_146.npz",
+      "shard_147.npz",
+      "shard_148.npz",
+      "shard_149.npz"
+    ],
+    "n_samples": 20,
+    "n_shards_merged": 150,
+    "protocol": {
+      "broadening_mev": 0.25,
+      "observable": "total_spin",
+      "observable_contract": {
+        "components": [
+          "Sxx",
+          "Syy",
+          "Szz"
+        ],
+        "kind": "total_spin",
+        "weights": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "output_quantity": "didv"
+    },
+    "seed": 3064686929,
+    "simulator": "DmrgpySimulator",
+    "training_preprocessing": {
+      "baseline_range_mev": [
+        0.0,
+        3.0
+      ],
+      "bias_cutoff_mev": 20.0,
+      "bias_min_mev": 0.0,
+      "clip": null,
+      "output_points": 61,
+      "resolved_scale_range_mev": [
+        10.0,
+        20.0
+      ],
+      "scale_bandwidth_mev": 10.0,
+      "scale_range_mev": null
+    }
+  },
+  "energy_convention": {
+    "dmrgpy_energy_unit_mev": 10.0
+  },
+  "ensemble_aggregation": {
+    "method": "mean",
+    "selection_metric": "validation_mae",
+    "weights": null
+  },
+  "metrics": {
+    "aggregation_selection": {
+      "candidates": {
+        "mean": {
+          "correlation_fidelity": 0.99285045988296,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157774448394775,
+          "weights": null
+        },
+        "median": {
+          "correlation_fidelity": 0.9928504599675776,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157775938510895,
+          "weights": null
+        },
+        "validation_weighted": {
+          "correlation_fidelity": 0.9928504600257811,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157774448394775,
+          "weights": [
+            0.3333333333333333,
+            0.3333333333333333,
+            0.3333333333333333
+          ]
+        }
+      },
+      "selected": "mean",
+      "selection_metric": "mae",
+      "selection_split": "validation"
+    },
+    "split": {
+      "split_seed": 42,
+      "test_groups": 300,
+      "train_groups": 2100,
+      "validation_groups": 600
+    },
+    "test": {
+      "ensemble": {
+        "correlation_fidelity": 0.9916794578187729,
+        "mae": 0.18031969666481018,
+        "rmse": 0.2619097828865051
+      },
+      "ensemble_aggregation": "mean",
+      "n_examples": 300,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.9916794578917827,
+          "mae": 0.18031969666481018,
+          "rmse": 0.2619097828865051
+        },
+        {
+          "correlation_fidelity": 0.9916794578917827,
+          "mae": 0.18031969666481018,
+          "rmse": 0.2619097828865051
+        },
+        {
+          "correlation_fidelity": 0.9916794578917827,
+          "mae": 0.18031969666481018,
+          "rmse": 0.2619097828865051
+        }
+      ],
+      "unit": "meV"
+    },
+    "validation": {
+      "ensemble": {
+        "correlation_fidelity": 0.99285045988296,
+        "mae": 0.17263509333133698,
+        "rmse": 0.24157774448394775
+      },
+      "ensemble_aggregation": "mean",
+      "n_examples": 600,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.9928504599675776,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157775938510895
+        },
+        {
+          "correlation_fidelity": 0.9928504599675776,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157775938510895
+        },
+        {
+          "correlation_fidelity": 0.9928504599675776,
+          "mae": 0.17263509333133698,
+          "rmse": 0.24157775938510895
+        }
+      ],
+      "unit": "meV"
+    }
+  },
+  "model_name": "ridge",
+  "model_options": {
+    "alpha": 0.001
+  },
+  "models": [
+    {
+      "file": "model_seed_42.joblib",
+      "format": "joblib",
+      "seed": 42
+    },
+    {
+      "file": "model_seed_43.joblib",
+      "format": "joblib",
+      "seed": 43
+    },
+    {
+      "file": "model_seed_44.joblib",
+      "format": "joblib",
+      "seed": 44
+    }
+  ],
+  "n_sites": 8,
+  "package_version": "0.1.0",
+  "preprocessing": {
+    "baseline_range_mev": [
+      0.0,
+      3.0
+    ],
+    "bias_cutoff_mev": 20.0,
+    "bias_min_mev": 0.0,
+    "clip": null,
+    "output_points": 61,
+    "resolved_scale_range_mev": [
+      10.0,
+      20.0
+    ],
+    "scale_bandwidth_mev": 10.0,
+    "scale_range_mev": null
+  },
+  "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+  "target_names": [
+    "J1_xy",
+    "J2",
+    "J3",
+    "Jz",
+    "D_z_magnitude"
+  ],
+  "target_scaler": {
+    "maximum": [
+      5.998734951019287,
+      1.4979437589645386,
+      0.9982487559318542,
+      5.9931817054748535,
+      2.4994757175445557
+    ],
+    "minimum": [
+      2.0020811557769775,
+      -1.49600088596344,
+      -0.999882698059082,
+      2.0011565685272217,
+      0.3021356165409088
+    ]
+  },
+  "toolkit": {
+    "distribution": "hamlet-toolkit",
+    "full_name": "Hamiltonian Learning Toolkit",
+    "name": "HamLeT"
+  },
+  "training_distribution": {
+    "feature_count": 488,
+    "file": "training_distribution.npz",
+    "method": "diagonal_rms_z_score",
+    "quantile_levels": [
+      0.5,
+      0.8999999761581421,
+      0.949999988079071,
+      0.9900000095367432
+    ],
+    "reference_count": 256,
+    "score_quantiles": [
+      0.7917618751525879,
+      1.4679514169692993,
+      1.7742925882339478,
+      2.323155164718628
+    ],
+    "threshold_95": 1.7742925882339478
+  },
+  "training_preset": {
+    "batch_size": 32,
+    "epochs": 100,
+    "name": "standard",
+    "patience": 12,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "split_seed": 42,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.2
+  },
+  "view": "global"
+}

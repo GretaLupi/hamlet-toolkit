@@ -1,0 +1,50 @@
+config_schema_version: 1
+name: L8 XXZ plus J2/J3/DMI with measured impurities
+system_type: homogeneous_xxz_j1j2j3_dmi_impurity
+output_dir: ../results/xxz_dmi_impurities_l8_project
+
+dataset:
+  format: generated
+  generate:
+    system: homogeneous_xxz_j1j2j3_dmi_impurity
+    output: ../data/xxz_dmi_impurities_L8.npz
+    n_sites: 8
+    n_samples: 1000
+    # Fixed order: J1_xy, J2, J3, Jz, non-negative D_z magnitude [meV].
+    coupling_ranges_mev:
+      - [2, 6]
+      - [-1.5, 1.5]
+      - [-1, 1]
+      - [2, 6]
+      - [0.3, 2.5]
+    # Add as many measured impurities as the chain contains. Sites are
+    # zero-based and must be distinct. Each impurity may have its own species,
+    # axial/transverse anisotropy, and in-plane anisotropy-axis angle.
+    impurities:
+      - site: 1
+        spin: S=1
+        transverse_mev: 2.0
+      - site: 4
+        spin: S=1
+        transverse_mev: 2.0
+      - site: 6
+        spin: S=1
+        transverse_mev: 2.0
+    transverse_field_mev: 0.0
+    bias_range_mev: [0, 20]
+    bias_points: 81
+    broadening_mev: 0.25
+    observable: total_spin
+    observable_weights: [1, 1, 1]
+    output_quantity: didv
+    backend: dmrgpy
+    checkpoint_every: 25
+    seed: 20260904
+
+training:
+  cutoffs_mev: [20]
+  manual_cutoff_mev: 20
+  output_points: 61
+  view: global
+  model: ridge
+  preset: standard

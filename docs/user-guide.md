@@ -184,9 +184,20 @@ overwritten), and existing non-empty artifact/output directories are never
 overwritten. Inspect first with `hamlet inspect project.yaml`, which reports
 site count, energy coverage, and cutoff candidates without training anything.
 
+For impurity-assisted DMI, select
+`homogeneous_xxz_j1j2j3_dmi_impurity` and provide `impurities` under
+`dataset.generate`. The list can contain any number of distinct, zero-based
+sites. Each entry accepts `site`, `spin`, `axial_mev`, `transverse_mev`, and
+`transverse_angle_rad`, so the simulation can reproduce the experimentally
+measured impurity configuration instead of assuming the validated three-site
+recipe. The exact list is part of the dataset fingerprint and model contract;
+changing it requires a matching dataset and artifact. See
+[`examples/heisenberg_xxz_dmi_impurities_l8.yaml`](../examples/heisenberg_xxz_dmi_impurities_l8.yaml).
+
 More complete configurations: [`examples/heisenberg_generate_dataset.yaml`](../examples/heisenberg_generate_dataset.yaml),
 [`examples/heisenberg_generate_train_analyze.yaml`](../examples/heisenberg_generate_train_analyze.yaml),
-[`examples/heisenberg_train_and_analyze.yaml`](../examples/heisenberg_train_and_analyze.yaml).
+[`examples/heisenberg_train_and_analyze.yaml`](../examples/heisenberg_train_and_analyze.yaml),
+and [`examples/heisenberg_xxz_dmi_impurities_l8.yaml`](../examples/heisenberg_xxz_dmi_impurities_l8.yaml).
 
 ### Retraining directly
 

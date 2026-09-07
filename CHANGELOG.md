@@ -8,6 +8,19 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Added
 
+- The impurity-assisted DMI family is available through project YAML. Users
+  may list any number of impurities at arbitrary distinct sites and provide the
+  measured spin, axial anisotropy, transverse anisotropy, and in-plane angle
+  for each.
+- A validated field-free three-impurity L=8 route, measured on 3000 simulated
+  chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
+  0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- `hamlet advise` now compares the fixed impurity and transverse-field
+  conditions an artifact was trained under, via a new `experiment_conditions`
+  argument. `system_type` is identical for every impurity chain regardless of
+  impurity count, sites, species or anisotropies, so an undeclared or differing
+  configuration blocks model reuse instead of being assumed to match -- the
+  same rule the package already applies to the bias cutoff.
 - Continuous integration: the test suite on Python 3.10, 3.11 and 3.12, a job
   that installs the `ml` extra so the Keras paths actually execute, a lint gate
   configured to correctness rules only, and packaging guards that compare the

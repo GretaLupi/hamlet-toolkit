@@ -1,0 +1,101 @@
+{
+  "artifact_name": "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1",
+  "artifact_relpath": "models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1",
+  "headline": "Reference global-view model for the `homogeneous_xxz_j1j2j3_dmi_impurity` system at L = 8, trained on 3000 exact-diagonalisation chains.",
+  "dataset_name": "dmi_impurity_l8.npz",
+  "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+  "system_description": "a homogeneous spin-1/2 host chain with substituted site impurities",
+    "known_conditions": [
+        "fixed impurity configuration: site 1 (S=1, D=0 meV, E=2.0 meV, phi=0 rad), site 4 (S=1, D=0 meV, E=2.0 meV, phi=0 rad), site 6 (S=1, D=0 meV, E=2.0 meV, phi=0 rad)",
+    "fixed transverse field: 0 meV"
+  ],
+  "n_chains": 3000,
+  "n_sites": 8,
+  "target_names": [
+    "J1_xy",
+    "J2",
+    "J3",
+    "Jz",
+    "D_z_magnitude"
+  ],
+  "parameter_ranges": [
+    {
+      "parameter": "J1_xy",
+      "min_mev": 2.0009164810180664,
+      "max_mev": 5.998734951019287
+    },
+    {
+      "parameter": "J2",
+      "min_mev": -1.49600088596344,
+      "max_mev": 1.4979437589645386
+    },
+    {
+      "parameter": "J3",
+      "min_mev": -0.999882698059082,
+      "max_mev": 0.998435914516449
+    },
+    {
+      "parameter": "Jz",
+      "min_mev": 2.0011565685272217,
+      "max_mev": 5.999602794647217
+    },
+    {
+      "parameter": "D_z_magnitude",
+      "min_mev": 0.30163314938545227,
+      "max_mev": 2.4994757175445557
+    }
+  ],
+  "observable": "total_spin",
+  "output_quantity": "didv",
+  "broadening_mev": 0.25,
+  "bias_cutoff_mev": 20.0,
+  "output_points": 61,
+  "model": "ridge",
+  "model_options": {
+    "alpha": 0.001
+  },
+  "preset": "standard",
+  "n_seeds": 3,
+  "aggregation": "mean",
+  "validation_mae_mev": 0.17263509333133698,
+  "test_mae_mev": 0.18031969666481018,
+  "test_rmse_mev": 0.2619097828865051,
+  "test_correlation_fidelity": 0.9916794578187729,
+  "split_sizes": {
+    "train_groups": 2100,
+    "validation_groups": 600,
+    "test_groups": 300,
+    "split_seed": 42
+  },
+  "per_parameter": [
+    {
+      "parameter": "J1_xy",
+      "test_mae_mev": 0.1806551069021225,
+      "skill": 0.8241392460515475
+    },
+    {
+      "parameter": "J2",
+      "test_mae_mev": 0.09534959495067596,
+      "skill": 0.8776879189255626
+    },
+    {
+      "parameter": "J3",
+      "test_mae_mev": 0.1313994824886322,
+      "skill": 0.7358396592412577
+    },
+    {
+      "parameter": "Jz",
+      "test_mae_mev": 0.23683655261993408,
+      "skill": 0.768171659921296
+    },
+    {
+      "parameter": "D_z_magnitude",
+      "test_mae_mev": 0.25735780596733093,
+      "skill": 0.5547933199419816
+    }
+  ],
+  "benchmark_note": "Chosen by `scripts/benchmark_homogeneous.py` over 5 resampled splits on validation MAE (mean validation MAE by model: `ridge` 0.178, `random_forest` 0.234). See `dmi_impurity_l8_benchmark.json`.",
+  "created": "2026-09-07",
+  "hamlet_version": "0.1.0",
+  "python_version": "3.11.5"
+}

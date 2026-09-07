@@ -118,6 +118,7 @@ def advise_experiment(
     dataset_paths: Sequence[str | Path] = (),
     system_type: str | None = None,
     view: str | None = None,
+    experiment_conditions: Any | None = None,
     allow_development_artifacts: bool = False,
     max_validation_mae_mev: float | None = None,
     max_test_mae_mev: float | None = None,
@@ -217,6 +218,7 @@ def advise_experiment(
             allow_development_artifacts,
             max_validation_mae_mev,
             max_test_mae_mev,
+            _canonical_fixed_conditions(experiment_conditions),
         )
         for path in discovered_artifacts
     )
@@ -322,6 +324,70 @@ def _discover_artifacts(roots: Sequence[str | Path]) -> tuple[Path, ...]:
     return tuple(sorted(found))
 
 
+def _canonical_fixed_conditions(source: Any) -> tuple[Any, ...] | None:
+    """Fixed physical conditions a model was trained under, in comparable form.
+
+    ``system_type`` alone does not pin these down. Every chain with substituted
+    impurities carries the same ``homogeneous_xxz_j1j2j3_dmi_impurity`` label
+    whatever the impurity count, sites, species or anisotropies are, and those
+    change the spectra completely. They are training conditions in exactly the
+    way the bias cutoff is, so they must be compared rather than assumed --
+    otherwise a model trained on three S=1 impurities would be silently reused
+    on a different chain and return confident nonsense.
+
+    Returns ``None`` when a source declares no such conditions, which is the
+    case for every system whose physics ``system_type`` fully determines.
+
+    Two recipe shapes are accepted, because datasets reach this point from both
+    the config interface (an ``impurities`` list) and from generation scripts
+    (parallel ``impurity_*`` fields).
+    """
+    if not isinstance(source, dict):
+        return None
+
+    impurities: list[tuple[Any, ...]] = []
+    listed = source.get("impurities")
+    if isinstance(listed, (list, tuple)):
+        for entry in listed:
+            if not isinstance(entry, dict):
+                continue
+            impurities.append(
+                (
+                    int(entry.get("site", -1)),
+                    str(entry.get("spin", "S=1")),
+                    round(float(entry.get("axial_mev", 0.0)), 9),
+                    round(float(entry.get("transverse_mev", 0.0)), 9),
+                    round(float(entry.get("transverse_angle_rad", 0.0)), 9),
+                )
+            )
+    elif isinstance(source.get("impurity_sites"), (list, tuple)):
+        spin = str(source.get("impurity_spin", "S=1"))
+        axial = round(float(source.get("impurity_axial_mev", 0.0) or 0.0), 9)
+        transverse = round(float(source.get("impurity_transverse_mev", 0.0) or 0.0), 9)
+        angle = round(float(source.get("impurity_transverse_angle_rad", 0.0) or 0.0), 9)
+        impurities = [
+            (int(site), spin, axial, transverse, angle)
+            for site in source["impurity_sites"]
+        ]
+
+    field = round(float(source.get("transverse_field_mev", 0.0) or 0.0), 9)
+    if not impurities and not field:
+        return None
+    return (tuple(sorted(impurities)), field)
+
+
+def _describe_conditions(conditions: tuple[Any, ...] | None) -> str:
+    if conditions is None:
+        return "none"
+    impurities, field = conditions
+    parts = [
+        f"site {site} {spin} D={axial:g} E={transverse:g} phi={angle:g}"
+        for site, spin, axial, transverse, angle in impurities
+    ]
+    parts.append(f"B_x={field:g} meV")
+    return "; ".join(parts)
+
+
 def _assess_artifact(
     path: Path,
     measurement: Measurement,
@@ -331,6 +397,7 @@ def _assess_artifact(
     allow_development: bool,
     max_validation_mae: float | None,
     max_test_mae: float | None,
+    experiment_conditions: tuple[Any, ...] | None = None,
 ) -> ResourceAssessment:
     reasons: list[str] = []
     warnings: list[str] = []
@@ -379,6 +446,33 @@ def _assess_artifact(
             reasons.append(
                 f"experiment does not cover artifact window {bias_min:g}–{stored_cutoff:g} meV"
             )
+    # Fixed physical conditions the model was trained under. Refusing when they
+    # are unconfirmed is deliberate: an artifact trained with a specific
+    # impurity configuration is not reusable on a chain with a different one,
+    # and silence here would be the same failure mode as substituting a cutoff.
+    artifact_conditions = _canonical_fixed_conditions(
+        manifest.get("dataset_metadata", {}).get("generation_recipe", {})
+    )
+    if artifact_conditions is not None:
+        if experiment_conditions is None:
+            reasons.append(
+                "artifact fixes physical conditions that the experiment has not "
+                f"declared ({_describe_conditions(artifact_conditions)}); pass "
+                "experiment_conditions to confirm they match"
+            )
+        elif experiment_conditions != artifact_conditions:
+            reasons.append(
+                "fixed-condition mismatch: artifact="
+                f"[{_describe_conditions(artifact_conditions)}], experiment="
+                f"[{_describe_conditions(experiment_conditions)}]"
+            )
+    elif experiment_conditions is not None:
+        reasons.append(
+            "experiment declares fixed conditions "
+            f"[{_describe_conditions(experiment_conditions)}] but the artifact "
+            "was trained without any"
+        )
+
     preset_name = str(manifest.get("training_preset", {}).get("name", "unknown"))
     if preset_name == "quick" and not allow_development:
         reasons.append("quick-preset artifact is development-only")

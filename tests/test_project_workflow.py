@@ -21,9 +21,11 @@ def _write_long_csv(path, bias, spectra):
 class LightweightSimulator:
     def __init__(self):
         self.calls = 0
+        self.systems = []
 
     def simulate(self, system, protocol):
         self.calls += 1
+        self.systems.append(system)
         scale = float(np.sum(system.as_array()))
         spectra = np.stack(
             [scale + site + np.asarray(protocol.bias_mev) for site in range(system.n_sites)]
@@ -204,6 +206,93 @@ def test_xxz_dmi_recipe_requires_positive_fifth_range(tmp_path):
     payload["dataset"]["generate"]["coupling_ranges_mev"][-1] = [-1, 6]
     with pytest.raises(ValueError, match="D_z magnitude"):
         ProjectConfig.from_mapping(payload, base_dir=tmp_path)
+
+
+def test_impurity_recipe_accepts_arbitrary_measured_sites_and_properties(tmp_path):
+    impurities = [
+        {"site": 0, "spin": "S=1", "transverse_mev": 2.0},
+        {"site": 2, "spin": "S=3/2", "axial_mev": -0.4},
+        {
+            "site": 5,
+            "spin": "S=2",
+            "transverse_mev": 1.3,
+            "transverse_angle_rad": 0.25,
+        },
+        {"site": 7, "spin": "S=5/2"},
+    ]
+    config = ProjectConfig.from_mapping(
+        {
+            "name": "measured impurity configuration",
+            "output_dir": "output",
+            "dataset": {
+                "generate": {
+                    "system": "homogeneous_xxz_j1j2j3_dmi_impurity",
+                    "n_sites": 8,
+                    "n_samples": 10,
+                    "coupling_ranges_mev": [
+                        [2, 6], [-1.5, 1.5], [-1, 1], [2, 6], [0.3, 2.5]
+                    ],
+                    "impurities": impurities,
+                }
+            },
+        },
+        base_dir=tmp_path,
+    )
+
+    assert config.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity"
+    assert config.view == "global"
+    assert config.generation is not None
+    assert [item.site for item in config.generation.impurities] == [0, 2, 5, 7]
+    assert config.generation.impurities[2].spin == "S=2"
+    assert config.generation.impurities[2].transverse_angle_rad == 0.25
+    assert len(config.generation.impurities) == 4
+
+    simulator = LightweightSimulator()
+    result = HamiltonianLearningProject(config).generate_training_dataset(
+        simulator=simulator
+    )
+    assert result.dataset.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity"
+    assert simulator.systems[0].site_spins == (
+        "S=1",
+        "S=1/2",
+        "S=3/2",
+        "S=1/2",
+        "S=1/2",
+        "S=2",
+        "S=1/2",
+        "S=5/2",
+    )
+
+
+@pytest.mark.parametrize(
+    ("impurities", "message"),
+    [
+        ([{"spin": "S=1"}], "requires site"),
+        ([{"site": 1, "mystery": 2}], "unknown fields"),
+        ([{"site": 1.5, "spin": "S=1"}], "site must be an integer"),
+        ([{"site": 1}, {"site": 1}], "sites must be distinct"),
+        ([{"site": 8}], "must index a site"),
+    ],
+)
+def test_impurity_recipe_rejects_invalid_configurations(tmp_path, impurities, message):
+    with pytest.raises(ValueError, match=message):
+        ProjectConfig.from_mapping(
+            {
+                "name": "invalid impurities",
+                "dataset": {
+                    "generate": {
+                        "system": "homogeneous_xxz_j1j2j3_dmi_impurity",
+                        "n_sites": 8,
+                        "n_samples": 1,
+                        "coupling_ranges_mev": [
+                            [2, 6], [-1.5, 1.5], [-1, 1], [2, 6], [0.3, 2.5]
+                        ],
+                        "impurities": impurities,
+                    }
+                },
+            },
+            base_dir=tmp_path,
+        )
 
 
 def test_project_calibrates_trains_infers_and_builds_html(tmp_path):

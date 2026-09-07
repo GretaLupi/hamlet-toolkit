@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -401,3 +402,162 @@ def test_analysis_cli_runs_manual_cutoff_preflight(workflow_resources, tmp_path)
                 "--no-plot",
             ]
         )
+
+
+PUBLISHED_DMI_ARTIFACT = (
+    "models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+)
+
+# The conditions this published artifact was actually trained under.
+DMI_TRAINING_CONDITIONS = {
+    "impurities": [
+        {"site": 1, "spin": "S=1", "transverse_mev": 2.0},
+        {"site": 4, "spin": "S=1", "transverse_mev": 2.0},
+        {"site": 6, "spin": "S=1", "transverse_mev": 2.0},
+    ],
+    "transverse_field_mev": 0.0,
+}
+
+
+@pytest.fixture
+def dmi_experiment(tmp_path):
+    """An L=8 experiment covering the published artifact's 0-20 meV window."""
+    repo_root = Path(__file__).resolve().parents[1]
+    artifact = repo_root / PUBLISHED_DMI_ARTIFACT
+    if not (artifact / "manifest.json").exists():
+        pytest.skip("published DMI artifact is not present")
+    bias = np.linspace(0.0, 20.0, 81)
+    spectra = np.cumsum(
+        np.exp(-((bias[None, :] - np.linspace(4.0, 12.0, 8)[:, None]) ** 2) / 2.0),
+        axis=1,
+    )
+    experiment = tmp_path / "dmi_experiment.csv"
+    _write_experiment(experiment, bias, spectra)
+    return artifact, experiment
+
+
+def test_impurity_artifact_is_refused_when_conditions_are_not_declared(dmi_experiment):
+    """The impurity configuration is a training condition, like the cutoff.
+
+    ``system_type`` is identical for every impurity chain regardless of how
+    many impurities there are, where they sit, or what their anisotropies are,
+    so an undeclared configuration must block reuse rather than be assumed to
+    match.
+    """
+    artifact, experiment = dmi_experiment
+    decision = advise_experiment(
+        experiment,
+        manual_cutoff_mev=20.0,
+        artifact_roots=(artifact,),
+        system_type="homogeneous_xxz_j1j2j3_dmi_impurity",
+        view="global",
+    )
+    assert not decision.can_use_existing_model
+    assessment = next(item for item in decision.artifact_assessments if item.path == artifact)
+    assert any("has not declared" in reason for reason in assessment.reasons)
+
+
+def test_impurity_artifact_is_reusable_when_conditions_match(dmi_experiment):
+    artifact, experiment = dmi_experiment
+    decision = advise_experiment(
+        experiment,
+        manual_cutoff_mev=20.0,
+        artifact_roots=(artifact,),
+        system_type="homogeneous_xxz_j1j2j3_dmi_impurity",
+        view="global",
+        experiment_conditions=DMI_TRAINING_CONDITIONS,
+    )
+    assessment = next(item for item in decision.artifact_assessments if item.path == artifact)
+    assert assessment.compatible, assessment.reasons
+    assert decision.can_use_existing_model
+
+
+@pytest.mark.parametrize(
+    "changed, label",
+    [
+        (
+            {
+                "impurities": [
+                    {"site": 1, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 4, "spin": "S=1", "transverse_mev": 2.0},
+                ],
+                "transverse_field_mev": 0.0,
+            },
+            "one fewer impurity",
+        ),
+        (
+            {
+                "impurities": [
+                    {"site": 2, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 4, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 6, "spin": "S=1", "transverse_mev": 2.0},
+                ],
+                "transverse_field_mev": 0.0,
+            },
+            "one impurity moved",
+        ),
+        (
+            {
+                "impurities": [
+                    {"site": 1, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 4, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 6, "spin": "S=3/2", "transverse_mev": 2.0},
+                ],
+                "transverse_field_mev": 0.0,
+            },
+            "different species",
+        ),
+        (
+            {
+                "impurities": [
+                    {"site": 1, "spin": "S=1", "transverse_mev": 1.5},
+                    {"site": 4, "spin": "S=1", "transverse_mev": 2.0},
+                    {"site": 6, "spin": "S=1", "transverse_mev": 2.0},
+                ],
+                "transverse_field_mev": 0.0,
+            },
+            "different anisotropy",
+        ),
+        (
+            {**DMI_TRAINING_CONDITIONS, "transverse_field_mev": 1.0},
+            "a field the model never saw",
+        ),
+    ],
+)
+def test_impurity_artifact_is_refused_when_any_condition_differs(
+    dmi_experiment, changed, label
+):
+    artifact, experiment = dmi_experiment
+    decision = advise_experiment(
+        experiment,
+        manual_cutoff_mev=20.0,
+        artifact_roots=(artifact,),
+        system_type="homogeneous_xxz_j1j2j3_dmi_impurity",
+        view="global",
+        experiment_conditions=changed,
+    )
+    assessment = next(item for item in decision.artifact_assessments if item.path == artifact)
+    assert not assessment.compatible, f"{label} should block reuse"
+    assert any("fixed-condition mismatch" in reason for reason in assessment.reasons)
+
+
+def test_impurity_order_does_not_affect_the_condition_contract():
+    """Listing the same impurities in another order is the same physical chain."""
+    from hamlet.workflow import _canonical_fixed_conditions
+
+    reversed_conditions = {
+        "impurities": list(reversed(DMI_TRAINING_CONDITIONS["impurities"])),
+        "transverse_field_mev": 0.0,
+    }
+    assert _canonical_fixed_conditions(
+        DMI_TRAINING_CONDITIONS
+    ) == _canonical_fixed_conditions(reversed_conditions)
+
+
+def test_systems_without_fixed_conditions_are_unaffected():
+    """Systems whose physics system_type fully determines declare nothing."""
+    from hamlet.workflow import _canonical_fixed_conditions
+
+    assert _canonical_fixed_conditions({"system_type": "homogeneous_heisenberg"}) is None
+    assert _canonical_fixed_conditions({"impurities": [], "transverse_field_mev": 0.0}) is None
+    assert _canonical_fixed_conditions(None) is None

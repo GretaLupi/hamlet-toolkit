@@ -88,6 +88,8 @@ def test_spin_half_impurity_rejects_single_ion_anisotropy():
 
 
 def test_impurity_sites_must_be_distinct_and_in_range():
+    with pytest.raises(ValueError, match="site must be an integer"):
+        SiteImpurity(2.5, "S=1")
     with pytest.raises(ValueError, match="distinct"):
         HomogeneousXXZDMIImpurityChain(
             8, COUPLINGS_MEV, impurities=(transverse(2), transverse(2))

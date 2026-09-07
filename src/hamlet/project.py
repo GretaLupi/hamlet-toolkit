@@ -21,9 +21,11 @@ from .io import load_reference_heisenberg_datasets
 from .simulation import DmrgpySimulator, SpectroscopyProtocol, SpectroscopySimulator
 from .systems import (
     HomogeneousHeisenbergFamily,
+    HomogeneousXXZDMIImpurityFamily,
     HomogeneousXXZLongRangeFamily,
     HomogeneousXXZDMILongRangeFamily,
     InhomogeneousHeisenbergFamily,
+    SiteImpurity,
 )
 from .training import (
     AugmentationCalibrationResult,
@@ -49,6 +51,8 @@ class DatasetGenerationConfig:
     n_samples: int
     coupling_range_mev: tuple[float, float] | None = None
     coupling_ranges_mev: tuple[tuple[float, float], ...] = ()
+    impurities: tuple[SiteImpurity, ...] = ()
+    transverse_field_mev: float = 0.0
     bias_range_mev: tuple[float, float] = (0.0, 100.0)
     bias_points: int = 200
     broadening_mev: float = 0.5
@@ -67,11 +71,13 @@ class DatasetGenerationConfig:
             "homogeneous_heisenberg",
             "homogeneous_xxz_j1j2j3",
             "homogeneous_xxz_j1j2j3_dmi",
+            "homogeneous_xxz_j1j2j3_dmi_impurity",
         }:
             raise ValueError(
                 "generated system must be inhomogeneous_heisenberg, "
                 "homogeneous_heisenberg, homogeneous_xxz_j1j2j3, or "
-                "homogeneous_xxz_j1j2j3_dmi"
+                "homogeneous_xxz_j1j2j3_dmi, or "
+                "homogeneous_xxz_j1j2j3_dmi_impurity"
             )
         if self.n_sites < 2 or self.n_samples < 1:
             raise ValueError("n_sites must be at least 2 and n_samples positive")
@@ -88,6 +94,13 @@ class DatasetGenerationConfig:
             raise ValueError("DMRGPy bond dimensions must be positive")
         if self.backend != "dmrgpy":
             raise ValueError("the configuration interface currently supports backend: dmrgpy")
+        if self.system_type != "homogeneous_xxz_j1j2j3_dmi_impurity" and (
+            self.impurities or self.transverse_field_mev
+        ):
+            raise ValueError(
+                "impurities and transverse_field_mev require "
+                "homogeneous_xxz_j1j2j3_dmi_impurity"
+            )
         # Reuse the simulator-independent protocol validation here so invalid
         # observable contracts fail before a long generation job starts.
         SpectroscopyProtocol.uniform(
@@ -122,18 +135,37 @@ class DatasetGenerationConfig:
                 "J1_xy, J2, J3, Jz"
             )
         if (
-            self.system_type == "homogeneous_xxz_j1j2j3_dmi"
+            self.system_type
+            in {
+                "homogeneous_xxz_j1j2j3_dmi",
+                "homogeneous_xxz_j1j2j3_dmi_impurity",
+            }
             and len(self.coupling_ranges_mev) != 5
         ):
             raise ValueError(
-                "homogeneous_xxz_j1j2j3_dmi requires five ranges ordered "
+                "DMI generation requires five ranges ordered "
                 "J1_xy, J2, J3, Jz, D_z"
             )
         if (
-            self.system_type == "homogeneous_xxz_j1j2j3_dmi"
+            self.system_type
+            in {
+                "homogeneous_xxz_j1j2j3_dmi",
+                "homogeneous_xxz_j1j2j3_dmi_impurity",
+            }
+            and len(self.coupling_ranges_mev) == 5
             and self.coupling_ranges_mev[4][0] < 0.0
         ):
             raise ValueError("D_z magnitude range cannot include negative values")
+        if self.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity":
+            # Constructing the family validates arbitrary user-supplied counts,
+            # positions, species, anisotropies, and the optional field before a
+            # long generation run begins.
+            HomogeneousXXZDMIImpurityFamily(
+                self.n_sites,
+                self.coupling_ranges_mev,
+                impurities=self.impurities,
+                transverse_field_mev=self.transverse_field_mev,
+            )
 
     def to_recipe(self) -> dict[str, Any]:
         values = asdict(self)
@@ -497,9 +529,16 @@ class HamiltonianLearningProject:
             family = HomogeneousXXZLongRangeFamily(
                 recipe.n_sites, recipe.coupling_ranges_mev
             )
-        else:
+        elif recipe.system_type == "homogeneous_xxz_j1j2j3_dmi":
             family = HomogeneousXXZDMILongRangeFamily(
                 recipe.n_sites, recipe.coupling_ranges_mev
+            )
+        else:
+            family = HomogeneousXXZDMIImpurityFamily(
+                recipe.n_sites,
+                recipe.coupling_ranges_mev,
+                impurities=recipe.impurities,
+                transverse_field_mev=recipe.transverse_field_mev,
             )
         protocol = SpectroscopyProtocol.uniform(
             bias_range_mev=recipe.bias_range_mev,
@@ -585,6 +624,11 @@ class HamiltonianLearningProject:
                 "seed": recipe.seed,
                 "output_path": recipe.output_path,
             }
+            if recipe.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity":
+                dataset_detail["impurities"] = [
+                    asdict(impurity) for impurity in recipe.impurities
+                ]
+                dataset_detail["transverse_field_mev"] = recipe.transverse_field_mev
             already_generated = recipe.output_path.exists()
             outputs.append(
                 PlannedOutput(
@@ -1016,6 +1060,28 @@ def _parse_generation_config(
     output_path = _resolve_path(base, output_value)
     coupling_range = values.get("coupling_range_mev")
     coupling_ranges = values.get("coupling_ranges_mev") or []
+    impurity_values = values.get("impurities") or []
+    if not isinstance(impurity_values, (list, tuple)):
+        raise ValueError("dataset.generate.impurities must be a list")
+    impurities: list[SiteImpurity] = []
+    allowed_impurity_keys = {
+        "site",
+        "spin",
+        "axial_mev",
+        "transverse_mev",
+        "transverse_angle_rad",
+    }
+    for index, impurity in enumerate(impurity_values):
+        if not isinstance(impurity, Mapping):
+            raise ValueError(f"impurities[{index}] must be a mapping")
+        unknown = set(impurity) - allowed_impurity_keys
+        if unknown:
+            raise ValueError(
+                f"impurities[{index}] has unknown fields: {sorted(unknown)}"
+            )
+        if "site" not in impurity:
+            raise ValueError(f"impurities[{index}] requires site")
+        impurities.append(SiteImpurity(**impurity))
     return DatasetGenerationConfig(
         system_type=system_type,
         output_path=output_path,
@@ -1029,6 +1095,8 @@ def _parse_generation_config(
         coupling_ranges_mev=tuple(
             tuple(float(item) for item in interval) for interval in coupling_ranges
         ),
+        impurities=tuple(impurities),
+        transverse_field_mev=float(values.get("transverse_field_mev", 0.0)),
         bias_range_mev=tuple(
             float(item) for item in values.get("bias_range_mev", [0.0, 100.0])
         ),
