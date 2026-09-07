@@ -10,6 +10,8 @@ from numpy.typing import ArrayLike
 from ..systems.heisenberg import (
     HomogeneousHeisenbergChain,
     HomogeneousXXZLongRangeChain,
+    HomogeneousXXZDMIFieldChain,
+    HomogeneousXXZDMIImpurityChain,
     HomogeneousXXZDMILongRangeChain,
     InhomogeneousHeisenbergChain,
 )
@@ -19,6 +21,8 @@ HeisenbergSystem = (
     | HomogeneousHeisenbergChain
     | HomogeneousXXZLongRangeChain
     | HomogeneousXXZDMILongRangeChain
+    | HomogeneousXXZDMIFieldChain
+    | HomogeneousXXZDMIImpurityChain
 )
 
 

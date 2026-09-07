@@ -9,6 +9,9 @@ from .heisenberg import (
     HomogeneousXXZDMILongRangeFamily,
     HomogeneousXXZDMIFieldChain,
     HomogeneousXXZDMIFieldFamily,
+    HomogeneousXXZDMIImpurityChain,
+    HomogeneousXXZDMIImpurityFamily,
+    SiteImpurity,
 )
 
 __all__ = [
@@ -22,4 +25,7 @@ __all__ = [
     "HomogeneousXXZDMILongRangeFamily",
     "HomogeneousXXZDMIFieldChain",
     "HomogeneousXXZDMIFieldFamily",
+    "HomogeneousXXZDMIImpurityChain",
+    "SiteImpurity",
+    "HomogeneousXXZDMIImpurityFamily",
 ]

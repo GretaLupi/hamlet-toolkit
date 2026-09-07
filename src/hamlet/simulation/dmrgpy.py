@@ -9,6 +9,7 @@ from ..systems.heisenberg import (
     HomogeneousHeisenbergChain,
     HomogeneousXXZLongRangeChain,
     HomogeneousXXZDMIFieldChain,
+    HomogeneousXXZDMIImpurityChain,
     HomogeneousXXZDMILongRangeChain,
     InhomogeneousHeisenbergChain,
 )
@@ -51,7 +52,14 @@ class DmrgpySimulator:
                 "DMRGPy simulation requires the 'simulation' optional dependency"
             ) from exc
 
-        chain = spinchain.Spin_Chain(["S=1/2"] * system.n_sites)
+        # Systems that mix spin magnitudes expose ``site_spins``; everything
+        # else is a uniform spin-1/2 chain.
+        site_spins = getattr(system, "site_spins", None)
+        if site_spins is None:
+            site_spins = ("S=1/2",) * system.n_sites
+        elif len(site_spins) != system.n_sites:
+            raise ValueError("site_spins must give one spin per site")
+        chain = spinchain.Spin_Chain(list(site_spins))
         hamiltonian = 0
         if isinstance(system, InhomogeneousHeisenbergChain):
             interactions = (
@@ -129,6 +137,54 @@ class DmrgpySimulator:
             if b_x:
                 for i in range(system.n_sites):
                     hamiltonian += -b_x * chain.Sx[i]
+            interactions = ()
+        elif isinstance(system, HomogeneousXXZDMIImpurityChain):
+            j1_xy, j2, j3, jz, d_z = mev_to_dmrgpy_energy(system.as_array())
+            for i in range(system.n_sites - 1):
+                hamiltonian += j1_xy * (
+                    chain.Sx[i] * chain.Sx[i + 1]
+                    + chain.Sy[i] * chain.Sy[i + 1]
+                )
+                hamiltonian += jz * chain.Sz[i] * chain.Sz[i + 1]
+                hamiltonian += d_z * (
+                    chain.Sx[i] * chain.Sy[i + 1]
+                    - chain.Sy[i] * chain.Sx[i + 1]
+                )
+            for distance, coupling in ((2, j2), (3, j3)):
+                for i in range(system.n_sites - distance):
+                    hamiltonian += coupling * (
+                        chain.Sx[i] * chain.Sx[i + distance]
+                        + chain.Sy[i] * chain.Sy[i + distance]
+                        + chain.Sz[i] * chain.Sz[i + distance]
+                    )
+            # Single-ion anisotropy on each impurity. The axial term commutes
+            # with total S^z and so can never expose D_z; the transverse term
+            # changes S^z by two and breaks the U(1) symmetry that makes a
+            # collinear DM vector removable. Two such impurities at distinct
+            # sites are needed, because the gauge rotation turns one impurity's
+            # in-plane axis by a single angle that a global rotation about z
+            # undoes -- see HomogeneousXXZDMIImpurityChain.
+            for impurity in system.impurities:
+                site = impurity.site
+                axial = float(mev_to_dmrgpy_energy(impurity.axial_mev))
+                transverse = float(mev_to_dmrgpy_energy(impurity.transverse_mev))
+                if axial:
+                    hamiltonian += axial * chain.Sz[site] * chain.Sz[site]
+                if transverse:
+                    # E [cos(2phi) (Sx^2 - Sy^2) + sin(2phi) (Sx Sy + Sy Sx)],
+                    # an in-plane anisotropy whose axes sit at phi from x.
+                    angle = 2.0 * impurity.transverse_angle_rad
+                    cos, sin = float(np.cos(angle)), float(np.sin(angle))
+                    if cos:
+                        hamiltonian += (transverse * cos) * (
+                            chain.Sx[site] * chain.Sx[site]
+                            - chain.Sy[site] * chain.Sy[site]
+                        )
+                    if sin:
+                        hamiltonian += (transverse * sin) * (
+                            chain.Sx[site] * chain.Sy[site]
+                            + chain.Sy[site] * chain.Sx[site]
+                        )
             interactions = ()
         else:
             raise TypeError(f"unsupported system type: {type(system).__name__}")
