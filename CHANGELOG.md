@@ -15,6 +15,15 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- Sample-design screening for DMI: `DmiDesign`, `screen_dmi_designs`,
+  `measure_dmi_imprint` and `transverse_impurities`. Given a chain length,
+  exchange scale and candidate impurity arrangements, this simulates a gauge
+  pair per candidate and ranks them by how well each exposes `D_z`, with
+  verdicts calibrated against the `D_z` skill models trained on such designs
+  actually reached. Designs with no U(1)-breaking mechanism are identified from
+  the symmetry rule and reported without being simulated, so sweeping counts
+  and positions costs nothing. Two simulations per candidate replaces a
+  training set per candidate.
 - Measured condition sensitivity for the published DMI model, on 1600 fresh
   chains across eight perturbed configurations. A 10% error in the impurity
   transverse anisotropy removes all `D_z` skill (0.50 -> 0.02); 20% is worse

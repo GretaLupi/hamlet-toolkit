@@ -12,6 +12,17 @@ from .systems import (
     HomogeneousXXZDMILongRangeFamily,
     HomogeneousXXZDMIFieldChain,
     HomogeneousXXZDMIFieldFamily,
+    HomogeneousXXZDMIImpurityChain,
+    HomogeneousXXZDMIImpurityFamily,
+    SiteImpurity,
+)
+from .dmi_design import (
+    DmiDesign,
+    DmiImprint,
+    format_screening_table,
+    measure_dmi_imprint,
+    screen_dmi_designs,
+    transverse_impurities,
 )
 from .project import (
     DatasetGenerationConfig,
@@ -45,6 +56,15 @@ __all__ = [
     "HomogeneousXXZDMILongRangeFamily",
     "HomogeneousXXZDMIFieldChain",
     "HomogeneousXXZDMIFieldFamily",
+    "HomogeneousXXZDMIImpurityChain",
+    "HomogeneousXXZDMIImpurityFamily",
+    "SiteImpurity",
+    "DmiDesign",
+    "DmiImprint",
+    "measure_dmi_imprint",
+    "screen_dmi_designs",
+    "transverse_impurities",
+    "format_screening_table",
     "InhomogeneousHeisenbergFamily",
     "HamiltonianLearningProject",
     "DatasetGenerationConfig",

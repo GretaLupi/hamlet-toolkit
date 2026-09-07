@@ -1,12 +1,26 @@
-# Measuring DMI in a spin chain: what the experiment has to provide
+# Measuring DMI: designing a sample that can
 
-This is a specification for experimentalists. It says what chain to build, what
-to measure, how precisely, and — importantly — what is not recoverable no
-matter how good the data is.
+DMI is the one coupling this package cannot simply be pointed at. A DM vector
+along `z` is *exactly* unidentifiable in a conventional chain, so measuring it
+is a question of sample design before it is a question of analysis.
+
+This guide is therefore organised as:
+
+1. **The rule** — one criterion that decides whether any design can work.
+2. **Screening your own design** — the package computes this for your chain,
+   your length, your impurities, before you generate anything.
+3. **A worked example** — one configuration taken end to end, as a reference
+   point rather than a prescription.
+4. **Precision requirements** — how exactly the impurities must be known, and
+   what it costs to be wrong.
+
+If you already have impurities characterised, go to
+[§4 Screening](#4-screening-your-own-design) and put your measured values in.
+If you are choosing what to build, screening is also how you compare candidates
+cheaply — two simulations each, instead of a training set each.
 
 Every number here was measured on simulated exact-diagonalisation chains with
-this package, not estimated. Where a claim is a limitation, the measurement
-behind it is quoted.
+this package, not estimated.
 
 ---
 
@@ -85,7 +99,80 @@ learning curve was flat (0.24 → 0.21 → 0.24 as chains tripled), so more
 measurement time cannot rescue it. It also needs `B/J` of order 10%, which is
 ~8.6 T for a few-meV chain and an unreachable ~43 T for a 35 meV chain.
 
-## 4. The recommended sample
+## 4. Screening your own design
+
+Do not take the configuration in §5 as a requirement. Which impurity
+arrangement is best depends on your chain length, your exchange scale, and what
+species you can actually place — so the package computes it for your case. It
+simulates a **gauge pair**: two chains sharing `sqrt(J1_xy^2 + D_z^2)` that
+differ only in how it splits between exchange and DMI. A design that cannot
+separate that pair cannot yield `D_z`, whatever model is trained on it.
+
+Two simulations per candidate, against thousands of chains for a training set.
+
+```python
+from hamlet import DmiDesign, screen_dmi_designs, transverse_impurities
+from hamlet import format_screening_table
+from hamlet.simulation import DmrgpySimulator, SpectroscopyProtocol
+
+protocol = SpectroscopyProtocol.uniform(
+    (0.0, 20.0), points=81, broadening_mev=0.25,
+    observable="total_spin", observable_weights=(1.0, 1.0, 1.0),
+    output_quantity="didv",
+)
+
+# Your chain: length, exchange scale, and the DMI you are trying to resolve.
+# Then the candidate impurity arrangements you could actually build.
+candidates = [
+    DmiDesign(n_sites=10, j_eff_mev=4.0, d_z_mev=1.2, jz_mev=4.0,
+              impurities=transverse_impurities(sites, e_mev, spin="S=1",
+                                               axial_mev=1.4),
+              label=f"{len(sites)} imp at {sites}, E={e_mev}")
+    for sites in ([2, 7], [1, 5, 8], [0, 3, 6, 9])
+    for e_mev in (1.0, 2.0)
+]
+
+results = screen_dmi_designs(candidates, DmrgpySimulator(dynamics_mode="ED"), protocol)
+print(format_screening_table(results))
+```
+
+Each result carries an `imprint` and a `verdict` — `hidden`, `too weak`,
+`marginal`, `promising`, `strong`. Those are not invented thresholds: they are
+anchored to the `D_z` skill that models trained on such designs actually
+reached, which `format_screening_table` prints alongside the results so you can
+judge for yourself.
+
+Designs with no U(1)-breaking mechanism are recognised from the symmetry rule
+and reported as `hidden` **without being simulated**, so sweeping impurity
+counts and positions is cheap. Pass `skip_symmetric=False` to verify that
+prediction against the simulator instead of trusting it.
+
+`DmiDesign.breaks_symmetry` gives the free structural answer on its own, and
+`measure_dmi_imprint` screens a single design.
+
+### Once you have a design
+
+Put the same impurities into a project config and the workflow is ordinary:
+
+```bash
+cp examples/heisenberg_xxz_dmi_impurities_l8.yaml my_chain.yaml
+# edit n_sites, coupling_ranges_mev, and the impurities block
+hamlet generate my_chain.yaml --dry-run   # cost first
+hamlet run my_chain.yaml
+```
+
+The `impurities` block takes any number of impurities at arbitrary distinct
+sites, each with its own `spin`, `axial_mev`, `transverse_mev` and
+`transverse_angle_rad`, so a measured configuration maps onto it directly. Any
+chain length the simulator can handle is allowed; cost grows steeply with it,
+and with substituted spins above 1/2.
+
+## 5. A worked example
+
+This is the configuration taken end to end in this package, and the one the
+published reference artifact uses. It is a **reference point, not a
+requirement** — screen your own candidates in §4 rather than adopting it
+blindly, especially if your exchange scale or available species differ.
 
 - **Host chain:** 8 spin-1/2 sites, open (not a ring).
 - **Exchange:** weakly coupled, `J1_xy` and `Jz` in **2–6 meV**. This matters:
@@ -99,7 +186,7 @@ measurement time cannot rescue it. It also needs `B/J` of order 10%, which is
 - **Transverse anisotropy:** `E` ≈ **2 meV** per impurity.
 - **Magnetic field:** **none.**
 
-## 5. Precision requirements — the strictest part of this spec
+## 6. Precision requirements
 
 A model is trained for one exact impurity configuration. The cost of a mismatch
 was measured by running the trained model on 200 fresh chains per perturbed
@@ -140,7 +227,7 @@ A wrong answer therefore arrives with confident-looking inputs and no warning.
 refuses reuse on any difference — that check is the only defence, and it depends
 on the conditions you declare being true.
 
-## 6. Pre-characterisation checklist
+## 7. Pre-characterisation checklist
 
 Before assembling the chain, measure each impurity species **in isolation**:
 
@@ -155,7 +242,7 @@ And record for the assembled chain:
 - [ ] exact impurity site indices
 - [ ] confirmation that no external field was applied
 
-## 7. Measurement protocol
+## 8. Measurement protocol
 
 | quantity | requirement |
 |---|---|
@@ -169,7 +256,7 @@ And record for the assembled chain:
 The bias window and resolution are matched to a 2–6 meV chain, where the
 excitations sit at a few meV. A stiffer chain needs both rescaled.
 
-## 8. What you get, and what you do not
+## 9. What you get, and what you do not
 
 Recovered on 3000 simulated L=8 chains, five held-out splits, all resolved
 against a training-mean baseline:
@@ -197,22 +284,5 @@ produced the training data. They quantify the inverse problem, not whether the
 model Hamiltonian describes any particular material, and the ensemble spread
 reported at inference measures agreement between seeds rather than distance
 from truth.
-
-## 9. Running it
-
-```bash
-# 1. copy the example and edit the impurity block to your measured values
-cp examples/heisenberg_xxz_dmi_impurities_l8.yaml my_chain.yaml
-
-# 2. check the plan and cost before committing compute
-hamlet generate my_chain.yaml --dry-run
-
-# 3. generate, train, and inspect
-hamlet run my_chain.yaml
-```
-
-The `impurities` block takes any number of impurities at arbitrary distinct
-sites, each with its own `spin`, `axial_mev`, `transverse_mev` and
-`transverse_angle_rad`, so a real measured configuration maps onto it directly.
 
 See [user-guide.md](user-guide.md) for the general workflow.
