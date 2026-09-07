@@ -182,6 +182,14 @@ def build_parser() -> argparse.ArgumentParser:
     advise.add_argument("--max-test-mae", type=float, help="optional artifact held-out test-MAE limit [meV]")
     advise.add_argument("--overwrite", action="store_true")
 
+    gui = commands.add_parser(
+        "gui",
+        help="open a local browser interface for these workflows",
+    )
+    gui.add_argument("--port", type=int, default=8765)
+    gui.add_argument("--host", default="127.0.0.1", help="localhost by default; it runs local compute")
+    gui.add_argument("--no-browser", action="store_true", help="print the URL instead of opening it")
+
     screen = commands.add_parser(
         "screen-dmi",
         help="rank candidate impurity designs by how well each exposes DMI",
@@ -290,6 +298,11 @@ def _run_screen_dmi(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "gui":
+        from .gui import serve
+
+        serve(host=args.host, port=args.port, open_browser=not args.no_browser)
+        return 0
     if args.command == "screen-dmi":
         return _run_screen_dmi(args)
     if args.command == "modes":

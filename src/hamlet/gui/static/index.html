@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HamLeT</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1>HamLeT</h1>
+  <p class="sub">Hamiltonian Learning Toolkit — learn spin-chain Hamiltonians from STM spectroscopy</p>
+</header>
+
+<nav id="tabs">
+  <button data-panel="start" class="active">Start here</button>
+  <button data-panel="data">My data</button>
+  <button data-panel="reuse">Can I reuse a model?</button>
+  <button data-panel="models">Existing models</button>
+  <button data-panel="train">Train a model</button>
+  <button data-panel="dmi">DMI sample design</button>
+  <button data-panel="jobs">Running <span id="job-badge" hidden>0</span></button>
+</nav>
+
+<main>
+
+<!-- ---------------------------------------------------------------- start -->
+<section id="panel-start" class="panel active">
+  <h2>What do you have?</h2>
+  <p class="lead">
+    Pick the row that matches your situation. Each says what it will do, what it
+    needs from you, and how long it takes, before anything happens.
+  </p>
+  <div id="situations" class="cards"></div>
+
+  <h3>The idea in one paragraph</h3>
+  <p>
+    A spin chain's excitation spectrum depends on its exchange couplings. HamLeT
+    simulates many chains with known couplings, trains a model to invert that
+    mapping, and applies it to your measured dI/dV. Because the model is trained
+    for one specific physical setup, every model carries a
+    <strong>contract</strong> — chain length, bias window, observable, parameter
+    ranges — and the package refuses to apply a model outside it rather than
+    returning a confident wrong answer.
+  </p>
+</section>
+
+<!-- ----------------------------------------------------------------- data -->
+<section id="panel-data" class="panel">
+  <h2>Look at a measurement</h2>
+  <p class="lead">
+    Reads a per-site spectroscopy file and reports what the workflow will make
+    of it. Nothing is trained or changed.
+  </p>
+  <div class="row">
+    <input type="text" id="data-path" placeholder="/path/to/measurement.csv or .npz or .dat" size="60">
+    <button id="data-go" class="primary">Inspect</button>
+  </div>
+  <p class="hint">
+    Accepts a canonical measurement NPZ, an experiment manifest, or a CSV with
+    site / bias / dI/dV columns.
+  </p>
+  <div id="data-out"></div>
+</section>
+
+<!-- ---------------------------------------------------------------- reuse -->
+<section id="panel-reuse" class="panel">
+  <h2>Can I reuse an existing model?</h2>
+  <p class="lead">
+    Compares your measurement against each published model's contract and
+    answers reuse / retrain / regenerate — listing the reason a model was
+    rejected, so you can see exactly what does not match.
+  </p>
+  <div class="row">
+    <input type="text" id="reuse-path" placeholder="/path/to/measurement.csv" size="48">
+    <label>cutoff <input type="number" id="reuse-cutoff" value="20" step="0.5" style="width:6em"> meV</label>
+    <button id="reuse-go" class="primary">Ask</button>
+  </div>
+  <p class="hint">
+    The cutoff is the upper bias limit you choose to analyse. It is part of the
+    contract and is never substituted: a model trained to 20 meV is not applied
+    to a 60 meV window.
+  </p>
+  <div id="reuse-out"></div>
+</section>
+
+<!-- --------------------------------------------------------------- models -->
+<section id="panel-models" class="panel">
+  <h2>Published models</h2>
+  <p class="lead">
+    What each model was trained on, how accurate it is, and the conditions under
+    which it must not be reused.
+  </p>
+  <div id="models-out"></div>
+  <div id="model-card-out"></div>
+</section>
+
+<!-- ---------------------------------------------------------------- train -->
+<section id="panel-train" class="panel">
+  <h2>Train a model for your own system</h2>
+  <p class="lead">
+    Start from an example configuration, edit it, then <em>plan</em> the run.
+    Planning writes nothing and shows every output plus a compute estimate, so
+    you can see the cost before committing hours.
+  </p>
+  <div class="row">
+    <select id="train-example"></select>
+    <button id="train-load">Load</button>
+    <button id="train-plan" class="primary">Plan (no changes)</button>
+    <button id="train-save">Save edits</button>
+  </div>
+  <textarea id="train-text" spellcheck="false" rows="20"></textarea>
+  <div id="train-out"></div>
+  <div class="danger-zone">
+    <button id="train-run">Run this configuration</button>
+    <span class="hint">Generation and training take hours. Plan first.</span>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------------ dmi -->
+<section id="panel-dmi" class="panel">
+  <h2>DMI sample design</h2>
+  <p class="lead">
+    DMI along <code>z</code> is <strong>exactly</strong> unmeasurable in a
+    conventional chain — a symmetry hides it, verified to one part in
+    10<sup>13</sup>. So measuring it is a question of sample design, answered
+    before any data is taken. This ranks candidate impurity arrangements by
+    whether they can expose DMI at all.
+  </p>
+  <div class="row">
+    <input type="text" id="dmi-path" placeholder="path to a screening YAML" size="52">
+    <button id="dmi-preview">Check symmetry (instant)</button>
+    <button id="dmi-run" class="primary">Run screening</button>
+  </div>
+  <p class="hint">
+    The symmetry check is free and rules out hopeless designs immediately.
+    Running the screening simulates a gauge pair per surviving candidate, about
+    a minute each. Start from <code>examples/dmi_screening.yaml</code>.
+  </p>
+  <div id="dmi-out"></div>
+</section>
+
+<!-- ----------------------------------------------------------------- jobs -->
+<section id="panel-jobs" class="panel">
+  <h2>Running and finished work</h2>
+  <p class="lead">
+    Long runs happen in the background. Their output appears here as it is
+    produced; you can leave this page and come back.
+  </p>
+  <div id="jobs-out"></div>
+</section>
+
+</main>
+<script src="/app.js"></script>
+</body>
+</html>

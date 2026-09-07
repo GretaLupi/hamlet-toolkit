@@ -2,6 +2,25 @@
 
 # Using HamLeT
 
+## The browser interface
+
+If you are not sure which workflow applies to your situation -- the usual
+problem, and not only for new users -- start here instead of with the CLI:
+
+```bash
+hamlet gui
+```
+
+It presents the package as a set of situations ("I have measured data and want
+to know if an existing model fits it") rather than a set of commands, and every
+screen states what it is about to do, what it needs, and how long it takes
+before doing it. Everything below is available through it, and the interface
+calls the same library functions, so nothing is available in one and not the
+other.
+
+The rest of this guide covers the command line, which is what you want for
+scripted or cluster runs.
+
 This is the complete path from raw per-site spectroscopy files to an inferred
 Hamiltonian: import your experiment, choose a physically usable cutoff, let
 the package decide whether to reuse, retrain, or generate a model, then read

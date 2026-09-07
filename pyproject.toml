@@ -71,6 +71,13 @@ hamlet-train-cutoff-bank = "hamlet.training.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+# The browser interface is served from files on disk, so they have to be in the
+# wheel. Without this the GUI imports fine and then 404s on every page, which
+# is exactly the kind of install-only failure tests/test_packaging.py exists to
+# catch.
+[tool.setuptools.package-data]
+"hamlet.gui" = ["static/*.html", "static/*.css", "static/*.js"]
+
 [tool.ruff]
 line-length = 100
 

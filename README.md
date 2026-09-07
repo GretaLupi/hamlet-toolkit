@@ -80,6 +80,19 @@ name.)
 Physical energy inputs and outputs are always in meV. See
 [docs/user-guide.md](docs/user-guide.md) for the complete workflow.
 
+### The easiest way in
+
+```bash
+hamlet gui
+```
+
+Opens a local browser interface organised around what you have rather than
+which command to run: inspect a measurement, ask whether an existing model
+fits it, browse the published models and their contracts, plan a training run
+before it costs anything, and screen impurity designs for measuring DMI. Long
+runs happen in the background with their output streamed to the page. It binds
+to localhost and nothing leaves your machine.
+
 ## Install
 
 ```bash

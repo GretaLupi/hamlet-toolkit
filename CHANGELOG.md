@@ -15,6 +15,16 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- A local browser interface, `hamlet gui`, built on the standard library so a
+  GUI cannot break the science path with a new dependency. It is organised
+  around the user's situation rather than the command names, since choosing the
+  right workflow is the package's real difficulty: inspect a measurement and
+  see whether it is structurally usable, ask the advisor which published models
+  fit and why each was rejected, browse model contracts and cards, plan a
+  training run with its compute cost before running it, and screen DMI sample
+  designs. Long runs execute in the background with their output streamed to
+  the page. Binds to localhost; refuses path traversal; static assets are
+  covered by packaging guards so an installed wheel is not served a blank page.
 - Sample-design screening for DMI: `DmiDesign`, `screen_dmi_designs`,
   `measure_dmi_imprint` and `transverse_impurities`. Given a chain length,
   exchange scale and candidate impurity arrangements, this simulates a gauge
