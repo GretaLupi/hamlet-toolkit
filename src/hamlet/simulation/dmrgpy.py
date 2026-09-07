@@ -185,6 +185,14 @@ class DmrgpySimulator:
                             chain.Sx[site] * chain.Sy[site]
                             + chain.Sy[site] * chain.Sx[site]
                         )
+            # An optional transverse field, so the two symmetry-breaking
+            # mechanisms can be combined. They are independent: the field is
+            # rotated into a spiral by the gauge, the impurities have their
+            # relative in-plane orientation changed.
+            b_x = float(mev_to_dmrgpy_energy(system.transverse_field_mev))
+            if b_x:
+                for i in range(system.n_sites):
+                    hamiltonian += -b_x * chain.Sx[i]
             interactions = ()
         else:
             raise TypeError(f"unsupported system type: {type(system).__name__}")

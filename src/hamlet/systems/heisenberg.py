@@ -463,6 +463,7 @@ class HomogeneousXXZDMIImpurityChain:
     n_sites: int
     parameters_mev: ArrayLike
     impurities: tuple[SiteImpurity, ...] = ()
+    transverse_field_mev: float = 0.0
 
     def __post_init__(self) -> None:
         values = np.asarray(self.parameters_mev, dtype=float)
@@ -474,6 +475,12 @@ class HomogeneousXXZDMIImpurityChain:
             )
         if values[4] < 0.0:
             raise ValueError("D_z is a magnitude and must be non-negative")
+        if not np.isfinite(self.transverse_field_mev):
+            raise ValueError("transverse_field_mev must be finite")
+        if self.transverse_field_mev < 0.0:
+            raise ValueError(
+                "transverse_field_mev is a magnitude along +x and must be non-negative"
+            )
         impurities = tuple(self.impurities)
         sites = [impurity.site for impurity in impurities]
         if any(not 0 <= site < self.n_sites for site in sites):
@@ -482,6 +489,9 @@ class HomogeneousXXZDMIImpurityChain:
             raise ValueError("impurity sites must be distinct")
         object.__setattr__(self, "parameters_mev", values.copy())
         object.__setattr__(self, "impurities", impurities)
+        object.__setattr__(
+            self, "transverse_field_mev", float(self.transverse_field_mev)
+        )
 
     @property
     def parameter_names(self) -> tuple[str, ...]:
@@ -497,15 +507,22 @@ class HomogeneousXXZDMIImpurityChain:
         return tuple(spins)
 
     @property
+    def n_transverse_impurities(self) -> int:
+        """How many impurities actually break the U(1) symmetry."""
+        return sum(1 for imp in self.impurities if imp.transverse_mev)
+
+    @property
     def exposes_dmi(self) -> bool:
         """Whether this configuration can constrain ``D_z`` at all.
 
-        Requires at least two impurities carrying transverse anisotropy at
-        distinct sites. With fewer, the Hamiltonian remains unitarily
-        equivalent to one with ``D_z = 0`` and no amount of data recovers it;
-        see the class docstring.
+        Either mechanism suffices, and they are independent: a transverse field
+        is rotated into a spiral, while two transverse impurities at distinct
+        sites have their relative in-plane orientation changed. A single
+        transverse impurity with no field is *not* enough, because one
+        in-plane axis is restored by a global rotation about z; see the class
+        docstring.
         """
-        return sum(1 for imp in self.impurities if imp.transverse_mev) >= 2
+        return bool(self.transverse_field_mev) or self.n_transverse_impurities >= 2
 
     @property
     def gauge_invariant_j1_mev(self) -> float:
@@ -531,6 +548,7 @@ class HomogeneousXXZDMIImpurityFamily:
     n_sites: int
     parameter_ranges_mev: tuple[tuple[float, float], ...]
     impurities: tuple[SiteImpurity, ...] = ()
+    transverse_field_mev: float = 0.0
 
     def __post_init__(self) -> None:
         if self.n_sites < 4:
@@ -547,6 +565,7 @@ class HomogeneousXXZDMIImpurityFamily:
             self.n_sites,
             [low for low, _ in self.parameter_ranges_mev],
             impurities=tuple(self.impurities),
+            transverse_field_mev=self.transverse_field_mev,
         )
 
     @property
@@ -556,5 +575,8 @@ class HomogeneousXXZDMIImpurityFamily:
     def sample(self, rng: np.random.Generator) -> HomogeneousXXZDMIImpurityChain:
         values = [rng.uniform(low, high) for low, high in self.parameter_ranges_mev]
         return HomogeneousXXZDMIImpurityChain(
-            self.n_sites, values, impurities=tuple(self.impurities)
+            self.n_sites,
+            values,
+            impurities=tuple(self.impurities),
+            transverse_field_mev=self.transverse_field_mev,
         )
