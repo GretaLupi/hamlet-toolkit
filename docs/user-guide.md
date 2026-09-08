@@ -49,6 +49,17 @@ Your answers are saved as a configuration file, so the same run can be repeated
 or submitted to a cluster with `hamlet run <path>`. The page shows that path;
 you never have to open the file.
 
+When the run finishes, the model appears on the **Existing models** page marked
+*you trained this*, and the reuse advisor considers it alongside the published
+ones.
+
+A note on the sample check: simulation cost is set by how many correlators are
+evaluated, which is one per site per observable component, and *not* by the bias
+resolution -- 81 bias points cost the same as 21. The preview therefore
+simulates a few representative sites rather than the whole chain, and switches
+from exact diagonalisation to DMRG once the basis grows past a few thousand
+states. It says which sites and which method it used.
+
 ### Stopping it
 
 The interface is a server, so **closing the browser tab does not stop it** --

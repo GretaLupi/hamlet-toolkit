@@ -894,6 +894,36 @@ class HamiltonianLearningProject:
         _write_json(calibration_dir / "summary.json", summary)
         return dict(self.calibrations)
 
+    def prepare_training_data_without_experiment(self):
+        """Prepare training data when there is no measurement to calibrate to.
+
+        Training a model before an experiment exists is an ordinary thing to
+        want -- building a bank of models in advance, or producing a reference
+        artifact -- but the calibrated path cannot serve it: augmentation is
+        tuned to match a specific measurement's noise and broadening, and with
+        no measurement there is nothing to match.
+
+        So no augmentation is applied, and the manually chosen cutoff is used
+        rather than a selected one. A model trained this way has seen only
+        clean simulated spectra, which is worth knowing when it later meets a
+        real measurement.
+        """
+        if self.config.manual_cutoff_mev is None:
+            raise RuntimeError(
+                "training without an experiment needs manual_cutoff_mev, since "
+                "there is no measurement to select a cutoff against"
+            )
+        cutoff = float(self.config.manual_cutoff_mev)
+        self.selected_cutoff_mev = cutoff
+        self.prepared = prepare_training_dataset(
+            self.load_dataset(),
+            TrainingPreprocessingConfig(
+                bias_cutoff_mev=cutoff,
+                output_points=self.config.output_points,
+            ),
+        )
+        return self.prepared
+
     def prepare_training_data(self):
         if self.selected_cutoff_mev is None or self.selected_augmentation is None:
             raise RuntimeError("calibrate_preprocessing must run before preparation")

@@ -171,14 +171,17 @@ async function loadModels() {
   const out = el("models-out");
   busy(out, "Reading published models…");
   try {
-    const { models, root } = await api("/api/models");
+    const { models } = await api("/api/models");
     if (!models.length) {
-      out.innerHTML = `<div class="box">No published models in <code>${esc(root)}</code>.</div>`;
+      out.innerHTML = `<div class="box">No models found yet. Train one on the
+        <em>Train a model</em> page and it will appear here.</div>`;
       return;
     }
     out.innerHTML = models.map((m) => `
       <div class="box">
-        <div class="verdict">${esc(m.name)}</div>
+        <div class="verdict">${esc(m.label || m.name)}
+          <span class="pill ${m.origin === "yours" ? "finished" : "running"}">${
+            m.origin === "yours" ? "you trained this" : "published"}</span></div>
         <table>
           <tr><th>System</th><td>${esc(m.system_type)} · ${esc(m.view)} view · L = ${m.n_sites}</td></tr>
           <tr><th>Bias window</th><td>0 to ${num(m.bias_cutoff_mev, 1)} meV · observable ${esc(m.observable)}</td></tr>
@@ -188,7 +191,7 @@ async function loadModels() {
             `${esc(p.name)}${p.trained_range_mev ? ` <span class="hint">[${p.trained_range_mev.join(", ")}]</span>` : ""}`).join(" · ")}</td></tr>
           <tr><th>Must match exactly</th><td>${conditionsText(m.fixed_conditions)}</td></tr>
         </table>
-        ${m.has_model_card ? `<button data-card="${esc(m.name)}">Read the model card</button>` : ""}
+        ${m.has_model_card ? `<button data-card="${esc(m.label || m.name)}">Read the model card</button>` : ""}
       </div>`).join("");
     out.querySelectorAll("button[data-card]").forEach((b) =>
       b.addEventListener("click", () => showCard(b.dataset.card)));
@@ -396,7 +399,7 @@ el("f-preview").addEventListener("click", async () => {
   const out = el("f-preview-out");
   busy(out, "Simulating sample chains… this takes about a minute each.");
   try {
-    const job = await api("/api/preview-samples", { form: readForm(), n_samples: 2 });
+    const job = await api("/api/preview-samples", { form: readForm(), n_samples: 1 });
     pollJob(job.job_id,
       (done) => {
         if (done.status === "failed") {
@@ -409,9 +412,19 @@ el("f-preview").addEventListener("click", async () => {
           <p class="hint">${r.target_names.map((n, j) =>
             `${esc(n)} = ${sample.couplings_mev[j].toFixed(2)}`).join(" · ")} meV</p>
           ${sampleSvg(r.bias_mev, sample.sites)}`).join("") +
-          `<p class="hint">One line per site. If the features sit at the very
-           edge of the window, or look like smooth bumps with no structure,
-           adjust the bias range or the broadening before running.</p></div>`;
+          `<p class="hint">
+             ${r.showing_all_sites
+               ? `One line per site, all ${r.n_sites} of them.`
+               : `One line per site, showing sites ${r.evaluated_sites.join(", ")}
+                  of ${r.n_sites} — a subset, because cost scales with the
+                  number of sites evaluated, not with the bias resolution.`}
+             Simulated with ${esc(r.dynamics_mode)}${
+               r.dynamics_mode === "DMRG"
+                 ? " (approximate; the full run uses the same setting)"
+                 : " (exact)"} at a basis size of ${r.hilbert_dimension}.
+             If the features sit at the very edge of the window, or look like
+             smooth bumps with no structure, adjust the bias range or the
+             broadening before running.</p></div>`;
       },
       (job) => { if (job.lines.length) busy(out, job.lines[job.lines.length - 1]); });
   } catch (e) { showError(out, e); }

@@ -16,6 +16,41 @@ from ..systems.heisenberg import (
 
 DMRGPY_ENERGY_UNIT_MEV = 10.0
 
+# Above this many basis states, exact diagonalisation stops being the cheap
+# option and DMRG is the better trade. The cost that matters is the Hilbert
+# dimension, not the site count: eight spin-1/2 sites is 256 states, but eight
+# sites carrying three spin-1 impurities is 3456.
+ED_DIMENSION_LIMIT = 2048
+
+
+def site_spins_of(system) -> tuple[str, ...]:
+    """Per-site spin labels, defaulting to a uniform spin-1/2 chain."""
+    spins = getattr(system, "site_spins", None)
+    if spins is None:
+        return ("S=1/2",) * int(system.n_sites)
+    return tuple(spins)
+
+
+def hilbert_dimension(system) -> int:
+    """Size of the many-body basis, i.e. the exact-diagonalisation cost."""
+    from ..systems import spin_multiplicity
+
+    dimension = 1
+    for label in site_spins_of(system):
+        dimension *= spin_multiplicity(label)
+    return dimension
+
+
+def recommended_dynamics_mode(system, *, limit: int = ED_DIMENSION_LIMIT) -> str:
+    """``"ED"`` while exact diagonalisation is affordable, else ``"DMRG"``.
+
+    ED is exact and preferable whenever it fits. DMRG is approximate -- its
+    accuracy depends on the bond dimension -- so this is a speed/fidelity
+    trade that a caller should make deliberately, which is why it is a separate
+    function rather than a default buried in the simulator.
+    """
+    return "ED" if hilbert_dimension(system) <= limit else "DMRG"
+
 
 def mev_to_dmrgpy_energy(values):
     """Convert physical meV to the DMRGPy convention used by this project."""
@@ -33,10 +68,24 @@ class DmrgpySimulator:
     kpm_max_bond_dimension: int = 20
     max_relative_imaginary_residue: float = 1e-6
     dynamics_mode: str = "DMRG"
+    # Which sites to evaluate correlators on. None means every site, which is
+    # what a dataset needs. A subset exists for previews, where the cost is
+    # linear in the number of correlators and a few representative traces
+    # answer the question just as well.
+    evaluate_sites: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.max_bond_dimension < 1 or self.kpm_max_bond_dimension < 1:
             raise ValueError("DMRGPy bond dimensions must be positive")
+        if self.evaluate_sites is not None:
+            sites = tuple(int(site) for site in self.evaluate_sites)
+            if not sites:
+                raise ValueError("evaluate_sites cannot be empty")
+            if len(set(sites)) != len(sites):
+                raise ValueError("evaluate_sites must not repeat a site")
+            if any(site < 0 for site in sites):
+                raise ValueError("evaluate_sites must be non-negative")
+            object.__setattr__(self, "evaluate_sites", sites)
         if not 0.0 < self.max_relative_imaginary_residue < 1.0:
             raise ValueError("max_relative_imaginary_residue must lie between zero and one")
         if self.dynamics_mode not in {"DMRG", "ED"}:
@@ -54,10 +103,8 @@ class DmrgpySimulator:
 
         # Systems that mix spin magnitudes expose ``site_spins``; everything
         # else is a uniform spin-1/2 chain.
-        site_spins = getattr(system, "site_spins", None)
-        if site_spins is None:
-            site_spins = ("S=1/2",) * system.n_sites
-        elif len(site_spins) != system.n_sites:
+        site_spins = site_spins_of(system)
+        if len(site_spins) != system.n_sites:
             raise ValueError("site_spins must give one spin per site")
         chain = spinchain.Spin_Chain(list(site_spins))
         hamiltonian = 0
@@ -211,7 +258,16 @@ class DmrgpySimulator:
         output_bias = np.asarray(protocol.bias_mev, dtype=float)
         backend_bias = mev_to_dmrgpy_energy(output_bias)
         backend_broadening = float(mev_to_dmrgpy_energy(protocol.broadening_mev))
-        for site in range(system.n_sites):
+        if self.evaluate_sites is None:
+            sites = tuple(range(system.n_sites))
+        else:
+            if max(self.evaluate_sites) >= system.n_sites:
+                raise ValueError(
+                    f"evaluate_sites {self.evaluate_sites} does not fit a "
+                    f"{system.n_sites}-site chain"
+                )
+            sites = self.evaluate_sites
+        for site in sites:
             operators = (chain.Sx[site], chain.Sy[site], chain.Sz[site])
             values = np.zeros_like(backend_bias, dtype=float)
             for weight, operator in zip(

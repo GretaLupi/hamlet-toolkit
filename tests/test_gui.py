@@ -102,7 +102,7 @@ def test_overview_leads_with_the_users_situation_not_the_command_name():
 # --- models -----------------------------------------------------------------
 
 def test_published_models_report_the_contract_that_governs_reuse():
-    payload = api.describe_published_models()
+    payload = api.describe_available_models()
     models = {entry["name"]: entry for entry in payload["models"]}
     assert models, "no published models were found"
     for entry in models.values():
@@ -288,7 +288,7 @@ def test_index_mentions_every_panel_the_script_drives():
 
 def test_every_published_model_reports_its_model_and_observable():
     """A blank field here means the browser is reading the wrong key."""
-    for entry in api.describe_published_models()["models"]:
+    for entry in api.describe_available_models()["models"]:
         assert entry["model"], f"{entry['name']} does not report which model it is"
         assert entry["observable"], f"{entry['name']} does not report its observable"
 
@@ -299,7 +299,7 @@ def test_training_chain_count_is_the_split_total_not_the_per_shard_count():
     Reading that would advertise a 3000-chain model as trained on 20, so the
     count must come from the split-group totals.
     """
-    for entry in api.describe_published_models()["models"]:
+    for entry in api.describe_available_models()["models"]:
         manifest = json.loads(
             (Path(entry["path"]) / "manifest.json").read_text(encoding="utf-8")
         )
@@ -326,7 +326,7 @@ def test_validity_ranges_are_shown_even_without_a_sampling_recipe():
     Falling back to the stored training distribution matters because the range
     is what tells a user whether their couplings are extrapolation.
     """
-    models = {m["name"]: m for m in api.describe_published_models()["models"]}
+    models = {m["name"]: m for m in api.describe_available_models()["models"]}
     imported = models["inhomogeneous_heisenberg_l12_keras_mlp_standard_v1"]
     for parameter in imported["parameters"]:
         low, high = parameter["trained_range_mev"]
@@ -700,3 +700,161 @@ def test_sample_preview_returns_plottable_spectra():
     assert len(sample["sites"][0]) == 21
     assert len(sample["couplings_mev"]) == 5
     assert all(np.isfinite(sample["sites"][0]))
+
+
+# --- models you trained yourself --------------------------------------------
+# A model trained through the interface was invisible on the models page and to
+# the reuse advisor, which is exactly when you would want it offered back.
+
+def _fake_artifact(directory: Path, *, system_type="homogeneous_heisenberg", preset="standard"):
+    """Minimal artifact manifest, enough for discovery and assessment."""
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "manifest.json").write_text(json.dumps({
+        "artifact_schema_version": 1,
+        "system_type": system_type,
+        "view": "global",
+        "n_sites": 8,
+        "model_name": "ridge",
+        "target_names": ["J1", "J2"],
+        "training_preset": {"name": preset},
+        "preprocessing": {"bias_cutoff_mev": 60.0, "bias_min_mev": 0.0, "output_points": 40},
+        "metrics": {
+            "validation": {"ensemble": {"mae": 1.0}},
+            "test": {"ensemble": {"mae": 1.1}},
+            "split": {"train_groups": 40, "validation_groups": 12, "test_groups": 8},
+        },
+        "dataset_metadata": {"observable": "Sz"},
+    }), encoding="utf-8")
+    return directory
+
+
+def test_models_you_trained_appear_alongside_the_published_ones(monkeypatch, tmp_path):
+    workspace = tmp_path / "gui-projects"
+    _fake_artifact(workspace / "my chain" / "run" / "artifact")
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+
+    models = api.describe_available_models()["models"]
+    origins = {m["origin"] for m in models}
+    assert "yours" in origins, "a trained model was not discovered"
+    assert "published" in origins, "the published models disappeared"
+
+    mine = next(m for m in models if m["origin"] == "yours")
+    # Labelled by the project the user named, not the literal "artifact" directory.
+    assert mine["label"] == "my chain"
+    assert mine["system_type"] == "homogeneous_heisenberg"
+    assert mine["n_training_chains"] == 60
+
+
+def test_a_project_manifest_that_is_not_an_artifact_is_ignored(monkeypatch, tmp_path):
+    """Project directories hold other manifests, such as generation recipes."""
+    workspace = tmp_path / "gui-projects"
+    recipe = workspace / "my chain"
+    recipe.mkdir(parents=True)
+    (recipe / "manifest.json").write_text(
+        json.dumps({"generation_schema_version": 1, "recipe": {}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    assert all(m["origin"] != "yours" for m in api.describe_available_models()["models"])
+
+
+def test_your_own_model_card_is_readable(monkeypatch, tmp_path):
+    workspace = tmp_path / "gui-projects"
+    directory = _fake_artifact(workspace / "my chain" / "run" / "artifact")
+    (directory / "MODEL_CARD.md").write_text("# Model card — mine\n", encoding="utf-8")
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    assert "mine" in api.read_model_card("my chain")["markdown"]
+
+
+def test_the_advisor_considers_models_you_trained(monkeypatch, tmp_path, measurement_csv):
+    """Searching only the published models made your own work unreachable."""
+    workspace = tmp_path / "gui-projects"
+    _fake_artifact(workspace / "my chain" / "run" / "artifact")
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+
+    decision = api.advise_for_experiment(
+        measurement_csv, 20.0, system_type="homogeneous_heisenberg", view="global"
+    )
+    considered = [a["path"] for a in decision["artifacts"]]
+    assert any("gui-projects" in path for path in considered), (
+        "the advisor did not even look at the model the user trained"
+    )
+
+
+# --- preview cost ------------------------------------------------------------
+# Simulation cost is linear in the number of correlators evaluated, which is
+# per site, so previewing every site is the largest avoidable expense. Bias
+# points are nearly free by comparison, and process-level parallelism measured
+# slower than sequential because one simulation already uses several cores.
+
+def test_preview_evaluates_a_subset_of_sites_including_the_impurities():
+    form = {
+        "n_sites": 8,
+        "impurities": [{"site": 1}, {"site": 4}],
+    }
+    sites = api.preview_sites(form, max_sites=4)
+    assert len(sites) == 4
+    assert 0 in sites and 7 in sites, "the ends of an open chain matter most"
+    assert 1 in sites and 4 in sites, "the impurity sites are the point of the preview"
+    assert sites == tuple(sorted(sites))
+
+
+def test_preview_shows_every_site_of_a_short_chain():
+    assert api.preview_sites({"n_sites": 3, "impurities": []}, max_sites=4) == (0, 1, 2)
+
+
+def test_preview_site_count_never_exceeds_the_cap():
+    form = {"n_sites": 20, "impurities": [{"site": s} for s in range(10)]}
+    assert len(api.preview_sites(form, max_sites=4)) == 4
+
+
+def test_dynamics_mode_is_chosen_by_basis_size_not_site_count():
+    """Eight sites is 256 states, or 3456 with three spin-1 impurities."""
+    from hamlet.simulation.dmrgpy import hilbert_dimension, recommended_dynamics_mode
+    from hamlet.systems import HomogeneousXXZDMIImpurityChain, SiteImpurity
+
+    def chain(n_sites, impurity_sites):
+        return HomogeneousXXZDMIImpurityChain(
+            n_sites, [5.0, 0.0, 0.0, 5.0, 1.0],
+            impurities=tuple(
+                SiteImpurity(s, "S=1", transverse_mev=2.0) for s in impurity_sites
+            ),
+        )
+
+    assert hilbert_dimension(chain(8, ())) == 256
+    assert recommended_dynamics_mode(chain(8, ())) == "ED"
+    assert hilbert_dimension(chain(8, (1, 4, 6))) == 2 ** 5 * 3 ** 3
+    # Long chains must not be attempted exactly.
+    assert recommended_dynamics_mode(chain(14, (1, 4, 6))) == "DMRG"
+
+
+def test_evaluate_sites_is_validated_against_the_chain():
+    from hamlet.simulation import DmrgpySimulator
+
+    with pytest.raises(ValueError, match="cannot be empty"):
+        DmrgpySimulator(evaluate_sites=())
+    with pytest.raises(ValueError, match="must not repeat"):
+        DmrgpySimulator(evaluate_sites=(1, 1))
+    with pytest.raises(ValueError, match="non-negative"):
+        DmrgpySimulator(evaluate_sites=(-1,))
+
+
+def test_training_without_an_experiment_needs_a_manual_cutoff(tmp_path):
+    """Augmentation is calibrated against a measurement; with none there is
+    nothing to calibrate, so the cutoff has to be stated outright."""
+    import yaml
+
+    from hamlet.project import HamiltonianLearningProject
+
+    built = api.build_project_config(
+        _builder_form(system_type="homogeneous_heisenberg",
+                      coupling_ranges_mev=[[30, 45], [0, 10]],
+                      bias_range_mev=[0, 100], bias_points=60, observable="Sz",
+                      cutoff_mev=60.0, output_points=40, impurities=[]),
+        workspace=tmp_path,
+    )
+    payload = yaml.safe_load(Path(built["config_path"]).read_text())
+    # The builder always sets it, which is what makes the path usable at all.
+    assert payload["training"]["manual_cutoff_mev"] == 60.0
+    project = HamiltonianLearningProject.from_config(built["config_path"])
+    assert project.config.experiment_csv is None
+    assert hasattr(project, "prepare_training_data_without_experiment")

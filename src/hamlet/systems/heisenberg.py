@@ -370,6 +370,23 @@ _SPIN_MAGNITUDES = {
 }
 
 
+def spin_multiplicity(label: str) -> int:
+    """States per site, ``2S + 1``.
+
+    Exposed because the product over sites is the exact-diagonalisation cost,
+    and choosing between ED and DMRG has to be based on it rather than on the
+    site count: eight spin-1/2 sites is a 256-state problem, but eight sites
+    with three spin-1 impurities is 3456.
+    """
+    try:
+        magnitude = _SPIN_MAGNITUDES[label]
+    except KeyError:
+        raise ValueError(
+            f"unknown spin {label!r}; expected one of {sorted(_SPIN_MAGNITUDES)}"
+        ) from None
+    return int(round(2.0 * magnitude + 1.0))
+
+
 @dataclass(frozen=True)
 class SiteImpurity:
     """One substituted site with its own spin and single-ion anisotropy.

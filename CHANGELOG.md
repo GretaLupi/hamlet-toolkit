@@ -15,6 +15,28 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- Models trained through the interface now appear on the models page, tagged
+  as yours rather than published, and the reuse advisor searches them too.
+  Previously both looked only in `models/published/`, so the model you had just
+  trained was invisible exactly when you would ask about it.
+- `HamiltonianLearningProject.prepare_training_data_without_experiment()`, so a
+  model can be trained before any measurement exists. The calibrated path
+  cannot serve that case -- augmentation is tuned to match a specific
+  measurement's noise -- and the interface's own runs have no experiment
+  attached, so its Run button previously failed on every project the form
+  built.
+- Sample previews are faster and honest about what they show. Cost is linear in
+  the number of correlators evaluated, which is per site, so only a few
+  representative sites are simulated -- ends of the chain plus any impurity
+  sites -- and DMRG replaces exact diagonalisation once the basis exceeds 2048
+  states. Bias resolution turned out to be nearly free: 81 points cost the same
+  as 21, so the knob that looked like the obvious economy was the wrong one.
+  Running chains in separate processes was measured at 0.57x, i.e. slower than
+  sequential, because one simulation already occupies several cores; it is
+  available behind a `workers` argument but no longer the default.
+- `spin_multiplicity`, `hilbert_dimension` and `recommended_dynamics_mode`, so
+  the ED-versus-DMRG choice can be made on basis size rather than site count.
+  `DmrgpySimulator` gained `evaluate_sites` for evaluating a subset of sites.
 - The interface's training page is a guided form instead of a YAML editor,
   since editing a configuration file is still coding. It walks through the
   system, the chain and coupling ranges, the impurity arrangement where one

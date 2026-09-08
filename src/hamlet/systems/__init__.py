@@ -12,6 +12,7 @@ from .heisenberg import (
     HomogeneousXXZDMIImpurityChain,
     HomogeneousXXZDMIImpurityFamily,
     SiteImpurity,
+    spin_multiplicity,
 )
 
 __all__ = [
@@ -27,5 +28,6 @@ __all__ = [
     "HomogeneousXXZDMIFieldFamily",
     "HomogeneousXXZDMIImpurityChain",
     "SiteImpurity",
+    "spin_multiplicity",
     "HomogeneousXXZDMIImpurityFamily",
 ]

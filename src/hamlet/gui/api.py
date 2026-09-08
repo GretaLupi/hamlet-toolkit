@@ -30,6 +30,38 @@ def _examples_root() -> Path:
     return REPO_ROOT / "examples"
 
 
+def _workspace_root() -> Path:
+    """Where runs started from the interface put their artifacts."""
+    return REPO_ROOT / "results" / "gui-projects"
+
+
+def _artifact_directories() -> list[tuple[Path, str]]:
+    """Every artifact the interface should know about, with where it came from.
+
+    A model you trained yourself is exactly the model you most want offered
+    back, so the workspace is searched alongside the published models rather
+    than only the latter.
+    """
+    found: list[tuple[Path, str]] = []
+    published = _published_root()
+    if published.exists():
+        found.extend(
+            (path.parent, "published") for path in sorted(published.glob("*/manifest.json"))
+        )
+    workspace = _workspace_root()
+    if workspace.exists():
+        for path in sorted(workspace.rglob("manifest.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            # Only real training artifacts; a project directory holds other
+            # manifests too, such as generation recipes.
+            if "artifact_schema_version" in payload:
+                found.append((path.parent, "yours"))
+    return found
+
+
 # --- guidance ---------------------------------------------------------------
 
 def workflow_overview() -> dict[str, Any]:
@@ -104,16 +136,19 @@ def workflow_overview() -> dict[str, Any]:
 
 # --- published models -------------------------------------------------------
 
-def describe_published_models() -> dict[str, Any]:
-    """Published artifacts with the contract that governs reusing them."""
+def describe_available_models() -> dict[str, Any]:
+    """Every usable artifact with the contract that governs reusing it.
+
+    Covers both the models shipped with the package and any trained through the
+    interface, tagged by origin so provenance stays obvious.
+    """
     models: list[dict[str, Any]] = []
-    root = _published_root()
-    for manifest_path in sorted(root.glob("*/manifest.json")):
-        directory = manifest_path.parent
+    for directory, origin in _artifact_directories():
+        manifest_path = directory / "manifest.json"
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            models.append({"name": directory.name, "error": str(exc)})
+            models.append({"name": directory.name, "origin": origin, "error": str(exc)})
             continue
 
         metrics = manifest.get("metrics", {})
@@ -184,6 +219,12 @@ def describe_published_models() -> dict[str, Any]:
         models.append(
             {
                 "name": directory.name,
+                "origin": origin,
+                "label": (
+                    directory.name
+                    if origin == "published"
+                    else _workspace_label(directory)
+                ),
                 "path": str(directory),
                 "system_type": manifest.get("system_type"),
                 "view": manifest.get("view"),
@@ -201,7 +242,25 @@ def describe_published_models() -> dict[str, Any]:
                 "model_card": str(directory / "MODEL_CARD.md"),
             }
         )
-    return {"root": str(root), "models": models}
+    return {
+        "published_root": str(_published_root()),
+        "workspace_root": str(_workspace_root()),
+        "models": models,
+    }
+
+
+def _workspace_label(directory: Path) -> str:
+    """A readable name for a model trained through the interface.
+
+    The artifact directory is called "artifact"; the project directory above it
+    carries the name the user typed, which is the useful one.
+    """
+    workspace = _workspace_root()
+    try:
+        relative = directory.relative_to(workspace)
+    except ValueError:
+        return directory.name
+    return relative.parts[0] if relative.parts else directory.name
 
 
 def read_model_card(name: str) -> dict[str, Any]:
@@ -210,11 +269,13 @@ def read_model_card(name: str) -> dict[str, Any]:
     ``name`` is matched against directory names only, so a path cannot be used
     to read files elsewhere on disk.
     """
-    root = _published_root()
-    candidates = {path.name: path for path in root.iterdir() if path.is_dir()} if root.exists() else {}
+    candidates: dict[str, Path] = {}
+    for directory, origin in _artifact_directories():
+        key = directory.name if origin == "published" else _workspace_label(directory)
+        candidates.setdefault(key, directory)
     directory = candidates.get(name)
     if directory is None:
-        raise FileNotFoundError(f"no published model named {name!r}")
+        raise FileNotFoundError(f"no model named {name!r}")
     card = directory / "MODEL_CARD.md"
     if not card.exists():
         raise FileNotFoundError(f"{name} has no model card")
@@ -280,7 +341,9 @@ def advise_for_experiment(
     """
     from ..workflow import advise_experiment
 
-    roots = artifact_roots if artifact_roots else [str(_published_root())]
+    # Both roots by default: a model the user just trained is the one they are
+    # most likely to be asking about.
+    roots = artifact_roots or [str(_published_root()), str(_workspace_root())]
     decision = advise_experiment(
         str(path),
         manual_cutoff_mev=float(cutoff_mev),
@@ -916,15 +979,12 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
     return {"config_path": str(config_path), "project_dir": str(project_dir), "name": name}
 
 
-def preview_samples(form: dict[str, Any], *, n_samples: int = 3) -> dict[str, Any]:
-    """Simulate a few chains with the chosen settings and return them for plotting.
+def _build_family(form: dict[str, Any]):
+    """The sampler for one set of form answers.
 
-    Worth the wait before committing to a full run: it is the only way to see
-    that the bias window actually contains the excitations, that the broadening
-    is not washing them out, and that the couplings produce features at all.
+    Module level so a worker process can rebuild it from the plain form rather
+    than having a family pickled across the process boundary.
     """
-    from ..data import generate_dataset
-    from ..simulation import DmrgpySimulator, SpectroscopyProtocol
     from ..systems import (
         HomogeneousHeisenbergFamily,
         HomogeneousXXZDMIImpurityFamily,
@@ -934,41 +994,44 @@ def preview_samples(form: dict[str, Any], *, n_samples: int = 3) -> dict[str, An
         SiteImpurity,
     )
 
-    spec = _spec_for(str(form["system_type"]))
+    system_type = str(form["system_type"])
     n_sites = int(form["n_sites"])
     ranges = tuple((float(low), float(high)) for low, high in form["coupling_ranges_mev"])
 
-    if spec["system_type"] == "inhomogeneous_heisenberg":
-        family = InhomogeneousHeisenbergFamily(n_sites, ranges[0])
-    elif spec["system_type"] == "homogeneous_heisenberg":
-        family = HomogeneousHeisenbergFamily(n_sites, ranges)
-    elif spec["system_type"] == "homogeneous_xxz_j1j2j3":
-        family = HomogeneousXXZLongRangeFamily(n_sites, ranges)
-    elif spec["system_type"] == "homogeneous_xxz_j1j2j3_dmi":
-        family = HomogeneousXXZDMILongRangeFamily(n_sites, ranges)
-    else:
-        impurities = tuple(
-            SiteImpurity(
-                int(item["site"]),
-                str(item.get("spin", "S=1")),
-                axial_mev=float(item.get("axial_mev", 0.0)),
-                transverse_mev=float(item.get("transverse_mev", 0.0)),
-            )
-            for item in form.get("impurities") or ()
+    if system_type == "inhomogeneous_heisenberg":
+        return InhomogeneousHeisenbergFamily(n_sites, ranges[0])
+    if system_type == "homogeneous_heisenberg":
+        return HomogeneousHeisenbergFamily(n_sites, ranges)
+    if system_type == "homogeneous_xxz_j1j2j3":
+        return HomogeneousXXZLongRangeFamily(n_sites, ranges)
+    if system_type == "homogeneous_xxz_j1j2j3_dmi":
+        return HomogeneousXXZDMILongRangeFamily(n_sites, ranges)
+    impurities = tuple(
+        SiteImpurity(
+            int(item["site"]),
+            str(item.get("spin", "S=1")),
+            axial_mev=float(item.get("axial_mev", 0.0)),
+            transverse_mev=float(item.get("transverse_mev", 0.0)),
         )
-        family = HomogeneousXXZDMIImpurityFamily(
-            n_sites,
-            ranges,
-            impurities=impurities,
-            transverse_field_mev=float(form.get("transverse_field_mev", 0.0)),
-        )
+        for item in form.get("impurities") or ()
+    )
+    return HomogeneousXXZDMIImpurityFamily(
+        n_sites,
+        ranges,
+        impurities=impurities,
+        transverse_field_mev=float(form.get("transverse_field_mev", 0.0)),
+    )
+
+
+def _build_protocol(form: dict[str, Any]):
+    from ..simulation import SpectroscopyProtocol
 
     weights = (
         tuple(float(v) for v in form.get("observable_weights", (1.0, 1.0, 1.0)))
         if form["observable"] == "total_spin"
         else None
     )
-    protocol = SpectroscopyProtocol.uniform(
+    return SpectroscopyProtocol.uniform(
         tuple(float(v) for v in form["bias_range_mev"]),
         points=int(form["bias_points"]),
         broadening_mev=float(form["broadening_mev"]),
@@ -977,27 +1040,154 @@ def preview_samples(form: dict[str, Any], *, n_samples: int = 3) -> dict[str, An
         output_quantity="didv",
     )
 
-    print(f"simulating {n_samples} sample chain(s) of {n_sites} sites")
-    dataset = generate_dataset(
-        family,
-        DmrgpySimulator(dynamics_mode="ED"),
-        protocol,
-        n_samples=int(n_samples),
-        seed=int(form.get("seed", 42)),
-    )
-    print("done")
 
-    bias = np.asarray(dataset.bias_mev, dtype=float)
-    spectra = np.asarray(dataset.spectra, dtype=float)
-    targets = np.asarray(dataset.targets_mev, dtype=float)
+def preview_sites(form: dict[str, Any], *, max_sites: int = 4) -> tuple[int, ...]:
+    """Representative sites to evaluate for a preview.
+
+    Simulation cost is linear in the number of correlators evaluated, and a
+    correlator is computed per site, so previewing every site of a chain is the
+    single largest avoidable expense. The ends are included because an open
+    chain differs most there, and any impurity sites because that is where the
+    physics being previewed actually lives.
+    """
+    n_sites = int(form["n_sites"])
+    if n_sites <= max_sites:
+        return tuple(range(n_sites))
+
+    wanted: list[int] = [0, n_sites - 1]
+    for item in form.get("impurities") or ():
+        site = int(item["site"])
+        if 0 <= site < n_sites:
+            wanted.append(site)
+    # Fill any remaining slots with evenly spaced interior sites.
+    for site in np.linspace(0, n_sites - 1, max_sites).round().astype(int).tolist():
+        wanted.append(int(site))
+    ordered: list[int] = []
+    for site in wanted:
+        if site not in ordered:
+            ordered.append(site)
+        if len(ordered) == max_sites:
+            break
+    return tuple(sorted(ordered))
+
+
+def _preview_worker(task: dict[str, Any]) -> dict[str, Any]:
+    """Simulate one sample chain. Runs in its own process and directory.
+
+    The directory matters: the DMRGPy backend writes scratch state (.mpsfolder,
+    .pychainfolder) into the working directory, so two workers sharing one
+    would corrupt each other's runs.
+    """
+    import os
+    import tempfile
+
+    from ..simulation import DmrgpySimulator
+
+    form = task["form"]
+    workdir = tempfile.mkdtemp(prefix="hamlet-preview-")
+    os.chdir(workdir)
+
+    family = _build_family(form)
+    protocol = _build_protocol(form)
+    chain = family.sample(np.random.default_rng(int(task["seed"])))
+    simulator = DmrgpySimulator(
+        dynamics_mode=task["dynamics_mode"],
+        evaluate_sites=tuple(task["sites"]),
+        # A DMRG preview carries truncation error, which shows up as a small
+        # imaginary residue in these Hermitian autocorrelators. The strict
+        # research default would reject a perfectly usable preview.
+        max_relative_imaginary_residue=(
+            1e-3 if task["dynamics_mode"] == "DMRG" else 1e-6
+        ),
+    )
+    result = simulator.simulate(chain, protocol)
+    spectra = np.asarray(result.spectral_map, dtype=float)
     return {
-        "bias_mev": bias.tolist(),
-        "target_names": list(dataset.target_names),
+        "index": int(task["index"]),
+        "couplings_mev": np.asarray(chain.as_array(), dtype=float).tolist(),
+        "sites": [row.tolist() for row in spectra],
+        "bias_mev": np.asarray(result.bias_mev, dtype=float).tolist(),
+    }
+
+
+def preview_samples(
+    form: dict[str, Any],
+    *,
+    n_samples: int = 1,
+    max_sites: int = 4,
+    workers: int | None = None,
+) -> dict[str, Any]:
+    """Simulate a few chains with the chosen settings and return them to plot.
+
+    Worth the wait before committing to a full run: it is the only way to see
+    that the bias window contains the excitations, that the broadening is not
+    washing them out, and that the couplings produce structure at all.
+
+    Two things keep it quick, neither of which changes the physics being shown:
+    only a few representative sites are evaluated, and DMRG replaces exact
+    diagonalisation once the basis is too large for ED to be the cheap option.
+    What was done is reported back so the page can say so rather than implying
+    a full simulation.
+
+    Running the chains in separate processes was tried and measured at 0.57x,
+    i.e. almost twice as slow as doing them one after another: a single
+    simulation already keeps several cores busy, so a second process
+    oversubscribes rather than adding throughput. ``workers`` is left as an
+    escape hatch for a machine where that does not hold, but the default is
+    sequential because that is what measured faster here.
+    """
+    from concurrent.futures import ProcessPoolExecutor
+
+    from ..simulation.dmrgpy import hilbert_dimension, recommended_dynamics_mode
+
+    n_samples = max(1, int(n_samples))
+    sites = preview_sites(form, max_sites=max_sites)
+    probe = _build_family(form).sample(np.random.default_rng(0))
+    dynamics_mode = recommended_dynamics_mode(probe)
+    dimension = hilbert_dimension(probe)
+    n_sites = int(form["n_sites"])
+
+    correlators = len(sites) * (3 if form["observable"] == "total_spin" else 1)
+    print(
+        f"{n_samples} chain(s), {len(sites)} of {n_sites} sites, "
+        f"{correlators} correlators each"
+    )
+    print(f"basis dimension {dimension}, so using {dynamics_mode}")
+
+    tasks = [
+        {
+            "form": form,
+            "seed": int(form.get("seed", 42)) + index,
+            "sites": sites,
+            "dynamics_mode": dynamics_mode,
+            "index": index,
+        }
+        for index in range(n_samples)
+    ]
+
+    started = time.time()
+    if (workers or 1) <= 1:
+        results = []
+        for position, task in enumerate(tasks, start=1):
+            results.append(_preview_worker(task))
+            print(f"chain {position} of {n_samples} done")
+    else:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_preview_worker, tasks))
+    results.sort(key=lambda item: item["index"])
+    print(f"done in {time.time() - started:.0f} s")
+
+    family = _build_family(form)
+    return {
+        "bias_mev": results[0]["bias_mev"],
+        "target_names": list(family.parameter_names),
+        "evaluated_sites": list(sites),
+        "n_sites": n_sites,
+        "showing_all_sites": len(sites) == n_sites,
+        "dynamics_mode": dynamics_mode,
+        "hilbert_dimension": dimension,
         "samples": [
-            {
-                "couplings_mev": targets[index].tolist(),
-                "sites": [row.tolist() for row in spectra[index]],
-            }
-            for index in range(spectra.shape[0])
+            {"couplings_mev": item["couplings_mev"], "sites": item["sites"]}
+            for item in results
         ],
     }

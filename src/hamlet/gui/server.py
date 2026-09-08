@@ -82,7 +82,7 @@ class _Handler(BaseHTTPRequestHandler):
             if route == "/api/overview":
                 self._send_json(api.workflow_overview())
             elif route == "/api/models":
-                self._send_json(api.describe_published_models())
+                self._send_json(api.describe_available_models())
             elif route == "/api/model-card":
                 self._send_json(api.read_model_card(query["name"][0]))
             elif route == "/api/builder-options":
@@ -244,8 +244,39 @@ class _Handler(BaseHTTPRequestHandler):
             from ..project import HamiltonianLearningProject
 
             project = HamiltonianLearningProject.from_config(config_path)
-            outcome = project.run()
-            return {"summary": str(outcome)[:2000]}
+            # `run()` ends in inference and therefore requires an experiment.
+            # Projects built by the guided form have no experiment attached --
+            # their whole purpose is to produce a model -- so the generate and
+            # train stages are driven directly. With an experiment configured,
+            # the full pipeline including the report is the right thing.
+            if project.config.experiment_csv is not None:
+                outcome = project.run()
+                return {
+                    "kind": "full",
+                    "artifact_path": str(outcome.artifact_path),
+                    "report_path": str(outcome.report_path),
+                    "status": str(outcome.status),
+                }
+
+            if project.config.generation is not None:
+                print("generating the training dataset")
+                project.generate_training_dataset(
+                    progress=lambda done, total: print(f"  {done} of {total} chains")
+                )
+            # No experiment means no augmentation to calibrate against, so the
+            # uncalibrated path is used deliberately rather than by accident.
+            print("preparing training data at the chosen cutoff")
+            project.prepare_training_data_without_experiment()
+            print("training")
+            run = project.train()
+            artifact = project.config.output_dir / "artifact"
+            print(f"done; artifact written to {artifact}")
+            return {
+                "kind": "train_only",
+                "artifact_path": str(artifact),
+                "validation_mae_mev": run.metrics["validation"]["ensemble"]["mae"],
+                "test_mae_mev": run.metrics["test"]["ensemble"]["mae"],
+            }
 
         return self.registry.submit(
             "project", f"run {Path(config_path).name}", work

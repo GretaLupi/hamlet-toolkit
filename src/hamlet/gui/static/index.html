@@ -172,11 +172,13 @@
     </li>
 
     <li>
-      <h3>4 &middot; Check a few samples before committing</h3>
+      <h3>4 &middot; Check a sample before committing</h3>
       <p class="hint">
-        Simulates two or three chains with exactly these settings, so you can
-        see whether the bias window contains the excitations and the broadening
-        is not washing them out. About a minute per chain.
+        Simulates one chain with exactly these settings, so you can see whether
+        the bias window contains the excitations and the broadening is not
+        washing them out. A few representative sites rather than all of them,
+        because cost scales with the number of sites evaluated — roughly a
+        minute, against hours for the full run.
       </p>
       <div class="row">
         <button id="f-preview" class="primary">Plot samples</button>
