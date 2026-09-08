@@ -186,7 +186,12 @@ def build_parser() -> argparse.ArgumentParser:
         "gui",
         help="open a local browser interface for these workflows",
     )
-    gui.add_argument("--port", type=int, default=8765)
+    gui.add_argument(
+        "--port",
+        type=int,
+        default=None,
+        help="default 8765, or the next free port after it; an explicit port is strict",
+    )
     gui.add_argument("--host", default="127.0.0.1", help="localhost by default; it runs local compute")
     gui.add_argument("--no-browser", action="store_true", help="print the URL instead of opening it")
 

@@ -332,3 +332,132 @@ def test_validity_ranges_are_shown_even_without_a_sampling_recipe():
         low, high = parameter["trained_range_mev"]
         assert 29.0 < low < 31.0, parameter
         assert 44.0 < high < 46.0, parameter
+
+
+# --- starting up -------------------------------------------------------------
+# `hamlet gui` failed with a raw bind traceback when a previous interface was
+# still holding the port, and the browser was launched on the calling thread
+# before serve_forever, so a hanging launcher left the socket listening while
+# nothing was ever accepted.
+
+def test_a_busy_default_port_falls_back_instead_of_failing():
+    """A second terminal must not fail just because the first one is serving."""
+    import socket
+    import threading
+
+    from hamlet.gui import server as gui_server
+
+    blocker = socket.socket()
+    blocker.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    blocker.bind(("127.0.0.1", 0))
+    taken = blocker.getsockname()[1]
+    blocker.listen(1)
+
+    started = threading.Event()
+    chosen: list[int] = []
+    real_server = gui_server.ThreadingHTTPServer
+
+    class Recorder(real_server):
+        def __init__(self, address, handler):
+            super().__init__(address, handler)
+            chosen.append(self.server_address[1])
+            started.set()
+
+        def serve_forever(self, *args, **kwargs):
+            return None
+
+    gui_server.ThreadingHTTPServer = Recorder
+    try:
+        # port=None means "the default, or the next free one"; point the default
+        # at the blocked port so the fallback path is the one exercised.
+        original_default = gui_server.DEFAULT_PORT
+        gui_server.DEFAULT_PORT = taken
+        gui_server.serve(port=None, open_browser=False)
+    finally:
+        gui_server.DEFAULT_PORT = original_default
+        gui_server.ThreadingHTTPServer = real_server
+        blocker.close()
+
+    assert chosen, "the server never bound anything"
+    assert chosen[0] != taken, "it bound the port that was already taken"
+    assert chosen[0] == taken + 1
+
+
+def test_an_explicitly_chosen_busy_port_is_refused_with_guidance():
+    """An explicit port is honoured strictly, and the error has to be actionable.
+
+    The message must not claim what is holding the port: a suspended interface
+    keeps its socket bound while answering nothing.
+    """
+    import socket
+
+    from hamlet.gui.server import serve
+
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    taken = blocker.getsockname()[1]
+    blocker.listen(1)
+    try:
+        with pytest.raises(SystemExit) as excinfo:
+            serve(port=taken, open_browser=False)
+    finally:
+        blocker.close()
+    message = str(excinfo.value)
+    assert "not responding" in message
+    assert f"--port {taken + 1}" in message
+    assert "not a HamLeT interface" not in message
+
+
+def test_browser_launch_cannot_block_the_server():
+    """It runs before serve_forever, so a hanging launcher must not reach it."""
+    import threading
+
+    from hamlet.gui import server as gui_server
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hanging_open(url):
+        entered.set()
+        release.wait(timeout=10)
+        return True
+
+    import webbrowser
+
+    original = webbrowser.open
+    webbrowser.open = hanging_open
+    try:
+        gui_server._open_browser("http://127.0.0.1:1/")
+        # If the launch were synchronous, control would not return until the
+        # fake browser was released.
+        assert entered.wait(timeout=5), "the launcher never ran"
+    finally:
+        release.set()
+        webbrowser.open = original
+
+
+def test_headless_sessions_are_told_how_to_reach_the_interface(monkeypatch, capsys):
+    """On a login node there is no browser; the port-forward hint is the answer."""
+    import threading
+
+    from hamlet.gui import server as gui_server
+
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+
+    real_server = gui_server.ThreadingHTTPServer
+
+    class Immediate(real_server):
+        def serve_forever(self, *args, **kwargs):
+            return None
+
+    monkeypatch.setattr(gui_server, "ThreadingHTTPServer", Immediate)
+    opened: list[str] = []
+    monkeypatch.setattr(gui_server, "_open_browser", lambda url: opened.append(url))
+
+    gui_server.serve(port=0, open_browser=True)
+    output = capsys.readouterr().out
+    assert not opened, "a browser was launched with no display"
+    assert "No display detected" in output
+    assert "ssh -N -L" in output
+    assert threading.active_count() >= 1

@@ -8,7 +8,10 @@ behind it read local files and start local compute.
 
 from __future__ import annotations
 
+import errno
 import json
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -199,25 +202,127 @@ class _Handler(BaseHTTPRequestHandler):
         )
 
 
+DEFAULT_PORT = 8765
+# How many ports past the default to try before giving up. Small on purpose: if
+# this many are taken, something is wrong that a wider scan would only hide.
+PORT_SEARCH_LIMIT = 12
+
+
+def _interface_already_running(host: str, port: int, timeout: float = 0.5) -> bool:
+    """Whether a HamLeT interface is already answering on this address.
+
+    Running ``hamlet gui`` twice is an easy thing to do, and the useful reply is
+    "it is already open, here is the link" rather than a bind error.
+    """
+    try:
+        with urllib.request.urlopen(
+            f"http://{host}:{port}/api/overview", timeout=timeout
+        ) as response:
+            payload = json.loads(response.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and "situations" in payload
+
+
+def _open_browser(url: str) -> None:
+    """Launch a browser without ever blocking the caller.
+
+    ``webbrowser.open`` can block for a long time, or hang outright, when it
+    resolves to a console browser or a launcher that waits on the terminal. It
+    runs before ``serve_forever``, so a hang there leaves the socket bound and
+    listening while nothing is ever accepted -- the server looks started and
+    answers nothing. A daemon thread keeps that failure mode impossible.
+    """
+    import threading
+    import webbrowser
+
+    def launch() -> None:
+        try:
+            webbrowser.open(url)
+        except Exception:  # noqa: BLE001 - the printed URL still works
+            pass
+
+    threading.Thread(target=launch, name="hamlet-gui-browser", daemon=True).start()
+
+
+def _has_display() -> bool:
+    import os
+
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def serve(
-    *, host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True
+    *,
+    host: str = "127.0.0.1",
+    port: int | None = None,
+    open_browser: bool = True,
 ) -> None:
-    """Run the interface until interrupted."""
+    """Run the interface until interrupted.
+
+    ``port`` of ``None`` means "the default, or the next free one after it",
+    which keeps a second terminal from failing over a port collision. An
+    explicit port is honoured strictly, because someone who chose a port
+    usually needs that one.
+    """
+    requested = port
+    first = DEFAULT_PORT if port is None else int(port)
+    candidates = (
+        range(first, first + PORT_SEARCH_LIMIT) if requested is None else (first,)
+    )
+
     handler = type("Handler", (_Handler,), {"registry": api.JobRegistry()})
-    with ThreadingHTTPServer((host, port), handler) as httpd:
-        url = f"http://{host}:{port}/"
+    httpd = None
+    for candidate in candidates:
+        try:
+            httpd = ThreadingHTTPServer((host, candidate), handler)
+        except OSError as exc:
+            if exc.errno not in (errno.EADDRINUSE, errno.EACCES):
+                raise
+            if _interface_already_running(host, candidate):
+                url = f"http://{host}:{candidate}/"
+                print(f"A HamLeT interface is already running on {url}")
+                print("Opening that one instead of starting a second.")
+                if open_browser:
+                    _open_browser(url)
+                return
+            continue
+        else:
+            break
+
+    if httpd is None:
+        if requested is not None:
+            # Deliberately does not claim what is holding the port. A suspended
+            # `hamlet gui` (Ctrl+Z) keeps its socket bound while answering
+            # nothing, so "not a HamLeT interface" would be actively wrong.
+            raise SystemExit(
+                f"Port {first} on {host} is in use by a process that is not "
+                f"responding.\n"
+                f"If you started an interface earlier and suspended it, bring it "
+                f"back with `fg`, or list suspended jobs with `jobs`.\n"
+                f"Otherwise start on another port:\n"
+                f"    hamlet gui --port {first + 1}"
+            )
+        raise SystemExit(
+            f"Ports {first} to {first + PORT_SEARCH_LIMIT - 1} on {host} are all "
+            f"in use.\nPick one explicitly with: hamlet gui --port <number>"
+        )
+
+    with httpd:
+        actual = httpd.server_address[1]
+        url = f"http://{host}:{actual}/"
+        if requested is None and actual != DEFAULT_PORT:
+            print(f"Port {DEFAULT_PORT} was busy, so this is on {actual} instead.")
         print(f"HamLeT interface on {url}")
         print("This is a local server; nothing leaves your machine.")
         print("Press Ctrl+C to stop.")
-        if open_browser:
-            import webbrowser
-
-            # A failure to find a browser must not take the server down; the
-            # printed URL is still usable.
-            try:
-                webbrowser.open(url)
-            except Exception:  # noqa: BLE001
-                pass
+        if open_browser and _has_display():
+            _open_browser(url)
+        elif open_browser:
+            # Common on a cluster login node, where there is no browser to open.
+            print()
+            print("No display detected, so no browser was opened. If you are")
+            print("connected over SSH, forward the port and open the URL locally:")
+            print(f"    ssh -N -L {actual}:{host}:{actual} <this-host>")
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
