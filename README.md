@@ -21,10 +21,20 @@ name.)
 ## Status
 
 - **Bond-inhomogeneous Heisenberg chains** (`local_bonds` view) — the
-  validated, ready-to-use workflow. A three-site sliding-window estimator
-  predicts local exchange couplings and works on any chain length. Validated
-  end-to-end against a real experimental chain and a small physical DMRGPy
-  recovery benchmark.
+  validated, ready-to-use workflow, and the one with a published model from
+  peer-reviewed work. A three-site sliding-window estimator predicts local
+  exchange couplings and, because its input is a local window rather than the
+  whole chain, works on any chain length. The
+  [L=12 reference artifact](models/published/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1)
+  is the trained Keras ensemble from *Learning Inhomogeneous Heisenberg
+  Hamiltonians in Nanographene Spin Chains* (Lupi et al., 2026): 1.404 meV
+  held-out test MAE on raw data over 3000 simulated chains, with both bonds at
+  ~0.55 skill against a training-mean baseline and correlation ~0.88. Requires
+  the `ml` extra, since it is a Keras model. Validated end-to-end against a
+  real experimental chain and a small physical DMRGPy recovery benchmark. See
+  its
+  [model card](models/published/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
+  for attribution, the valid 30-45 meV coupling range, and the limits.
 - **Homogeneous `J1-J2` chains at L=8** (`global` view) — a first reference
   model ships in
   [models/published/](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1),

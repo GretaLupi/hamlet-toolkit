@@ -15,6 +15,21 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- Published the bond-inhomogeneous L=12 reference model: the trained Keras
+  ensemble from *Learning Inhomogeneous Heisenberg Hamiltonians in Nanographene
+  Spin Chains* (Lupi et al., 2026), reused rather than retrained so the
+  published artifact is the one the work was done with. Per-bond held-out
+  accuracy is 1.400 and 1.407 meV MAE at ~0.55 skill and ~0.88 correlation.
+  The model card records the attribution and citation, the 30-45 meV validity
+  range, the TensorFlow requirement, and the fact that it is evaluated on a
+  single split rather than the five resampled splits used for the homogeneous
+  reference.
+- The model browser now reads both published-manifest shapes, so artifacts
+  imported from earlier work no longer render their model, observable and
+  validity range as blanks. It also reports the training-set size from the
+  split totals rather than the recipe's `n_samples`, which for a dataset merged
+  from shards is the per-shard count -- that would have advertised a
+  3000-chain model as trained on 20.
 - A local browser interface, `hamlet gui`, built on the standard library so a
   GUI cannot break the science path with a new dependency. It is organised
   around the user's situation rather than the command names, since choosing the

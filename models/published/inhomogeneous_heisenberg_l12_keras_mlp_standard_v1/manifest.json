@@ -1,0 +1,243 @@
+{
+  "artifact_schema_version": 1,
+  "coupling_unit": "meV",
+  "dataset_metadata": {
+    "dmrgpy_energy_unit_mev": 10.0,
+    "experimental_like_augmentation": {
+      "amplitude_range": [
+        1.0,
+        1.0
+      ],
+      "background_quadratic": [
+        0.0,
+        0.0
+      ],
+      "broadening_points": [
+        0.5,
+        2.0
+      ],
+      "energy_shift_mev": [
+        0.0,
+        0.0
+      ],
+      "energy_stretch": [
+        1.0,
+        1.0
+      ],
+      "linear_drift": true,
+      "noise": 0.002,
+      "offset_range": [
+        0.009,
+        0.016
+      ],
+      "seed": 42
+    },
+    "observable": "integrated local susceptibility (dI/dV-like)",
+    "source_files": [
+      "reference/Inhomogeneous-Heisenberg-HL/data/synthetic/dataset_30_40.npz",
+      "reference/Inhomogeneous-Heisenberg-HL/data/synthetic/dataset_35_45.npz"
+    ],
+    "source_format": "Inhomogeneous-Heisenberg-HL X/Z/J NPZ",
+    "training_preprocessing": {
+      "baseline_range_mev": [
+        0.0,
+        3.0
+      ],
+      "bias_cutoff_mev": 50.0,
+      "bias_min_mev": 0.0,
+      "clip": null,
+      "output_points": 200,
+      "resolved_scale_range_mev": [
+        40.0,
+        50.0
+      ],
+      "scale_bandwidth_mev": 10.0,
+      "scale_range_mev": null
+    }
+  },
+  "energy_convention": {
+    "dmrgpy_energy_unit_mev": 10.0
+  },
+  "ensemble_aggregation": {
+    "method": "median",
+    "selection_metric": "validation_mae",
+    "weights": null
+  },
+  "metrics": {
+    "aggregation_selection": {
+      "candidates": {
+        "mean": {
+          "correlation_fidelity": 0.8740750057564778,
+          "mae": 1.4613769054412842,
+          "rmse": 1.863463044166565,
+          "weights": null
+        },
+        "median": {
+          "correlation_fidelity": 0.8851077917633463,
+          "mae": 1.3758463859558105,
+          "rmse": 1.779918909072876,
+          "weights": null
+        },
+        "validation_weighted": {
+          "correlation_fidelity": 0.8779506697170559,
+          "mae": 1.4335907697677612,
+          "rmse": 1.8351479768753052,
+          "weights": [
+            0.2672297117276373,
+            0.36900054428909645,
+            0.36376974398326617
+          ]
+        }
+      },
+      "selected": "median",
+      "selection_metric": "mae",
+      "selection_split": "validation"
+    },
+    "split": {
+      "split_seed": 42,
+      "test_groups": 300,
+      "train_groups": 2100,
+      "validation_groups": 600
+    },
+    "test": {
+      "ensemble": {
+        "correlation_fidelity": 0.8841252583303297,
+        "mae": 1.3696725368499756,
+        "rmse": 1.772647738456726
+      },
+      "ensemble_aggregation": "median",
+      "n_examples": 3000,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.7897729982758206,
+          "mae": 1.886878252029419,
+          "rmse": 2.3532400131225586
+        },
+        {
+          "correlation_fidelity": 0.8870331178803753,
+          "mae": 1.3494353294372559,
+          "rmse": 1.749143362045288
+        },
+        {
+          "correlation_fidelity": 0.8843567327457662,
+          "mae": 1.364203929901123,
+          "rmse": 1.7688868045806885
+        }
+      ],
+      "unit": "meV"
+    },
+    "validation": {
+      "ensemble": {
+        "correlation_fidelity": 0.8851077917633463,
+        "mae": 1.3758463859558105,
+        "rmse": 1.779918909072876
+      },
+      "ensemble_aggregation": "median",
+      "n_examples": 6000,
+      "per_model": [
+        {
+          "correlation_fidelity": 0.7974132395462259,
+          "mae": 1.869778037071228,
+          "rmse": 2.327484130859375
+        },
+        {
+          "correlation_fidelity": 0.8877229126193936,
+          "mae": 1.3540908098220825,
+          "rmse": 1.7597240209579468
+        },
+        {
+          "correlation_fidelity": 0.8850569518769439,
+          "mae": 1.3735618591308594,
+          "rmse": 1.7793723344802856
+        }
+      ],
+      "unit": "meV"
+    }
+  },
+  "model_name": "keras_mlp",
+  "model_options": {},
+  "models": [
+    {
+      "file": "model_seed_42.keras",
+      "format": "keras",
+      "seed": 42
+    },
+    {
+      "file": "model_seed_43.keras",
+      "format": "keras",
+      "seed": 43
+    },
+    {
+      "file": "model_seed_44.keras",
+      "format": "keras",
+      "seed": 44
+    }
+  ],
+  "n_sites": 12,
+  "package_version": "0.1.0",
+  "preprocessing": {
+    "baseline_range_mev": [
+      0.0,
+      3.0
+    ],
+    "bias_cutoff_mev": 50.0,
+    "bias_min_mev": 0.0,
+    "clip": null,
+    "output_points": 200,
+    "resolved_scale_range_mev": [
+      40.0,
+      50.0
+    ],
+    "scale_bandwidth_mev": 10.0,
+    "scale_range_mev": null
+  },
+  "system_type": "inhomogeneous_heisenberg",
+  "target_names": [
+    "J_left",
+    "J_right"
+  ],
+  "target_scaler": {
+    "maximum": [
+      44.99867248535156,
+      44.99867248535156
+    ],
+    "minimum": [
+      30.000761032104492,
+      30.000761032104492
+    ]
+  },
+  "training_distribution": {
+    "feature_count": 600,
+    "file": "training_distribution.npz",
+    "method": "diagonal_rms_z_score",
+    "quantile_levels": [
+      0.5,
+      0.8999999761581421,
+      0.949999988079071,
+      0.9900000095367432
+    ],
+    "reference_count": 256,
+    "score_quantiles": [
+      0.9571803212165833,
+      1.2423120737075806,
+      1.3391828536987305,
+      1.5903711318969727
+    ],
+    "threshold_95": 1.3391828536987305
+  },
+  "training_preset": {
+    "batch_size": 32,
+    "epochs": 100,
+    "name": "standard",
+    "patience": 12,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "split_seed": 42,
+    "test_fraction": 0.1,
+    "validation_fraction": 0.2
+  },
+  "view": "local_bonds"
+}

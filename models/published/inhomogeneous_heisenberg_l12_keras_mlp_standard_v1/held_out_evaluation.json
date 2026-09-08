@@ -1,0 +1,22 @@
+{
+  "per_parameter": [
+    {
+      "parameter": "J_left",
+      "test_mae_mev": 1.3996914625167847,
+      "baseline_mae_mev": 3.0789172649383545,
+      "skill": 0.545394909289708,
+      "correlation": 0.8780790683878762
+    },
+    {
+      "parameter": "J_right",
+      "test_mae_mev": 1.407448410987854,
+      "baseline_mae_mev": 3.0873539447784424,
+      "skill": 0.5441246983138317,
+      "correlation": 0.8761982848360174
+    }
+  ],
+  "overall_test_mae_mev": 1.4035699367523193,
+  "coupling_min_mev": 30.000761032104492,
+  "coupling_max_mev": 44.999732971191406,
+  "n_source_chains": 3000
+}
