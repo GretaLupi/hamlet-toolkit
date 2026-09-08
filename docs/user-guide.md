@@ -18,6 +18,26 @@ before doing it. Everything below is available through it, and the interface
 calls the same library functions, so nothing is available in one and not the
 other.
 
+### Stopping it
+
+The interface is a server, so **closing the browser tab does not stop it** --
+it keeps running and keeps its port. Any of these will stop it:
+
+- the **Stop server** button on the page, which warns first if a run is still
+  going and would be lost
+- `Ctrl+C` in the terminal where you started it
+- `pkill -f "hamlet gui"` if you have lost track of it
+
+If you suspended it with `Ctrl+Z`, it is still holding its port while answering
+nothing: bring it back with `fg` (then `Ctrl+C`), or list suspended jobs with
+`jobs`. Starting a second interface is harmless -- it takes the next free port
+and tells you which.
+
+### On a remote machine
+
+With no display there is nothing to open, so the interface prints an SSH
+port-forward command instead. Run that on your laptop and open the URL there.
+
 The rest of this guide covers the command line, which is what you want for
 scripted or cluster runs.
 

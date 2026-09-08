@@ -140,12 +140,37 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(self._submit_screening(payload).to_dict())
             elif route == "/api/run-project":
                 self._send_json(self._submit_project(payload).to_dict())
+            elif route == "/api/shutdown":
+                self._shutdown()
             else:
                 self._send_json({"error": "no such route"}, status=404)
         except KeyError as exc:
             self._send_error_json(ValueError(f"missing field {exc}"))
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser
             self._send_error_json(exc, status=500)
+
+    def _shutdown(self) -> None:
+        """Stop the server at the browser's request.
+
+        Closing a tab leaves the process running, which is a real way to end up
+        with an interface nobody can see and a port nobody can reuse. Any job
+        still running is reported so the answer is informed rather than a
+        surprise; shutdown itself is deferred to another thread because
+        ``shutdown()`` blocks until the serving loop exits, and that loop is
+        the one handling this request.
+        """
+        import threading
+
+        running = [job for job in self.registry.list() if job["status"] == "running"]
+        self._send_json(
+            {
+                "stopping": True,
+                "abandoned_jobs": [job["label"] for job in running],
+            }
+        )
+        threading.Thread(
+            target=self.server.shutdown, name="hamlet-gui-shutdown", daemon=True
+        ).start()
 
     # --- job submission ---
     def _submit_screening(self, payload: dict[str, Any]) -> api.GuiJob:
@@ -314,7 +339,8 @@ def serve(
             print(f"Port {DEFAULT_PORT} was busy, so this is on {actual} instead.")
         print(f"HamLeT interface on {url}")
         print("This is a local server; nothing leaves your machine.")
-        print("Press Ctrl+C to stop.")
+        print("To stop it: Ctrl+C here, or the Stop button on the page.")
+        print("Closing the browser tab does not stop it.")
         if open_browser and _has_display():
             _open_browser(url)
         elif open_browser:

@@ -8,9 +8,19 @@
 </head>
 <body>
 <header>
-  <h1>HamLeT</h1>
-  <p class="sub">Hamiltonian Learning Toolkit — learn spin-chain Hamiltonians from STM spectroscopy</p>
+  <div>
+    <h1>HamLeT</h1>
+    <p class="sub">Hamiltonian Learning Toolkit — learn spin-chain Hamiltonians from STM spectroscopy</p>
+  </div>
+  <div class="header-actions">
+    <button id="stop-server" title="Stops the local server. Closing this tab does not.">Stop server</button>
+    <p class="hint" id="stop-hint">Closing this tab leaves the server running.</p>
+  </div>
 </header>
+<div id="stopped-banner" hidden>
+  <b>The server has stopped.</b> This page is no longer connected.
+  Run <code>hamlet gui</code> again to start it.
+</div>
 
 <nav id="tabs">
   <button data-panel="start" class="active">Start here</button>

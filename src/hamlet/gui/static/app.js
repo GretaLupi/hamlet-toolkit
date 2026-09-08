@@ -327,9 +327,46 @@ async function refreshJobs() {
     el("jobs-out").innerHTML = jobs.length
       ? jobs.map(jobBlock).join("")
       : `<div class="box">Nothing has been run yet.</div>`;
-  } catch (e) { /* the panel simply stays as it was */ }
+  } catch (e) {
+    // A failed poll is how this page learns the server was stopped from the
+    // terminal, which is otherwise indistinguishable from a hung interface.
+    markStopped();
+  }
 }
 
+// --- stopping the server ---------------------------------------------------
+
+let stopped = false;
+// Declared before the first poll: markStopped() reads it, and that poll can
+// fail immediately, which would otherwise hit the const's temporal dead zone.
+let jobTimer = null;
+
+function markStopped() {
+  if (stopped) return;
+  stopped = true;
+  document.body.classList.add("stopped");
+  el("stopped-banner").hidden = false;
+  if (jobTimer) clearInterval(jobTimer);
+}
+
+el("stop-server").addEventListener("click", async () => {
+  let warning = "Stop the local server?";
+  try {
+    const { jobs } = await api("/api/jobs");
+    const running = jobs.filter((j) => j.status === "running");
+    if (running.length) {
+      warning = `${running.length} job(s) are still running and will be lost:\n`
+        + running.map((j) => `  ${j.label}`).join("\n")
+        + "\n\nStop the server anyway?";
+    }
+  } catch (e) { /* fall through to the plain confirmation */ }
+  if (!confirm(warning)) return;
+  try {
+    await api("/api/shutdown", {});
+  } catch (e) { /* the socket usually closes before a reply arrives */ }
+  markStopped();
+});
+
 refreshJobs();
-setInterval(refreshJobs, 3000);
+jobTimer = setInterval(refreshJobs, 3000);
 loadModels();

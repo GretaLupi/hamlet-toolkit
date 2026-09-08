@@ -15,6 +15,16 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- `hamlet gui` no longer fails when a port is busy: the default falls back to
+  the next free port, an explicit `--port` is refused with actionable guidance,
+  and a browser that hangs on launch can no longer leave the socket listening
+  while nothing is accepted. With no display it prints an SSH port-forward
+  command instead of opening nothing.
+- The interface can be stopped from the page. Closing a tab leaves the server
+  running, which is an easy way to end up with an interface nobody can see
+  holding a port nobody can reuse; there is now a Stop button that names any
+  run it would abandon, the terminal banner says a tab close is not enough, and
+  the page detects a server stopped from the terminal instead of appearing hung.
 - Published the bond-inhomogeneous L=12 reference model: the trained Keras
   ensemble from *Learning Inhomogeneous Heisenberg Hamiltonians in Nanographene
   Spin Chains* (Lupi et al., 2026), reused rather than retrained so the

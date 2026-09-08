@@ -461,3 +461,59 @@ def test_headless_sessions_are_told_how_to_reach_the_interface(monkeypatch, caps
     assert "No display detected" in output
     assert "ssh -N -L" in output
     assert threading.active_count() >= 1
+
+
+# --- stopping from the browser ----------------------------------------------
+# Closing a tab leaves the process running, which is how you end up with an
+# interface nobody can see holding a port nobody can reuse.
+
+def test_shutdown_route_stops_the_server_and_reports_lost_work():
+    """The reply must arrive before the socket closes, and name running jobs."""
+    import threading
+    import time
+
+    handler = type("StopHandler", (_Handler,), {"registry": api.JobRegistry()})
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    base = f"http://127.0.0.1:{httpd.server_address[1]}"
+    serving = threading.Thread(target=httpd.serve_forever, daemon=True)
+    serving.start()
+
+    release = threading.Event()
+    handler.registry.submit("test", "a long simulation", lambda: release.wait(30))
+    # Let the job reach "running" before asking to stop.
+    deadline = time.time() + 5
+    while time.time() < deadline and not any(
+        job["status"] == "running" for job in handler.registry.list()
+    ):
+        time.sleep(0.05)
+
+    try:
+        status, payload = post(base, "/api/shutdown", {})
+        assert status == 200
+        assert payload["stopping"] is True
+        assert payload["abandoned_jobs"] == ["a long simulation"], (
+            "work that will be lost has to be named, not silently dropped"
+        )
+        serving.join(timeout=10)
+        assert not serving.is_alive(), "the serving loop did not exit"
+    finally:
+        release.set()
+        httpd.server_close()
+
+    # The port must actually be free again afterwards.
+    import socket
+
+    probe = socket.socket()
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("127.0.0.1", int(base.rsplit(":", 1)[1])))
+    finally:
+        probe.close()
+
+
+def test_the_page_explains_that_closing_the_tab_is_not_enough():
+    """The confusion this fixes is a documentation problem as much as a UI one."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    assert "Stop server" in html
+    assert "Closing this tab leaves the server running" in html
+    assert 'id="stopped-banner"' in html

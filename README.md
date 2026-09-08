@@ -103,6 +103,9 @@ before it costs anything, and screen impurity designs for measuring DMI. Long
 runs happen in the background with their output streamed to the page. It binds
 to localhost and nothing leaves your machine.
 
+It is a server, so closing the browser tab does not stop it. Use the **Stop
+server** button on the page, or `Ctrl+C` in the terminal.
+
 ## Install
 
 ```bash

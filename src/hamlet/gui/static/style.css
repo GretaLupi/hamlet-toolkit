@@ -16,7 +16,18 @@ body {
   color: var(--ink);
   background: var(--bg);
 }
-header { padding: 22px 28px 14px; background: var(--card); border-bottom: 1px solid var(--line); }
+header {
+  padding: 22px 28px 14px; background: var(--card);
+  border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 20px;
+}
+.header-actions { text-align: right; flex-shrink: 0; }
+.header-actions .hint { margin-top: 5px; font-size: 12px; }
+#stopped-banner {
+  background: var(--warn); color: #fff; padding: 12px 28px; font-size: 14px;
+}
+#stopped-banner code { background: rgba(255,255,255,.22); color: #fff; }
+body.stopped main { opacity: .45; pointer-events: none; }
 h1 { margin: 0; font-size: 26px; letter-spacing: -0.01em; }
 .sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 
