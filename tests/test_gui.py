@@ -517,3 +517,186 @@ def test_the_page_explains_that_closing_the_tab_is_not_enough():
     assert "Stop server" in html
     assert "Closing this tab leaves the server running" in html
     assert 'id="stopped-banner"' in html
+
+
+# --- the guided builder ------------------------------------------------------
+# The form replaced a YAML editor, which was still asking experimentalists to
+# write code. Its options are served from the library so they cannot offer a
+# choice the library would reject, and its validation has to fire before any
+# compute is spent rather than hours into a run.
+
+def test_builder_options_describe_every_supported_system():
+    options = api.describe_builder_options()
+    systems = {spec["system_type"] for spec in options["systems"]}
+    assert {
+        "inhomogeneous_heisenberg",
+        "homogeneous_heisenberg",
+        "homogeneous_xxz_j1j2j3",
+        "homogeneous_xxz_j1j2j3_dmi",
+        "homogeneous_xxz_j1j2j3_dmi_impurity",
+    } == systems
+    for spec in options["systems"]:
+        for key in ("title", "recovers", "when", "view", "coupling_mode", "defaults"):
+            assert spec[key], f"{spec['system_type']} is missing {key}"
+        assert spec["couplings"], spec["system_type"]
+    # Only the impurity system takes impurities, and it must ship a default
+    # arrangement that can actually expose DMI.
+    impurity = next(
+        s for s in options["systems"]
+        if s["system_type"] == "homogeneous_xxz_j1j2j3_dmi_impurity"
+    )
+    assert impurity["supports_impurities"]
+    transverse = [
+        item for item in impurity["default_impurities"] if item["transverse_mev"]
+    ]
+    assert len(transverse) >= 2, "the default arrangement cannot expose DMI"
+    assert not any(
+        s["supports_impurities"] for s in options["systems"]
+        if s["system_type"] != "homogeneous_xxz_j1j2j3_dmi_impurity"
+    )
+
+
+def test_the_unidentifiable_dmi_system_carries_a_warning():
+    """Offering it without a warning would invite a wasted run."""
+    options = api.describe_builder_options()
+    plain_dmi = next(
+        s for s in options["systems"] if s["system_type"] == "homogeneous_xxz_j1j2j3_dmi"
+    )
+    assert plain_dmi.get("warning")
+    assert "cannot be recovered" in plain_dmi["warning"]
+
+
+def test_models_declare_whether_they_need_tensorflow():
+    """The form disables what the environment cannot run."""
+    models = {m["name"]: m for m in api.describe_builder_options()["models"]}
+    assert models["ridge"]["needs_tensorflow"] is False
+    assert models["random_forest"]["needs_tensorflow"] is False
+    assert models["keras_mlp"]["needs_tensorflow"] is True
+    for spec in models.values():
+        for option in spec["options"]:
+            assert option["default"] is not None, spec["name"]
+
+
+def _builder_form(**overrides):
+    form = {
+        "name": "test run",
+        "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+        "n_sites": 8,
+        "n_samples": 20,
+        "coupling_ranges_mev": [[2, 6], [-1.5, 1.5], [-1, 1], [2, 6], [0.3, 2.5]],
+        "impurities": [
+            {"site": 1, "spin": "S=1", "transverse_mev": 2.0, "axial_mev": 0.0},
+            {"site": 4, "spin": "S=1", "transverse_mev": 2.0, "axial_mev": 0.0},
+        ],
+        "transverse_field_mev": 0.0,
+        "bias_range_mev": [0, 20],
+        "bias_points": 21,
+        "broadening_mev": 0.25,
+        "observable": "total_spin",
+        "observable_weights": [1, 1, 1],
+        "cutoff_mev": 20.0,
+        "output_points": 21,
+        "model": "ridge",
+        "preset": "standard",
+        "model_options": {"alpha": 0.001},
+    }
+    form.update(overrides)
+    return form
+
+
+def test_builder_writes_a_valid_project_without_showing_yaml(tmp_path):
+    built = api.build_project_config(_builder_form(), workspace=tmp_path)
+    config = Path(built["config_path"])
+    assert config.exists()
+    # The file exists for reproducibility, but the user was never asked to read
+    # or edit it -- the plan is what they see.
+    plan = api.plan_project(config)
+    assert plan["system_type"] == "homogeneous_xxz_j1j2j3_dmi_impurity"
+    assert plan["view"] == "global"
+    assert plan["generation_chains"] == 20
+    assert plan["outputs"]
+
+
+def test_impurities_and_field_reach_the_generated_configuration(tmp_path):
+    built = api.build_project_config(
+        _builder_form(transverse_field_mev=0.5), workspace=tmp_path
+    )
+    import yaml
+
+    generate = yaml.safe_load(Path(built["config_path"]).read_text())["dataset"]["generate"]
+    assert [item["site"] for item in generate["impurities"]] == [1, 4]
+    assert generate["impurities"][0]["spin"] == "S=1"
+    assert generate["transverse_field_mev"] == 0.5
+
+
+def test_a_single_range_system_does_not_get_per_parameter_ranges(tmp_path):
+    """Bond-inhomogeneous chains take one shared range, not one per bond."""
+    import yaml
+
+    built = api.build_project_config(
+        _builder_form(
+            system_type="inhomogeneous_heisenberg",
+            n_sites=12,
+            coupling_ranges_mev=[[30, 45]],
+            bias_range_mev=[0, 100],
+            bias_points=200,
+            observable="Sz",
+            cutoff_mev=50.0,
+            output_points=200,
+            impurities=[],
+        ),
+        workspace=tmp_path,
+    )
+    payload = yaml.safe_load(Path(built["config_path"]).read_text())
+    generate = payload["dataset"]["generate"]
+    assert generate["coupling_range_mev"] == [30.0, 45.0]
+    assert "coupling_ranges_mev" not in generate
+    assert "impurities" not in generate
+    assert payload["training"]["view"] == "local_bonds"
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"system_type": "inhomogeneous_heisenberg", "n_sites": 2,
+          "coupling_ranges_mev": [[30, 45]], "impurities": []}, "three sites"),
+        ({"cutoff_mev": 99.0}, "inside the simulated bias window"),
+        ({"output_points": 500}, "beyond the resolution actually simulated"),
+        ({"impurities": [{"site": 1, "spin": "S=1", "transverse_mev": 2.0},
+                         {"site": 99, "spin": "S=1", "transverse_mev": 2.0}]},
+         "outside a 8-site chain"),
+    ],
+)
+def test_impossible_settings_are_refused_before_any_compute(tmp_path, overrides, expected):
+    """Each of these would otherwise fail only after the generation stage."""
+    with pytest.raises(ValueError, match=expected):
+        api.build_project_config(_builder_form(**overrides), workspace=tmp_path)
+
+
+def test_rejected_settings_are_a_client_error_not_a_server_fault(server):
+    """The form distinguishes "impossible request" from "the package broke"."""
+    status, payload = post(
+        server, "/api/build-config", {"form": _builder_form(cutoff_mev=99.0)}
+    )
+    assert status == 400
+    assert "inside the simulated bias window" in payload["error"]
+
+
+def test_builder_routes_are_reachable_over_http(server):
+    payload = json.loads(get(server, "/api/builder-options")[1])
+    assert payload["systems"] and payload["models"] and payload["presets"]
+    assert "tensorflow_available" in payload
+
+
+@pytest.mark.integration
+def test_sample_preview_returns_plottable_spectra():
+    """The check-before-you-commit step, against the real simulator."""
+    result = api.preview_samples(_builder_form(bias_points=21), n_samples=1)
+    assert len(result["bias_mev"]) == 21
+    assert result["target_names"][-1] == "D_z_magnitude"
+    assert len(result["samples"]) == 1
+    sample = result["samples"][0]
+    assert len(sample["sites"]) == 8, "one trace per site"
+    assert len(sample["sites"][0]) == 21
+    assert len(sample["couplings_mev"]) == 5
+    assert all(np.isfinite(sample["sites"][0]))

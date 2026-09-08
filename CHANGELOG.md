@@ -15,6 +15,21 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - A validated field-free three-impurity L=8 route, measured on 3000 simulated
   chains: `D_z_magnitude` reaches 0.258 +/- 0.004 meV test MAE and
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
+- The interface's training page is a guided form instead of a YAML editor,
+  since editing a configuration file is still coding. It walks through the
+  system, the chain and coupling ranges, the impurity arrangement where one
+  applies, the measurement to simulate, the model and its hyperparameters, and
+  ends at a plan. The options are served from the library, so the form cannot
+  offer a choice the library would reject, and combinations that would fail
+  during training -- a cutoff outside the simulated window, more input points
+  than simulated points, impurity sites off the end of the chain, too few sites
+  for a local window -- are refused before any compute is spent. Settings are
+  saved as a real configuration so a run can be repeated from the command line
+  or a cluster, but nobody has to read it.
+- The form can simulate two or three sample chains with the chosen settings and
+  plot them, which is the cheap way to notice that a bias window misses the
+  excitations or a broadening washes them out before committing to hours of
+  generation.
 - `hamlet gui` no longer fails when a port is busy: the default falls back to
   the next free port, an explicit `--port` is refused with actionable guidance,
   and a browser that hangs on launch can no longer leave the socket listening

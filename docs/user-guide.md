@@ -18,6 +18,37 @@ before doing it. Everything below is available through it, and the interface
 calls the same library functions, so nothing is available in one and not the
 other.
 
+### Generating a dataset and training, without writing a configuration
+
+The **Train a model** page is a form, not a file to edit. It asks, in order:
+
+1. **Which system** you are measuring — each option says what it recovers and
+   when to pick it. The DMI-without-impurities entry carries a warning, because
+   `D_z` is not recoverable there.
+2. **The chain and its couplings** — number of sites, how many chains to
+   simulate, and the range each coupling is drawn from. Impurity rows appear
+   only for the system that supports them, with their spin and anisotropies.
+3. **The measurement to simulate** — bias window, points, broadening,
+   observable, and the analysis cutoff.
+4. **A sample check** — simulates two or three chains with exactly those
+   settings and plots them, so you can see whether the bias window contains the
+   excitations and the broadening is not washing them out. About a minute per
+   chain, against hours for a full run.
+5. **The model** — ridge, random forest, or a neural network, with
+   hyperparameters behind a toggle and sensible defaults. Models needing
+   TensorFlow are disabled when it is not installed.
+6. **Review and run** — the plan lists every file it would write and a compute
+   estimate before anything happens.
+
+Settings that cannot work are refused at step 6 rather than hours into the run:
+a cutoff outside the simulated window, more model input points than simulated
+points, impurity sites off the end of the chain, or too few sites for a local
+sliding window.
+
+Your answers are saved as a configuration file, so the same run can be repeated
+or submitted to a cluster with `hamlet run <path>`. The page shows that path;
+you never have to open the file.
+
 ### Stopping it
 
 The interface is a server, so **closing the browser tab does not stop it** --

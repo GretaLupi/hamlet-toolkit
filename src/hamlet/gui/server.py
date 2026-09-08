@@ -85,6 +85,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(api.describe_published_models())
             elif route == "/api/model-card":
                 self._send_json(api.read_model_card(query["name"][0]))
+            elif route == "/api/builder-options":
+                self._send_json(api.describe_builder_options())
             elif route == "/api/examples":
                 self._send_json(api.list_example_configs())
             elif route == "/api/config":
@@ -130,6 +132,10 @@ class _Handler(BaseHTTPRequestHandler):
                         seconds_per_chain=float(seconds) if seconds else None,
                     )
                 )
+            elif route == "/api/build-config":
+                self._send_json(api.build_project_config(payload["form"]))
+            elif route == "/api/preview-samples":
+                self._send_json(self._submit_preview(payload).to_dict())
             elif route == "/api/save-config":
                 self._send_json(
                     api.write_config_text(payload["path"], payload["text"])
@@ -146,6 +152,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json({"error": "no such route"}, status=404)
         except KeyError as exc:
             self._send_error_json(ValueError(f"missing field {exc}"))
+        except ValueError as exc:
+            # Rejected settings are the caller's problem, not a server fault.
+            # The guided form leans on that distinction to tell "you asked for
+            # something impossible" apart from "the package broke".
+            self._send_error_json(exc, status=400)
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser
             self._send_error_json(exc, status=500)
 
@@ -173,6 +184,20 @@ class _Handler(BaseHTTPRequestHandler):
         ).start()
 
     # --- job submission ---
+    def _submit_preview(self, payload: dict[str, Any]) -> api.GuiJob:
+        """Simulate a couple of sample chains so the settings can be eyeballed.
+
+        A job rather than a direct call: one chain is around a minute, which is
+        far too long to hold a request open.
+        """
+        form = payload["form"]
+        n_samples = int(payload.get("n_samples", 2))
+
+        def work() -> Any:
+            return api.preview_samples(form, n_samples=n_samples)
+
+        return self.registry.submit("preview", "sample simulation", work)
+
     def _submit_screening(self, payload: dict[str, Any]) -> api.GuiJob:
         config_path = payload["config_path"]
         verify = bool(payload.get("verify_symmetric", False))

@@ -533,3 +533,471 @@ class _JobStream(io.TextIOBase):
 
     def flush(self) -> None:
         return None
+
+
+# --- guided builder ---------------------------------------------------------
+# The form is described here rather than in the page, so that the choices it
+# offers cannot drift from what the library actually accepts. Every default is
+# the library's own default or a value taken from a published reference model.
+
+_SYSTEM_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "system_type": "inhomogeneous_heisenberg",
+        "title": "Bond-inhomogeneous Heisenberg",
+        "recovers": "one exchange coupling per bond, varying along the chain",
+        "when": (
+            "The chain is not uniform and you want the coupling profile. This "
+            "is the validated workflow, with a published model from "
+            "peer-reviewed work."
+        ),
+        "view": "local_bonds",
+        "coupling_mode": "single_range",
+        "couplings": [{"name": "J", "low": 30.0, "high": 45.0}],
+        "supports_impurities": False,
+        "supports_field": False,
+        "defaults": {
+            "n_sites": 12,
+            "bias_range_mev": [0.0, 100.0],
+            "bias_points": 200,
+            "broadening_mev": 0.5,
+            "observable": "Sz",
+            "cutoff_mev": 50.0,
+            "output_points": 200,
+            "model": "keras_mlp",
+        },
+    },
+    {
+        "system_type": "homogeneous_heisenberg",
+        "title": "Homogeneous Heisenberg (J1, J2, ...)",
+        "recovers": "uniform couplings shared by the whole chain",
+        "when": (
+            "The chain is uniform and you want its exchange constants. One "
+            "range per interaction distance."
+        ),
+        "view": "global",
+        "coupling_mode": "per_parameter",
+        "couplings": [
+            {"name": "J1", "low": 30.0, "high": 45.0},
+            {"name": "J2", "low": 0.0, "high": 10.0},
+        ],
+        "supports_impurities": False,
+        "supports_field": False,
+        "defaults": {
+            "n_sites": 8,
+            "bias_range_mev": [0.0, 100.0],
+            "bias_points": 200,
+            "broadening_mev": 0.5,
+            "observable": "Sz",
+            "cutoff_mev": 60.0,
+            "output_points": 200,
+            "model": "random_forest",
+        },
+    },
+    {
+        "system_type": "homogeneous_xxz_j1j2j3",
+        "title": "Anisotropic XXZ + J2 + J3",
+        "recovers": "J1_xy, J2, J3 and Jz",
+        "when": "The chain has easy-axis or easy-plane anisotropy.",
+        "view": "global",
+        "coupling_mode": "per_parameter",
+        "couplings": [
+            {"name": "J1_xy", "low": 2.0, "high": 8.0},
+            {"name": "J2", "low": -1.5, "high": 1.5},
+            {"name": "J3", "low": -1.0, "high": 1.0},
+            {"name": "Jz", "low": 2.0, "high": 8.0},
+        ],
+        "supports_impurities": False,
+        "supports_field": False,
+        "defaults": {
+            "n_sites": 8,
+            "bias_range_mev": [0.0, 20.0],
+            "bias_points": 81,
+            "broadening_mev": 0.25,
+            "observable": "total_spin",
+            "cutoff_mev": 20.0,
+            "output_points": 61,
+            "model": "ridge",
+        },
+    },
+    {
+        "system_type": "homogeneous_xxz_j1j2j3_dmi",
+        "title": "XXZ + J2 + J3 + DMI (no symmetry breaking)",
+        "recovers": "J1_xy, J2, J3, Jz and a D_z magnitude",
+        "when": (
+            "Rarely what you want. D_z is exactly unidentifiable in a chain "
+            "that conserves total S^z, and it has been measured here as "
+            "unlearnable. Use the impurity system below instead."
+        ),
+        "view": "global",
+        "coupling_mode": "per_parameter",
+        "couplings": [
+            {"name": "J1_xy", "low": 2.0, "high": 8.0},
+            {"name": "J2", "low": -1.5, "high": 1.5},
+            {"name": "J3", "low": -1.0, "high": 1.0},
+            {"name": "Jz", "low": 2.0, "high": 8.0},
+            {"name": "D_z", "low": 0.0, "high": 2.0, "min": 0.0},
+        ],
+        "supports_impurities": False,
+        "supports_field": False,
+        "warning": (
+            "D_z cannot be recovered from this system. Measured skill against "
+            "a training-mean baseline is about zero at every dataset size "
+            "tried."
+        ),
+        "defaults": {
+            "n_sites": 8,
+            "bias_range_mev": [0.0, 20.0],
+            "bias_points": 81,
+            "broadening_mev": 0.25,
+            "observable": "total_spin",
+            "cutoff_mev": 20.0,
+            "output_points": 61,
+            "model": "ridge",
+        },
+    },
+    {
+        "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+        "title": "XXZ + J2 + J3 + DMI with impurities",
+        "recovers": "J1_xy, J2, J3, Jz and a D_z magnitude",
+        "when": (
+            "You want DMI. Impurities carrying transverse anisotropy break the "
+            "symmetry that hides it. Screen your arrangement first on the DMI "
+            "page: two impurities at distinct sites is the minimum, and three "
+            "worked best in testing."
+        ),
+        "view": "global",
+        "coupling_mode": "per_parameter",
+        "couplings": [
+            {"name": "J1_xy", "low": 2.0, "high": 6.0},
+            {"name": "J2", "low": -1.5, "high": 1.5},
+            {"name": "J3", "low": -1.0, "high": 1.0},
+            {"name": "Jz", "low": 2.0, "high": 6.0},
+            {"name": "D_z", "low": 0.3, "high": 2.5, "min": 0.0},
+        ],
+        "supports_impurities": True,
+        "supports_field": True,
+        "default_impurities": [
+            {"site": 1, "spin": "S=1", "transverse_mev": 2.0, "axial_mev": 0.0},
+            {"site": 4, "spin": "S=1", "transverse_mev": 2.0, "axial_mev": 0.0},
+            {"site": 6, "spin": "S=1", "transverse_mev": 2.0, "axial_mev": 0.0},
+        ],
+        "defaults": {
+            "n_sites": 8,
+            "bias_range_mev": [0.0, 20.0],
+            "bias_points": 81,
+            "broadening_mev": 0.25,
+            "observable": "total_spin",
+            "cutoff_mev": 20.0,
+            "output_points": 61,
+            "model": "ridge",
+        },
+    },
+)
+
+_MODEL_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "ridge",
+        "title": "Ridge regression",
+        "notes": "Fast and deterministic. A strong baseline; it won on the DMI dataset.",
+        "needs_tensorflow": False,
+        "options": [
+            {"name": "alpha", "label": "regularisation strength", "default": 0.001,
+             "type": "number"},
+        ],
+    },
+    {
+        "name": "random_forest",
+        "title": "Random forest",
+        "notes": "Handles non-linearity without tuning. Slower and larger on disk.",
+        "needs_tensorflow": False,
+        "options": [
+            {"name": "n_estimators", "label": "number of trees", "default": 400,
+             "type": "integer"},
+            {"name": "min_samples_leaf", "label": "minimum samples per leaf",
+             "default": 2, "type": "integer"},
+        ],
+    },
+    {
+        "name": "keras_mlp",
+        "title": "Neural network (MLP)",
+        "notes": (
+            "Used by the published inhomogeneous model. Needs the ml extra "
+            "(pip install \"hamlet-toolkit[ml]\")."
+        ),
+        "needs_tensorflow": True,
+        "options": [],
+    },
+    {
+        "name": "keras_cnn",
+        "title": "Neural network (CNN)",
+        "notes": "Convolutional over the bias axis. Needs the ml extra.",
+        "needs_tensorflow": True,
+        "options": [],
+    },
+)
+
+_PRESET_SPECS: tuple[dict[str, Any], ...] = (
+    {
+        "name": "standard",
+        "title": "Standard",
+        "notes": "Three seeds, full training. Use this for anything you will rely on.",
+    },
+    {
+        "name": "quick",
+        "title": "Quick",
+        "notes": (
+            "One seed, few epochs. For checking a pipeline runs; artifacts are "
+            "marked development-only and the advisor refuses them by default."
+        ),
+    },
+)
+
+
+def _reference_rate() -> float:
+    """The project's own simulation-cost anchor, so the form quotes one number."""
+    from ..project import REFERENCE_SECONDS_PER_CORRELATOR_L8
+
+    return float(REFERENCE_SECONDS_PER_CORRELATOR_L8)
+
+
+def describe_builder_options() -> dict[str, Any]:
+    """Everything the guided form needs in order to render itself."""
+    try:
+        import tensorflow  # noqa: F401
+
+        tensorflow_available = True
+    except Exception:  # noqa: BLE001
+        tensorflow_available = False
+
+    return {
+        "systems": [dict(spec) for spec in _SYSTEM_SPECS],
+        "models": [dict(spec) for spec in _MODEL_SPECS],
+        "presets": [dict(spec) for spec in _PRESET_SPECS],
+        "observables": [
+            {
+                "name": "Sz",
+                "title": "Sz only",
+                "notes": "The longitudinal autocorrelator alone.",
+            },
+            {
+                "name": "total_spin",
+                "title": "Total spin (Sxx + Syy + Szz)",
+                "notes": "Weighted sum of all three components; the DMI work uses this.",
+            },
+        ],
+        "spins": ["S=1", "S=3/2", "S=2", "S=5/2"],
+        "tensorflow_available": tensorflow_available,
+        "reference_seconds_per_correlator_l8": _reference_rate(),
+    }
+
+
+def _spec_for(system_type: str) -> dict[str, Any]:
+    for spec in _SYSTEM_SPECS:
+        if spec["system_type"] == system_type:
+            return spec
+    raise ValueError(f"unknown system_type {system_type!r}")
+
+
+def build_project_config(form: dict[str, Any], *, workspace: Path | None = None) -> dict[str, Any]:
+    """Turn the form's answers into a validated project configuration.
+
+    The configuration file is written where the run can find it but is not
+    presented to the user: the point of the guided builder is that nobody has
+    to read or edit YAML. It is still a real file on disk, so a run started
+    from the interface is reproducible from the command line afterwards.
+    """
+    from ..project import ProjectConfig
+
+    spec = _spec_for(str(form["system_type"]))
+    root = Path(workspace) if workspace else (REPO_ROOT / "results" / "gui-projects")
+    name = str(form.get("name") or "").strip() or f"{spec['system_type']}_project"
+    slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in name.lower())
+    project_dir = root / slug
+    project_dir.mkdir(parents=True, exist_ok=True)
+
+    # Combinations the configuration layer accepts but training would later
+    # refuse. Catching them here is the whole point of a guided form: the
+    # alternative is discovering it after the generation stage has run.
+    n_sites = int(form["n_sites"])
+    if spec["view"] == "local_bonds" and n_sites < 3:
+        raise ValueError(
+            "the local sliding window spans three sites, so a bond-resolved "
+            f"model needs at least 3 sites; {n_sites} was requested"
+        )
+    low, high = (float(v) for v in form["bias_range_mev"])
+    cutoff = float(form["cutoff_mev"])
+    if not low <= cutoff <= high:
+        raise ValueError(
+            f"the cutoff ({cutoff:g} meV) has to lie inside the simulated bias "
+            f"window ({low:g} to {high:g} meV)"
+        )
+    if int(form["output_points"]) > int(form["bias_points"]):
+        raise ValueError(
+            f"asking for {form['output_points']} output points from "
+            f"{form['bias_points']} simulated points would interpolate beyond "
+            "the resolution actually simulated"
+        )
+    if spec["supports_impurities"]:
+        sites = [int(item["site"]) for item in form.get("impurities") or ()]
+        if any(site >= n_sites for site in sites):
+            raise ValueError(
+                f"impurity sites {sorted(s for s in sites if s >= n_sites)} lie "
+                f"outside a {n_sites}-site chain (sites are numbered from 0)"
+            )
+
+    generate: dict[str, Any] = {
+        "system": spec["system_type"],
+        "output": str(project_dir / "dataset.npz"),
+        "n_sites": n_sites,
+        "n_samples": int(form["n_samples"]),
+        "bias_range_mev": [float(v) for v in form["bias_range_mev"]],
+        "bias_points": int(form["bias_points"]),
+        "broadening_mev": float(form["broadening_mev"]),
+        "observable": str(form["observable"]),
+        "output_quantity": "didv",
+        "backend": "dmrgpy",
+        "seed": int(form.get("seed", 42)),
+    }
+    if form["observable"] == "total_spin":
+        generate["observable_weights"] = [
+            float(v) for v in form.get("observable_weights", [1.0, 1.0, 1.0])
+        ]
+    ranges = [[float(low), float(high)] for low, high in form["coupling_ranges_mev"]]
+    if spec["coupling_mode"] == "single_range":
+        generate["coupling_range_mev"] = ranges[0]
+    else:
+        generate["coupling_ranges_mev"] = ranges
+    if spec["supports_impurities"] and form.get("impurities"):
+        generate["impurities"] = [
+            {
+                "site": int(item["site"]),
+                "spin": str(item.get("spin", "S=1")),
+                "axial_mev": float(item.get("axial_mev", 0.0)),
+                "transverse_mev": float(item.get("transverse_mev", 0.0)),
+            }
+            for item in form["impurities"]
+        ]
+    if spec["supports_field"]:
+        generate["transverse_field_mev"] = float(form.get("transverse_field_mev", 0.0))
+
+    payload: dict[str, Any] = {
+        "config_schema_version": 1,
+        "name": name,
+        "system_type": spec["system_type"],
+        "output_dir": str(project_dir / "run"),
+        "dataset": {"format": "generated", "generate": generate},
+        "training": {
+            "cutoffs_mev": [float(form["cutoff_mev"])],
+            "manual_cutoff_mev": float(form["cutoff_mev"]),
+            "output_points": int(form["output_points"]),
+            "view": spec["view"],
+            "model": str(form["model"]),
+            "preset": str(form.get("preset", "standard")),
+        },
+    }
+    options = {k: v for k, v in (form.get("model_options") or {}).items() if v not in (None, "")}
+    if options:
+        payload["training"]["model_options"] = options
+
+    config_path = project_dir / "project.yaml"
+    try:
+        import yaml
+    except ImportError as exc:  # pragma: no cover
+        raise ImportError("writing a configuration requires PyYAML") from exc
+    config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    # Validate by loading it back the way a run would, so an impossible
+    # combination is reported now rather than hours into a job.
+    try:
+        ProjectConfig.from_file(config_path)
+    except Exception as exc:
+        raise ValueError(f"those settings are not a valid project: {exc}") from exc
+
+    return {"config_path": str(config_path), "project_dir": str(project_dir), "name": name}
+
+
+def preview_samples(form: dict[str, Any], *, n_samples: int = 3) -> dict[str, Any]:
+    """Simulate a few chains with the chosen settings and return them for plotting.
+
+    Worth the wait before committing to a full run: it is the only way to see
+    that the bias window actually contains the excitations, that the broadening
+    is not washing them out, and that the couplings produce features at all.
+    """
+    from ..data import generate_dataset
+    from ..simulation import DmrgpySimulator, SpectroscopyProtocol
+    from ..systems import (
+        HomogeneousHeisenbergFamily,
+        HomogeneousXXZDMIImpurityFamily,
+        HomogeneousXXZDMILongRangeFamily,
+        HomogeneousXXZLongRangeFamily,
+        InhomogeneousHeisenbergFamily,
+        SiteImpurity,
+    )
+
+    spec = _spec_for(str(form["system_type"]))
+    n_sites = int(form["n_sites"])
+    ranges = tuple((float(low), float(high)) for low, high in form["coupling_ranges_mev"])
+
+    if spec["system_type"] == "inhomogeneous_heisenberg":
+        family = InhomogeneousHeisenbergFamily(n_sites, ranges[0])
+    elif spec["system_type"] == "homogeneous_heisenberg":
+        family = HomogeneousHeisenbergFamily(n_sites, ranges)
+    elif spec["system_type"] == "homogeneous_xxz_j1j2j3":
+        family = HomogeneousXXZLongRangeFamily(n_sites, ranges)
+    elif spec["system_type"] == "homogeneous_xxz_j1j2j3_dmi":
+        family = HomogeneousXXZDMILongRangeFamily(n_sites, ranges)
+    else:
+        impurities = tuple(
+            SiteImpurity(
+                int(item["site"]),
+                str(item.get("spin", "S=1")),
+                axial_mev=float(item.get("axial_mev", 0.0)),
+                transverse_mev=float(item.get("transverse_mev", 0.0)),
+            )
+            for item in form.get("impurities") or ()
+        )
+        family = HomogeneousXXZDMIImpurityFamily(
+            n_sites,
+            ranges,
+            impurities=impurities,
+            transverse_field_mev=float(form.get("transverse_field_mev", 0.0)),
+        )
+
+    weights = (
+        tuple(float(v) for v in form.get("observable_weights", (1.0, 1.0, 1.0)))
+        if form["observable"] == "total_spin"
+        else None
+    )
+    protocol = SpectroscopyProtocol.uniform(
+        tuple(float(v) for v in form["bias_range_mev"]),
+        points=int(form["bias_points"]),
+        broadening_mev=float(form["broadening_mev"]),
+        observable=str(form["observable"]),
+        observable_weights=weights,
+        output_quantity="didv",
+    )
+
+    print(f"simulating {n_samples} sample chain(s) of {n_sites} sites")
+    dataset = generate_dataset(
+        family,
+        DmrgpySimulator(dynamics_mode="ED"),
+        protocol,
+        n_samples=int(n_samples),
+        seed=int(form.get("seed", 42)),
+    )
+    print("done")
+
+    bias = np.asarray(dataset.bias_mev, dtype=float)
+    spectra = np.asarray(dataset.spectra, dtype=float)
+    targets = np.asarray(dataset.targets_mev, dtype=float)
+    return {
+        "bias_mev": bias.tolist(),
+        "target_names": list(dataset.target_names),
+        "samples": [
+            {
+                "couplings_mev": targets[index].tolist(),
+                "sites": [row.tolist() for row in spectra[index]],
+            }
+            for index in range(spectra.shape[0])
+        ],
+    }

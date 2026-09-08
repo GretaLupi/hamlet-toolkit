@@ -109,22 +109,104 @@
 <section id="panel-train" class="panel">
   <h2>Train a model for your own system</h2>
   <p class="lead">
-    Start from an example configuration, edit it, then <em>plan</em> the run.
-    Planning writes nothing and shows every output plus a compute estimate, so
-    you can see the cost before committing hours.
+    Answer the questions below and the run is assembled for you. Nothing is
+    written or computed until you ask for it.
   </p>
-  <div class="row">
-    <select id="train-example"></select>
-    <button id="train-load">Load</button>
-    <button id="train-plan" class="primary">Plan (no changes)</button>
-    <button id="train-save">Save edits</button>
-  </div>
-  <textarea id="train-text" spellcheck="false" rows="20"></textarea>
-  <div id="train-out"></div>
-  <div class="danger-zone">
-    <button id="train-run">Run this configuration</button>
-    <span class="hint">Generation and training take hours. Plan first.</span>
-  </div>
+
+  <ol class="steps">
+    <li>
+      <h3>1 &middot; Which system are you measuring?</h3>
+      <div id="sys-cards" class="cards"></div>
+      <div id="sys-warning"></div>
+    </li>
+
+    <li>
+      <h3>2 &middot; The chain and its couplings</h3>
+      <div class="row">
+        <label>sites in the chain
+          <input type="number" id="f-n-sites" min="2" max="20" step="1" style="width:6em">
+        </label>
+        <label>chains to simulate
+          <input type="number" id="f-n-samples" min="1" step="1" style="width:8em">
+        </label>
+      </div>
+      <p class="hint">
+        Couplings are drawn uniformly from these ranges. Make them cover the
+        values you expect: predictions outside the trained range are
+        extrapolation.
+      </p>
+      <table id="f-couplings"><tbody></tbody></table>
+      <div id="f-impurity-block" hidden>
+        <h4>Impurities</h4>
+        <p class="hint">
+          These are known conditions, not things the model infers, so use your
+          measured values. Two carrying transverse anisotropy at distinct sites
+          is the minimum that makes DMI recoverable at all.
+        </p>
+        <table id="f-impurities"><tbody></tbody></table>
+        <div class="row">
+          <button id="f-add-impurity">Add an impurity</button>
+          <label>transverse field
+            <input type="number" id="f-field" value="0" step="0.1" style="width:6em"> meV
+          </label>
+        </div>
+      </div>
+    </li>
+
+    <li>
+      <h3>3 &middot; The measurement to simulate</h3>
+      <p class="hint">Match this to the measurement you can actually take.</p>
+      <div class="row">
+        <label>bias from
+          <input type="number" id="f-bias-lo" step="1" style="width:5em"> to
+          <input type="number" id="f-bias-hi" step="1" style="width:5em"> meV
+        </label>
+        <label>points <input type="number" id="f-bias-points" step="1" style="width:6em"></label>
+        <label>broadening <input type="number" id="f-broadening" step="0.05" style="width:5em"> meV</label>
+      </div>
+      <div class="row">
+        <label>observable <select id="f-observable"></select></label>
+        <label>analysis cutoff <input type="number" id="f-cutoff" step="1" style="width:5em"> meV</label>
+        <label>model input points <input type="number" id="f-output-points" step="1" style="width:6em"></label>
+      </div>
+    </li>
+
+    <li>
+      <h3>4 &middot; Check a few samples before committing</h3>
+      <p class="hint">
+        Simulates two or three chains with exactly these settings, so you can
+        see whether the bias window contains the excitations and the broadening
+        is not washing them out. About a minute per chain.
+      </p>
+      <div class="row">
+        <button id="f-preview" class="primary">Plot samples</button>
+      </div>
+      <div id="f-preview-out"></div>
+    </li>
+
+    <li>
+      <h3>5 &middot; Which model?</h3>
+      <div id="f-model-cards" class="cards"></div>
+      <div class="row">
+        <label>effort <select id="f-preset"></select></label>
+        <button id="f-toggle-advanced">Hyperparameters</button>
+      </div>
+      <div id="f-model-options" hidden></div>
+    </li>
+
+    <li>
+      <h3>6 &middot; Review and run</h3>
+      <div class="row">
+        <label>name this run <input type="text" id="f-name" size="30" placeholder="my chain"></label>
+        <button id="f-plan" class="primary">Show me what this will do</button>
+      </div>
+      <div id="f-plan-out"></div>
+      <div class="danger-zone" id="f-run-zone" hidden>
+        <button id="f-run">Start the run</button>
+        <span class="hint">Generation and training take hours. It runs in the background.</span>
+      </div>
+    </li>
+  </ol>
 </section>
 
 <!-- ------------------------------------------------------------------ dmi -->
