@@ -2,6 +2,12 @@
 
 # Using HamLeT
 
+HamLeT provides a general experiment-to-inference workflow for STM/STS data.
+This release implements that workflow for Heisenberg and related spin-chain
+Hamiltonians; spin chains are the first physics mode, and the package structure
+is intended to support additional observables, simulators, and inverse problems
+without changing the experimental workflow.
+
 ## The browser interface
 
 If you are not sure which workflow applies to your situation -- the usual

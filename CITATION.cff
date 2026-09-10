@@ -2,6 +2,7 @@ cff-version: 1.2.0
 message: "If you use HamLeT in your work, please cite this software and the model-specific references in the relevant model card."
 title: "HamLeT: Hamiltonian Learning Toolkit"
 type: software
+abstract: "An experimental-facing framework for learning Hamiltonians and physical parameters from STM/STS data, with spin chains as its first implemented physics mode."
 authors:
   - family-names: Lupi
     given-names: Greta

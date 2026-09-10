@@ -9,14 +9,22 @@
 [![Python](https://img.shields.io/pypi/pyversions/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-087f8c.svg)](LICENSE)
 
-HamLeT (Hamiltonian Learning Toolkit) is an experimentalist-facing Python
-package for generating spin-chain spectroscopy datasets, training supervised
-inverse models, and inferring Hamiltonian parameters from measured dI/dV maps.
+HamLeT (Hamiltonian Learning Toolkit) is an experimental-facing framework for
+inferring Hamiltonians and physical parameters from scanning tunnelling
+microscopy and spectroscopy data. It connects raw-data inspection and
+preprocessing to simulated dataset generation, supervised model training,
+model matching, inference, and reproducible reports.
 
-The package is an **alpha release**: the complete Heisenberg workflow works,
-while additional physical systems and experimental formats are still being
-added. Physical energies are expressed in meV; at the simulator boundary,
-`1 DMRGPy energy unit = 10 meV`.
+Spin chains are HamLeT's first fully implemented physics mode, not the intended
+limit of the toolkit. The same experiment → simulation → learning → inference
+workflow is being designed to accommodate further STM problems, including
+QPI-based electronic-structure inference and diffusion/generative approaches.
+
+HamLeT is a **working pre-1.0 research release**. The current spin-chain
+workflows are implemented end to end and extensively tested; pre-1.0 indicates
+that the public extension API may still evolve as new physical modes are
+introduced. Physical energies are expressed in meV; at the DMRGPy simulator
+boundary, `1 DMRGPy energy unit = 10 meV`.
 
 ## Start with the interface
 
@@ -74,6 +82,16 @@ changing the cutoff.
 Each shipped artifact has a model card under
 [`src/hamlet/resources/models`](src/hamlet/resources/models) documenting its
 training distribution, expected observable, accuracy, and limitations.
+
+The pretrained bond-inhomogeneous model is the model developed for:
+
+> G. Lupi, S. Ravuri, C. Zhao, et al., *Learning Inhomogeneous Heisenberg
+> Hamiltonians in Nanographene Spin Chains* (2026).
+
+Please cite that work when using this model. Its
+[model card](src/hamlet/resources/models/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
+contains the full author list, BibTeX entry, training provenance, and validity
+range.
 
 ## Command line
 

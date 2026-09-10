@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hamlet-toolkit"
 version = "0.1.0"
-description = "HamLeT: Hamiltonian Learning Toolkit for simulated and experimental data"
+description = "Experimental Hamiltonian inference from STM/STS data with simulation and machine learning"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -21,7 +21,7 @@ keywords = [
   "dmrg",
 ]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",

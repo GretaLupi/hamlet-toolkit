@@ -228,6 +228,12 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Changed
 
+- Project positioning now describes HamLeT as a general experimental
+  Hamiltonian-inference toolkit for STM/STS, with spin chains identified as its
+  first implemented physics mode. The release maturity is beta/pre-1.0: the
+  supported workflows are tested and usable while the extension API continues
+  to evolve. The README now cites the paper associated with the pretrained
+  inhomogeneous-Heisenberg model.
 - Published model artifacts now live under `src/hamlet/resources/models/` and
   are included as package data, so the GUI catalog contains the same reference
   models after `pip install` as it does in a source checkout.
