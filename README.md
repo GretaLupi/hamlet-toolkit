@@ -15,19 +15,16 @@ microscopy and spectroscopy data. It connects raw-data inspection and
 preprocessing to simulated dataset generation, supervised model training,
 model matching, inference, and reproducible reports.
 
-Spin chains are HamLeT's first fully implemented physics mode, not the intended
-limit of the toolkit. The same experiment → simulation → learning → inference
-workflow is being designed to accommodate further STM problems, including
-QPI-based electronic-structure inference and diffusion/generative approaches.
+Spin chains are HamLeT's first fully implemented application. Its modular
+experiment → simulation → learning → inference workflow is designed for
+Hamiltonian-learning problems based on STM/STS measurements.
 
 HamLeT **1.0 is a complete, working toolkit for spin-chain Hamiltonian
 inference**. Its spin-chain workflows are implemented end to end and extensively
 tested: experimentalists can import site-resolved STM/STS measurements, inspect
 and crop spectra, match compatible pretrained models, generate simulated
 training data, train their own estimators, infer couplings, and export results.
-Future physics modes will extend this stable foundation rather than being
-prerequisites for calling the present spin-chain toolkit complete. Physical
-energies are expressed in meV; at the DMRGPy simulator boundary,
+Physical energies are expressed in meV; at the DMRGPy simulator boundary,
 `1 DMRGPy energy unit = 10 meV`.
 
 ## Start with the interface
