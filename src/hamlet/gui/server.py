@@ -73,6 +73,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header(
             "Content-Type", content_types.get(target.suffix, "application/octet-stream")
         )
+        # Never cached. These files ship inside the package, so they change
+        # whenever it is upgraded, and a browser holding an old index.html
+        # against a new bundle is a page assembled from two versions: it asks
+        # for scripts that are no longer there, or misses ones that now are.
+        # There is no bandwidth argument on the other side -- it is localhost.
+        self.send_header("Cache-Control", "no-store, must-revalidate")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -93,6 +99,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(api.describe_builder_options())
             elif route == "/api/screening-options":
                 self._send_json(api.describe_screening_options())
+            elif route == "/api/locations":
+                self._send_json(api.describe_output_locations())
             elif route == "/api/compute":
                 self._send_json(api.describe_compute_options())
             elif route == "/api/cluster-config":

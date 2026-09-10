@@ -94,6 +94,81 @@ def _experiment_root() -> Path:
     return _workspace_base() / "gui-experiments"
 
 
+# What each place under the workspace is for, in the order a run fills them.
+# Kept beside the roots themselves so a new one cannot be added without a
+# description, which is how a folder ends up on disk that nobody can explain.
+OUTPUT_LOCATIONS: tuple[tuple[str, str, str], ...] = (
+    ("Uploads", "gui-uploads", "Copies of files dropped onto the page."),
+    (
+        "Imported experiments",
+        "gui-experiments",
+        "Folders of raw per-site STS files, converted to one measurement.",
+    ),
+    (
+        "Projects",
+        "gui-projects",
+        "One folder per training run: its configuration, generated dataset, "
+        "and the trained artifact.",
+    ),
+    (
+        "Analyses",
+        "gui-analyses",
+        "One folder per inference: report.html, summary.png, couplings.csv "
+        "and report.json.",
+    ),
+    ("DMI designs", "gui-screenings", "Saved sample-design screening configurations."),
+)
+
+
+def describe_output_locations() -> dict[str, Any]:
+    """Every directory the interface writes to, and what lands in each.
+
+    Asked for often enough to be worth answering unprompted: the workspace is
+    not in the same place for everyone. A source checkout writes beside the
+    project, an installed package writes under the home directory -- it cannot
+    write beside itself, because that is inside site-packages, where pip may
+    delete a user's measurements on the next upgrade -- and
+    ``HAMLET_WORKSPACE`` overrides both. Someone who does not know which of
+    those applies to them cannot find their own results.
+    """
+    import os
+
+    base = _workspace_base()
+    override = os.environ.get("HAMLET_WORKSPACE")
+    locations = []
+    for title, name, purpose in OUTPUT_LOCATIONS:
+        path = base / name
+        entries = sorted(path.iterdir()) if path.is_dir() else []
+        locations.append(
+            {
+                "title": title,
+                "path": str(path),
+                "purpose": purpose,
+                "exists": path.is_dir(),
+                "entries": len(entries),
+                "latest": str(entries[-1].name) if entries else "",
+            }
+        )
+    return {
+        "workspace": str(base),
+        "locations": locations,
+        "source_checkout": _is_source_checkout(),
+        "override": override or "",
+        "explanation": (
+            f"This is a source checkout, so results are kept beside the project "
+            f"in {base}."
+            if _is_source_checkout() and not override
+            else (
+                f"HAMLET_WORKSPACE is set, so everything is written under {base}."
+                if override
+                else f"HamLeT is installed as a package, so results are kept in "
+                f"{base} rather than beside the installed files, which pip "
+                f"replaces on upgrade."
+            )
+        ),
+    }
+
+
 def _readable_roots() -> tuple[Path, ...]:
     """Directories the interface is willing to serve files back out of.
 
@@ -1211,19 +1286,32 @@ def screening_preview(config_path: str | Path) -> dict[str, Any]:
 def describe_compute_options() -> dict[str, Any]:
     """What this machine offers, and what a cluster configuration would need."""
     from ..cluster import RESOURCE_FIELDS, available_profiles
-    from ..compute import describe_compute
+    from ..compute import describe_compute, gpu_unavailable_summary
 
     report = describe_compute()
+    no_gpu_here = gpu_unavailable_summary(report)
     return {
         **report.to_dict(),
+        # `unavailable_here` marks a choice this machine cannot honour without
+        # forbidding it: a configuration built here is often destined for a
+        # cluster that does have a card, and the interface has no business
+        # refusing that. The card says so, and the plan says so again before
+        # anything runs.
         "devices": [
             {"name": "auto", "title": "Automatic",
-             "notes": "Use an available GPU; otherwise use the CPU."},
+             "notes": "Use an available GPU; otherwise use the CPU.",
+             "unavailable_here": ""},
             {"name": "cpu", "title": "Force the CPU",
-             "notes": "Use CPU training, including on systems with an available GPU."},
+             "notes": "Use CPU training, including on systems with an available GPU.",
+             "unavailable_here": ""},
             {"name": "gpu", "title": "Require a GPU",
-             "notes": "Use a GPU when available; fall back to the CPU otherwise."},
+             "notes": "Use a GPU when available; fall back to the CPU otherwise.",
+             "unavailable_here": no_gpu_here},
         ],
+        "gpu_help_url": (
+            "https://github.com/GretaLupi/hamlet-toolkit/blob/main/"
+            "docs/user-guide.md#using-a-gpu"
+        ),
         "cluster": {
             "schedulers": available_profiles(),
             "resources": list(RESOURCE_FIELDS),
@@ -2379,6 +2467,15 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
     device = str(form.get("device", "auto"))
     if device not in {"auto", "cpu", "gpu"}:
         raise ValueError(f"device must be auto, cpu or gpu; got {device!r}")
+
+    # Parallel chains. Refused at the form rather than at generation time,
+    # which on this stage would mean failing after the first chunk of an
+    # hours-long run.
+    workers = int(form.get("workers", 1) or 1)
+    if workers < 0:
+        raise ValueError("chains at once must not be negative; 0 means one per core")
+    if workers != 1:
+        generate["workers"] = workers
 
     payload: dict[str, Any] = {
         "config_schema_version": 1,

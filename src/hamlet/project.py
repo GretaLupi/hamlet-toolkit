@@ -69,6 +69,11 @@ class DatasetGenerationConfig:
     kpm_max_bond_dimension: int = 20
     seed: int = 42
     checkpoint_every: int = 25
+    # How many chains to simulate at once. Generation is the long stage and
+    # every chain is independent, so this is the one setting that actually
+    # shortens it; `0` means "one per core". It is an execution detail and not
+    # part of the recipe -- see `to_recipe`.
+    workers: int = 1
 
     def __post_init__(self) -> None:
         if self.system_type not in {
@@ -88,6 +93,8 @@ class DatasetGenerationConfig:
             raise ValueError("n_sites must be at least 2 and n_samples positive")
         if self.bias_points < 2 or self.checkpoint_every < 1:
             raise ValueError("bias_points must be at least 2 and checkpoint_every positive")
+        if self.workers < 0:
+            raise ValueError("workers must not be negative; 0 means one per core")
         if (
             len(self.bias_range_mev) != 2
             or not self.bias_range_mev[0] < self.bias_range_mev[1]
@@ -173,8 +180,19 @@ class DatasetGenerationConfig:
             )
 
     def to_recipe(self) -> dict[str, Any]:
+        """The physics of the dataset, which is what gets fingerprinted.
+
+        ``workers`` is excluded for the same reason ``output_path`` is: it
+        cannot change a single number in the result. Chunk seeds are derived
+        from the seed sequence by index, so a chunk is identical whenever and
+        wherever it runs. Were it included, generating on four cores and then
+        resuming on eight would be rejected as a recipe mismatch -- and worse,
+        a dataset made on one machine would look incompatible with the same
+        recipe on another.
+        """
         values = asdict(self)
         values.pop("output_path")
+        values.pop("workers")
         return values
 
 
@@ -604,6 +622,7 @@ class HamiltonianLearningProject:
             recipe=recipe.to_recipe(),
             seed=recipe.seed,
             checkpoint_every=recipe.checkpoint_every,
+            workers=_resolved_workers(recipe.workers),
             progress=resolved_progress,
         )
         self.dataset = self.generation_result.dataset
@@ -650,7 +669,12 @@ class HamiltonianLearningProject:
             correlators = 3 if recipe.observable == "total_spin" else 1
             if rate is None:
                 rate = REFERENCE_SECONDS_PER_CORRELATOR_L8 * correlators
-            estimated_seconds = generation_chains * rate
+            workers = _resolved_workers(recipe.workers)
+            # Divided by the workers because that is the number a user is
+            # deciding with. The estimate stays a serial-rate extrapolation
+            # underneath, and the division is only near-linear -- chains are
+            # independent, but they still contend for memory bandwidth.
+            estimated_seconds = generation_chains * rate / workers
             dataset_detail = {
                 "system": recipe.system_type,
                 "n_sites": recipe.n_sites,
@@ -663,6 +687,7 @@ class HamiltonianLearningProject:
                 "backend": recipe.backend,
                 "seed": recipe.seed,
                 "output_path": recipe.output_path,
+                "workers": workers,
             }
             if recipe.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity":
                 dataset_detail["impurities"] = [
@@ -1382,7 +1407,22 @@ def _parse_generation_config(
         kpm_max_bond_dimension=int(values.get("kpm_max_bond_dimension", 20)),
         seed=int(values.get("seed", 42)),
         checkpoint_every=int(values.get("checkpoint_every", 25)),
+        workers=int(values.get("workers", 1)),
     )
+
+
+def _resolved_workers(workers: int) -> int:
+    """Turn the configured value into a process count.
+
+    ``0`` means "one per core", which is what someone wanting the machine's
+    full capacity writes rather than looking the number up and hard-coding it
+    into a configuration that then travels to a different machine.
+    """
+    import os
+
+    if workers == 0:
+        return os.cpu_count() or 1
+    return max(1, int(workers))
 
 
 def _console_progress(done: int, total: int) -> None:

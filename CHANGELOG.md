@@ -8,6 +8,69 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Added
 
+- Dataset generation runs several chains at once: `dataset.generate.workers`
+  in a configuration, **chains at once** on the training page, `0` for one per
+  core. It is the stage that costs hours and every chain is independent, so
+  this is the only setting that shortens it -- measured at 2.7x on four
+  workers. It cannot change the result: chunk seeds are derived from the run's
+  seed by position and samples are assembled in recipe order, so the dataset
+  is bit-identical on one core and on twelve, and `workers` is excluded from
+  the recipe fingerprint -- a run stopped on four cores resumes on sixteen,
+  and a dataset generated on one machine stays valid on another. Each worker
+  simulates in its own working directory, because DMRGPy derives its scratch
+  paths from the working directory and two workers sharing one would overwrite
+  each other's wavefunctions and produce a quietly wrong dataset. Progress and
+  cancellation move to chunk granularity while workers are in use. The
+  platform's default process start method is used rather than a pinned one:
+  spawn and forkserver both re-import `__main__` in every worker and so fail
+  wherever it is not importable, including notebooks and `python -c`, which
+  would trade an unlikely fork/thread deadlock for certain breakage of a
+  documented workflow.
+- The interface says where it writes things, on the *Start here* page and from
+  the new `hamlet where`. The workspace is `results/` beside a source
+  checkout, `~/.hamlet/workspace/` for an installed package, or wherever
+  `HAMLET_WORKSPACE` points, and the report says which case applies and why --
+  an installed package must not write beside itself, because that is inside
+  `site-packages` and pip replaces it on upgrade. Each folder is listed with
+  what lands in it. `GET /api/locations` backs it.
+- The device cards mark a choice this machine cannot honour. Picking **Require
+  a GPU** where none is visible used to highlight the card and say nothing
+  until the plan, two screens later. It is now labelled *not on this machine*
+  with the reason, and warns that training here will use the CPU -- without
+  forbidding it, since a configuration built here is often bound for a cluster
+  that does have a card.
+- A `gpu` extra, `pip install "hamlet-toolkit[gpu]"`, which installs
+  `tensorflow[and-cuda]` on Linux. Neither `[ml]` nor `[all]` ever produced a
+  GPU on any platform: they require the plain TensorFlow wheel, which on Linux
+  is built with CUDA but ships none of the CUDA runtime libraries and so finds
+  no card unless the system already provides them. Deliberately not folded
+  into `[all]`, because those wheels are several GB and do nothing on Windows
+  or macOS. The floor is 2.14 -- the release where the `and-cuda` extra first
+  exists -- since asking 2.13 for it only warns and then installs a
+  TensorFlow that can never find the card.
+- `hamlet compute` now says *why* it sees no GPU, not just that it does not.
+  The bare fact reads as a driver or hardware fault on every platform, and on
+  native Windows it is neither: TensorFlow has shipped no Windows GPU support
+  since 2.11 and its Windows wheels are CPU-only, so the report says so and
+  points at WSL2 instead of leaving someone to update drivers that were never
+  the problem. A CUDA-built TensorFlow that sees no card is distinguished from
+  a build that never could, and macOS is not sent after a CUDA install it
+  cannot use. The reason appears wherever the report does -- `hamlet compute`
+  and the interface's compute page.
+- A **Using a GPU** section in the user guide: which stages a card can help
+  (only Keras training; not generation, which is the long one), the Linux
+  install, and the WSL2 route for Windows, including the ordering that makes
+  it work -- `tensorflow[and-cuda]` before HamLeT, or pip sees the plain
+  `tensorflow` requirement already satisfied and adds no CUDA packages.
+- A line of Shakespeare while a job runs. The waits here are long -- one
+  simulated chain is about a minute and a dataset is hours -- and all the page
+  could offer for that was `142 of 3000 chains`. The package is called HamLeT,
+  so the wait now quotes the play: the **Running** tab and the page that
+  started the run show an attributed line once a job is more than eight seconds
+  old, rotating every thirty seconds. Some lines are held back until a run has
+  been going three minutes, and a few more until fifteen. Every line is
+  Shakespeare and so public domain, and the **hide** link beside one turns them
+  off for good.
 - A PyPI release workflow using Trusted Publishing, release instructions,
   citation metadata, a security policy, and structured issue and pull-request
   templates.
@@ -197,6 +260,26 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 - `scripts/benchmark_homogeneous.py`, which repeats training over several
   split seeds and reports the spread, because single-split per-parameter
   scores at these dataset sizes are noisy enough to invert a conclusion.
+
+### Fixed
+
+- The waiting quotes were unstable and could not be turned back on. Three
+  faults: the line was derived from the elapsed time sampled at render, and
+  the jobs list polls every three seconds against a job page's two, so the
+  same run quoted two different lines on two pages at once -- the choice is
+  now held per job and rotated on a stored timestamp, so every surface reads
+  one answer. **hide** wrote a permanent preference with no control to undo it,
+  leaving clearing site data as the only way back; the *Running* page now
+  carries a checkbox that reflects and sets it. And a missing `quotes.js` --
+  an older install, a stale cache -- threw from inside the job renderer, which
+  `refreshJobs` caught and reported as *the server has stopped*, blacking out
+  the jobs page over a decoration; the call is now guarded, so the worst case
+  is no quote.
+- The interface's own HTML, CSS and JavaScript are served `no-store`. They
+  ship inside the package and change when it is upgraded, so a cached
+  `index.html` against a new bundle produced a page assembled from two
+  versions -- which is how the quotes came to be missing after an update.
+  There is no bandwidth argument against it on localhost.
 
 ### Removed
 

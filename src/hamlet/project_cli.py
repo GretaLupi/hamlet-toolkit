@@ -199,6 +199,10 @@ def build_parser() -> argparse.ArgumentParser:
         "compute", help="report the CPU and GPU this machine can use"
     )
 
+    commands.add_parser(
+        "where", help="print the folders HamLeT writes results into"
+    )
+
     cluster = commands.add_parser(
         "cluster",
         help="run heavy stages on a cluster, through your own ssh",
@@ -373,6 +377,31 @@ def _run_compute(args) -> int:
     return 0
 
 
+def _run_where(args) -> int:
+    """Print the output folders, because they are not in one place for everyone.
+
+    A source checkout writes beside the project; an installed package writes
+    under the home directory, since beside itself is site-packages and pip
+    replaces that on upgrade. Both are reasonable and neither is guessable, so
+    it is worth a command rather than a paragraph in the guide.
+    """
+    from .gui.api import describe_output_locations
+
+    info = describe_output_locations()
+    print(info["explanation"])
+    print()
+    print(f"workspace: {info['workspace']}")
+    print()
+    width = max(len(item["title"]) for item in info["locations"])
+    for item in info["locations"]:
+        count = f"{item['entries']} item(s)" if item["exists"] else "not created yet"
+        print(f"  {item['title']:<{width}s}  {item['path']}")
+        print(f"  {'':<{width}s}  {item['purpose']} ({count})")
+    print()
+    print("Set HAMLET_WORKSPACE to write somewhere else.")
+    return 0
+
+
 def _cluster_session(args):
     from .cluster import ClusterConfig, ClusterSession
 
@@ -494,6 +523,8 @@ def _run_cluster(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "where":
+        return _run_where(args)
     if args.command == "compute":
         return _run_compute(args)
     if args.command == "cluster":

@@ -200,6 +200,46 @@ skill a model trained on that design actually reached.
 The design is saved as a screening configuration, so
 `hamlet screen-dmi <path>` repeats it.
 
+### Where your files are saved
+
+The *Start here* page lists every folder the interface writes to, and so does
+
+```bash
+hamlet where
+```
+
+The location depends on how HamLeT was installed, which is why it is worth
+asking rather than assuming:
+
+| Install | Workspace |
+| --- | --- |
+| a source checkout | `results/` beside the project |
+| an installed package | `~/.hamlet/workspace/` |
+| `HAMLET_WORKSPACE` set | wherever it points |
+
+An installed package deliberately does not write beside itself: that is inside
+`site-packages`, which pip replaces on upgrade, and your measurements would go
+with it.
+
+Within the workspace: `gui-uploads/` holds copies of dropped files,
+`gui-experiments/` the folders of raw per-site spectra once converted,
+`gui-projects/` one folder per training run (configuration, dataset, trained
+artifact), `gui-analyses/` one folder per inference (`report.html`,
+`summary.png`, `couplings.csv`, `report.json`), and `gui-screenings/` the saved
+DMI designs. Every path a run reports is inside one of these.
+
+### While you wait
+
+Generation and training are long — a single simulated chain is around a minute
+— so once a run has been going for a few seconds the **Running** tab, and the
+page that started it, show a line of Shakespeare under the progress. The
+package is called HamLeT; the lines are mostly from the play. They rotate as
+the wait goes on, and there are a few reserved for a run that has been going
+a quarter of an hour.
+
+If you would rather not have them, the **hide** link beside a quote turns them
+off for good in that browser.
+
 ### Stopping it
 
 The interface is a server, so **closing the browser tab does not stop it** --
@@ -227,6 +267,120 @@ This is the complete path from raw per-site spectroscopy files to an inferred
 Hamiltonian: import your experiment, choose a physically usable cutoff, let
 the package decide whether to reuse, retrain, or generate a model, then read
 the report. See the [README](../README.md) for install instructions.
+
+## Making generation faster
+
+Generation is the stage that costs hours. Every chain is an independent
+simulation, so the way to shorten it is to run several at once:
+
+```yaml
+dataset:
+  generate:
+    n_samples: 3000
+    workers: 8      # chains at once; 0 means one per core
+```
+
+or **chains at once** on the *Train a model* page. The plan divides its
+estimate by that number before you commit to the run.
+
+This cannot change the dataset. Each chunk's seed is derived from the run's
+seed by position, so a chunk is identical whenever and wherever it is
+simulated, and the samples are assembled in recipe order rather than
+completion order — the result is bit-identical on one core and on twelve.
+`workers` is therefore not part of the recipe fingerprint: you can stop a run
+on four cores and resume it on sixteen, and a dataset generated on one machine
+stays valid on another.
+
+Three practical limits. Each worker is a separate process holding its own
+simulation, so memory use scales with the count — on a shared login node,
+`workers: 0` is a way to annoy your colleagues. On Windows and macOS, Python
+starts worker processes by re-importing your script, so a `.py` file that
+generates a dataset needs the usual guard, or it will try to start the run
+again inside every worker:
+
+```python
+if __name__ == "__main__":
+    main()
+```
+
+`hamlet run`, `hamlet gui` and notebooks need nothing — this applies only to
+your own scripts. And progress arrives per
+checkpoint chunk rather than per chain when workers are in use, which is also
+the granularity at which a run can be stopped: **Stop** finishes the chunks
+already running and discards the ones not yet started, keeping every chunk
+already written.
+
+### Why generation cannot use a GPU
+
+It is DMRG and exact diagonalisation, and neither has a CUDA path in the
+simulator HamLeT uses. Recent DMRGPy can put its pure-Python backend's tensors
+on a GPU through JAX, but its own published benchmarks put the crossover far
+above where this package operates: for a KPM dynamical correlator the device is
+**7.7× slower** than one CPU core at a bond dimension of 40, roughly breaks
+even near 80, and only wins from about 160 upward. HamLeT's default bond
+dimension is 20, and the supported spin-chain workflows are small enough
+(Hilbert dimension ≤ 2048) that they use exact diagonalisation, where there is
+no GPU path at all.
+
+So a GPU would make this stage slower, not faster. Cores are what help here; a
+card only helps the Keras training that follows, which takes minutes.
+
+## Using a GPU
+
+Ask first, before installing anything:
+
+```bash
+hamlet compute
+```
+
+It lists the cores and cards it can see, says what each model will use, and —
+when it sees no GPU — why not. That last part matters, because "no GPU
+visible" has several different causes and only some of them are worth acting
+on.
+
+**A GPU may not be what you need.** Only `keras_mlp` and `keras_cnn` can use
+one; `ridge` and `random_forest` are scikit-learn and run on the CPU whatever
+hardware is present. And dataset generation — DMRG and exact diagonalisation,
+the stage that takes hours rather than minutes — is CPU-bound and
+single-threaded per chain, so a card does nothing for it. More cores shorten a
+run here; a faster accelerator usually does not. Check which stage is actually
+costing you time before spending an afternoon on drivers.
+
+**On Linux**, the plain `tensorflow` wheel that `[ml]` and `[all]` install is
+built with CUDA but ships none of the CUDA runtime libraries, so it finds no
+card unless your system already provides them. To let pip install them:
+
+```bash
+python -m pip install "hamlet-toolkit[gpu]"
+```
+
+The NVIDIA driver still has to come from the system; pip cannot supply it.
+
+**On native Windows there is no GPU path at all.** TensorFlow dropped Windows
+GPU support at version 2.11, and its Windows wheels have been CPU-only since.
+No driver update, CUDA install, or environment variable changes that, and the
+DirectML plugin sometimes suggested instead is pinned to TensorFlow 2.10 and
+Python ≤ 3.10 and cannot work with a current install. The supported route is
+WSL2:
+
+```powershell
+wsl --install -d Ubuntu
+```
+
+then, inside Ubuntu — installing the CUDA TensorFlow **first**, because
+otherwise HamLeT's plain `tensorflow` requirement is already satisfied and pip
+will not add the CUDA packages:
+
+```bash
+python3 -m venv ~/.venvs/hamlet && source ~/.venvs/hamlet/bin/activate
+python -m pip install "tensorflow[and-cuda]"
+python -m pip install "hamlet-toolkit[all]"
+python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+```
+
+Your Windows NVIDIA driver serves WSL2 — do not install a driver inside
+Ubuntu. On macOS there is no CUDA at all; Apple's `tensorflow-metal` plugin is
+the only accelerator option, and HamLeT neither requires nor tests it.
 
 ## 1. Import and inspect your experiment
 

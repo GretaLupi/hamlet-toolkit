@@ -83,8 +83,10 @@ function showError(node, error) {
   node.innerHTML = `<div class="error"><b>Error</b><br>${esc(error.message)}</div>`;
 }
 
-function busy(node, message) {
-  node.innerHTML = `<div class="box">${esc(message)}</div>`;
+// `extra` is trusted markup the caller appends under the message -- the
+// waiting quote, in practice. The message itself is still escaped.
+function busy(node, message, extra = "") {
+  node.innerHTML = `<div class="box">${esc(message)}${extra}</div>`;
 }
 
 function num(value, digits = 3) {
@@ -637,7 +639,11 @@ el("an-go").addEventListener("click", async () => {
           `<pre class="log">${esc(done.lines.join("\n"))}</pre>`;
         refreshJobs();
       },
-      (job) => { if (job.lines.length) busy(out, job.lines[job.lines.length - 1]); });
+      (job) => {
+        if (!job.lines.length) return;
+        busy(out, job.lines[job.lines.length - 1],
+             quoteFor(job.job_id, job.elapsed_seconds));
+      });
   } catch (e) { showError(out, e); }
 });
 
@@ -1124,6 +1130,11 @@ function selectSystem(systemType) {
   const d = spec.defaults;
   el("f-n-sites").value = d.n_sites;
   el("f-n-samples").value = 500;
+  // Starts at one rather than at the core count: parallel chains multiply
+  // memory use as well as throughput, and a default that quietly saturates
+  // the machine is not a good surprise on a shared login node. The hint says
+  // how to ask for all of them.
+  el("f-workers").value = 1;
   el("f-bias-lo").value = d.bias_range_mev[0];
   el("f-bias-hi").value = d.bias_range_mev[1];
   el("f-bias-points").value = d.bias_points;
@@ -1161,6 +1172,10 @@ function readForm() {
     system_type: chosenSystem,
     n_sites: Number(el("f-n-sites").value),
     n_samples: Number(el("f-n-samples").value),
+    // An empty field means the default, not zero -- zero is the explicit
+    // "one per core" request and is too big a difference to arrive by
+    // clearing a box.
+    workers: el("f-workers").value === "" ? 1 : Number(el("f-workers").value),
     coupling_ranges_mev: ranges,
     bias_range_mev: [Number(el("f-bias-lo").value), Number(el("f-bias-hi").value)],
     bias_points: Number(el("f-bias-points").value),
@@ -1190,6 +1205,20 @@ function sampleSvg(bias, sites, siteLabels, cutoffMev) {
     { bias_mev: bias, sites, site_labels: siteLabels },
     { cutoffMev, compact: true },
   );
+}
+
+// Decoration must never be load-bearing. `waitingQuote` lives in a separate
+// file, and if that file is missing -- an older install, a stale cache, a
+// proxy that ate it -- calling it throws a ReferenceError from inside
+// jobBlock(). That used to propagate to refreshJobs(), whose catch reports the
+// server as stopped: a missing quote would black out the jobs page and claim
+// the run had died. Now the worst case is no quote.
+function quoteFor(seed, elapsedSeconds) {
+  try {
+    return typeof waitingQuote === "function" ? waitingQuote(seed, elapsedSeconds) : "";
+  } catch (_error) {
+    return "";
+  }
 }
 
 async function pollJob(jobId, onDone, onTick) {
@@ -1233,7 +1262,12 @@ el("f-preview").addEventListener("click", async () => {
              Adjust the bias range or broadening if spectral features are cut
              off or poorly resolved.</p></div>`;
       },
-      (job) => { if (job.lines.length) busy(out, job.lines[job.lines.length - 1]); });
+      (job) => busy(
+        out,
+        job.lines.length ? job.lines[job.lines.length - 1]
+          : "Simulating a sample chain…",
+        quoteFor(job.job_id, job.elapsed_seconds),
+      ));
   } catch (e) { showError(out, e); }
 });
 
@@ -1583,6 +1617,38 @@ api("/api/screening-options").then((options) => {
   el("dmi-calibration").innerHTML = calibrationBox();
 }).catch((e) => showError(el("dmi-out"), e));
 
+// --- where the files go -----------------------------------------------------
+
+// Answered on the front page rather than on request, because the workspace is
+// not in the same place for everyone -- beside a checkout, under the home
+// directory for an installed package, or wherever HAMLET_WORKSPACE points --
+// and someone who does not know which case they are in cannot find their own
+// results.
+async function loadLocations() {
+  try {
+    const info = await api("/api/locations");
+    el("locations-lead").textContent = info.explanation;
+    el("locations-out").innerHTML = `<div class="box">
+      <table>
+        <tr><th>What</th><th>Folder</th><th class="num">Items</th></tr>
+        ${info.locations.map((loc) => `<tr>
+          <td><b>${esc(loc.title)}</b><div class="hint">${esc(loc.purpose)}</div></td>
+          <td><code>${esc(loc.path)}</code></td>
+          <td class="num">${loc.exists ? loc.entries : "—"}</td>
+        </tr>`).join("")}
+      </table>
+      <p class="hint">A folder appears the first time something is written to
+        it. Every path a run reports is inside one of these, and the same
+        layout is printed by <code>hamlet where</code>.</p>
+    </div>`;
+  } catch (e) {
+    // Not worth an error banner on the front page: the rest of the page works
+    // and every result still prints its own full path.
+    el("locations-lead").textContent =
+      "Run `hamlet where` in the terminal to list the output folders.";
+  }
+}
+
 // --- where it runs ----------------------------------------------------------
 
 let compute = null;
@@ -1605,10 +1671,30 @@ function renderCompute() {
   </div>`;
 
   el("device-cards").innerHTML = compute.devices.map((d) => `
-    <div class="card${d.name === chosenDevice ? " chosen" : ""}" data-device="${esc(d.name)}">
-      <div class="have">${esc(d.title)}</div>
+    <div class="card${d.name === chosenDevice ? " chosen" : ""}${
+      d.unavailable_here ? " unavailable" : ""}" data-device="${esc(d.name)}">
+      <div class="have">${esc(d.title)}${d.unavailable_here
+        ? ` <span class="pill cancelled">not on this machine</span>` : ""}</div>
       <div class="does">${esc(d.notes)}</div>
+      ${d.unavailable_here
+        ? `<div class="meta">${esc(d.unavailable_here)}</div>` : ""}
     </div>`).join("");
+  // Chosen but unavailable is a legitimate state -- a configuration built here
+  // may be meant for a cluster -- so it warns instead of refusing, and says
+  // what would happen if it were run here.
+  const chosenCard = compute.devices.find((d) => d.name === chosenDevice);
+  const warning = el("device-warning");
+  if (chosenCard && chosenCard.unavailable_here) {
+    warning.hidden = false;
+    warning.innerHTML = `<b>This machine will train on the CPU.</b>
+      ${esc(chosenCard.unavailable_here)}
+      The setting is still saved, which is what you want if this configuration
+      is going to a cluster with a GPU.
+      <a href="${esc(compute.gpu_help_url)}" target="_blank" rel="noopener">How
+      to get a GPU working</a>.`;
+  } else {
+    warning.hidden = true;
+  }
   el("device-cards").querySelectorAll(".card").forEach((c) =>
     c.addEventListener("click", () => {
       chosenDevice = c.dataset.device;
@@ -1793,6 +1879,7 @@ function jobBlock(job) {
         <span class="pill ${esc(job.status)}">${esc(job.status)}</span>
         <span class="hint">${job.elapsed_seconds}s</span></span>
     </div>
+    ${running ? quoteFor(job.job_id, job.elapsed_seconds) : ""}
     ${job.stopping ? `<p class="hint">Stopping after the current step finishes.</p>` : ""}
     ${job.error ? `<div class="${job.status === "cancelled" ? "box" : "error"}">${
       esc(job.error)}</div>` : ""}
@@ -1920,3 +2007,4 @@ el("stop-server").addEventListener("click", async () => {
 refreshJobs();
 jobTimer = setInterval(refreshJobs, 3000);
 loadModels();
+loadLocations();

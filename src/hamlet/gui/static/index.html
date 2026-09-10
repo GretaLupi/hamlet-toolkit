@@ -74,6 +74,10 @@
     For DMI studies, check the proposed geometry under <b>DMI sample design</b>
     before taking data.
   </p>
+
+  <h3>Where your files are saved</h3>
+  <p class="hint" id="locations-lead"></p>
+  <div id="locations-out"></div>
 </section>
 
 <!-- ----------------------------------------------------------------- data -->
@@ -223,7 +227,17 @@
         <label>chains to simulate
           <input type="number" id="f-n-samples" min="1" step="1" style="width:8em">
         </label>
+        <label>chains at once
+          <input type="number" id="f-workers" min="0" step="1" style="width:6em">
+        </label>
       </div>
+      <p class="hint" id="f-workers-hint">
+        <b>Chains at once</b> is how many are simulated in parallel. Every chain
+        is independent, so this is the setting that actually shortens generation
+        &mdash; the long stage. <code>0</code> means one per core. It cannot
+        change the dataset: each chain&rsquo;s seed is fixed by its position, so
+        the result is identical however many run at a time.
+      </p>
       <p class="hint">
         Couplings are drawn uniformly from these ranges. Make them cover the
         values you expect: predictions outside the trained range are
@@ -404,6 +418,7 @@
     CPU.
   </p>
   <div id="device-cards" class="cards"></div>
+  <div class="box" id="device-warning" hidden></div>
 
   <h3>A cluster</h3>
   <p class="lead">
@@ -446,6 +461,10 @@
     before the job exits. Completed simulations are retained.
   </p>
   <p class="hint" id="jobs-note" hidden></p>
+  <label class="quote-toggle">
+    <input type="checkbox" id="quotes-on" checked>
+    Show a line of Shakespeare while a job runs
+  </label>
   <div id="jobs-out"></div>
 </section>
 
@@ -473,6 +492,7 @@
   </div>
 </div>
 
+<script src="/quotes.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

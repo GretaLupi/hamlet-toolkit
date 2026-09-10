@@ -109,6 +109,33 @@ def test_gui_static_assets_are_tracked_by_git():
     )
 
 
+def test_the_gpu_extra_asks_for_cuda_and_stays_out_of_all():
+    """`[all]` must not drag in several GB of CUDA wheels, and cannot anyway.
+
+    The plain TensorFlow requirement in `[ml]` and `[all]` produces no GPU on
+    any platform: the Linux wheel is built with CUDA but ships none of the
+    runtime libraries. So a GPU needs its own extra, and users who asked for
+    "everything" should not silently receive it.
+    """
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = project["project"]["optional-dependencies"]
+
+    assert "gpu" in extras, "there is no way to ask for a CUDA TensorFlow"
+    requirement = "".join(extras["gpu"])
+    assert "tensorflow[and-cuda]" in requirement
+    # The extra does not exist before 2.14: ask 2.13 for it and pip warns,
+    # then installs a TensorFlow that can never find the card.
+    assert ">=2.14" in requirement
+    # Linux-only, because native Windows has no TensorFlow GPU build and macOS
+    # has no CUDA at all -- an unmarked requirement would download gigabytes
+    # to no effect.
+    assert "sys_platform == 'linux'" in requirement
+
+    assert not any("and-cuda" in item for item in extras["all"]), (
+        "the CUDA wheels are several GB; [all] must not pull them in"
+    )
+
+
 def test_gui_static_assets_are_declared_as_package_data():
     """They must also be declared, or a wheel install serves nothing.
 

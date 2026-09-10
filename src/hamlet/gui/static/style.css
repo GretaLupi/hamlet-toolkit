@@ -162,6 +162,32 @@ code { background: #eceff3; padding: 1px 5px; border-radius: 3px; font-size: 13p
 .pill.finished { background: #dff0e3; color: var(--good); }
 .pill.failed { background: #fadddd; color: var(--bad); }
 .pill.cancelled { background: #eceff3; color: var(--muted); }
+/* The Shakespeare line shown while a job runs. Set as an aside: it has to be
+   readable without ever competing with the progress it sits under, so it is
+   quieter than a hint and marked off by a rule rather than a box. */
+.wait-quote {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px;
+  margin: 14px 0 0; padding: 2px 0 2px 12px;
+  border-left: 2px solid var(--accent);
+  color: var(--muted); font-size: 13px; line-height: 1.5; max-width: 70ch;
+}
+.wait-quote-line { font-style: italic; }
+.wait-quote-source { font-size: 11.5px; letter-spacing: .02em; white-space: nowrap; }
+.wait-quote-off {
+  padding: 0 4px; border: 0; background: none; color: var(--muted);
+  font-size: 11.5px; text-decoration: underline; cursor: pointer;
+  margin-left: auto;
+}
+.wait-quote-off:hover { color: var(--ink); border-color: transparent; }
+.quote-toggle {
+  display: flex; align-items: center; gap: 8px; margin: 14px 0 0;
+  color: var(--muted); font-size: 13px; width: fit-content;
+}
+/* A choice this machine cannot honour: legible, still selectable, and clearly
+   not the same as the options that would work here. */
+.card.unavailable .have { color: var(--muted); }
+.card.unavailable .does { opacity: .75; }
+
 .error { color: var(--bad); background: #fdf0f0; border: 1px solid #f0c8c8; padding: 10px 12px; border-radius: 6px; margin-top: 14px; font-size: 14px; }
 .danger-zone { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line); display: flex; gap: 12px; align-items: center; }
 svg.spectra {

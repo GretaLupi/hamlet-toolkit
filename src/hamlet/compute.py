@@ -28,6 +28,49 @@ from typing import Any
 GPU_CAPABLE_MODELS = frozenset({"keras_mlp", "keras_cnn"})
 
 
+def _why_no_gpu(built_with_cuda: bool | None) -> list[str]:
+    """Why a working TensorFlow sees no GPU, which is not the same on every OS.
+
+    The bare fact -- "no GPU visible" -- reads as a driver or hardware fault
+    everywhere, and on native Windows it is neither: the wheel there is
+    CPU-only and has been since TensorFlow 2.11, so no driver, CUDA install or
+    environment variable will ever expose the card. Reporting the cause is the
+    difference between a one-line answer and an afternoon spent updating
+    drivers that were never the problem.
+    """
+    import sys
+
+    if sys.platform == "win32":
+        return [
+            "On native Windows that is expected rather than a fault: "
+            "TensorFlow has shipped no Windows GPU support since 2.11, and its "
+            "Windows wheel is CPU-only whatever the driver reports. Training a "
+            "Keras model on the card needs WSL2, with "
+            '`pip install "hamlet-toolkit[gpu]"` inside it.'
+        ]
+    if sys.platform == "darwin":
+        return [
+            "macOS has no CUDA path at all. Apple's tensorflow-metal plugin is "
+            "the only accelerator option there, and HamLeT neither requires "
+            "nor tests it."
+        ]
+    if built_with_cuda is False:
+        return [
+            "This TensorFlow was built without CUDA, so no driver or "
+            "environment change will expose a GPU to it. "
+            '`pip install "hamlet-toolkit[gpu]"` installs one that was.'
+        ]
+    if built_with_cuda:
+        return [
+            "This TensorFlow is built with CUDA, so the card is missing at "
+            "runtime rather than unsupported: either no NVIDIA driver is "
+            "loaded, or the CUDA runtime libraries are absent. "
+            '`pip install "hamlet-toolkit[gpu]"` installs the libraries pip '
+            "can provide; the driver has to come from the system."
+        ]
+    return []
+
+
 @dataclass(frozen=True)
 class Accelerator:
     """One visible compute device."""
@@ -77,11 +120,16 @@ def describe_compute() -> ComputeReport:
     accelerators: list[Accelerator] = []
     notes: list[str] = []
     tensorflow_available = False
+    built_with_cuda: bool | None = None
 
     try:
         import tensorflow as tf
 
         tensorflow_available = True
+        try:
+            built_with_cuda = bool(tf.test.is_built_with_cuda())
+        except Exception:  # noqa: BLE001 - a nicety on stripped or older builds
+            built_with_cuda = None
         for device in tf.config.list_physical_devices("GPU"):
             detail = ""
             try:
@@ -102,6 +150,7 @@ def describe_compute() -> ComputeReport:
         notes.append(
             "TensorFlow is installed but sees no GPU. Training will use the CPU."
         )
+        notes.extend(_why_no_gpu(built_with_cuda))
     notes.append(
         "Dataset generation is DMRG and exact diagonalisation on the CPU; a GPU "
         "does not help it. Generation is also the long stage, so more cores, "
@@ -117,6 +166,29 @@ def describe_compute() -> ComputeReport:
         tensorflow_available=tensorflow_available,
         notes=tuple(notes),
     )
+
+
+def gpu_unavailable_summary(report: "ComputeReport") -> str:
+    """One line for a card or a label, where the full note will not fit.
+
+    Empty when a GPU is there. The wording distinguishes "cannot on this
+    platform" from "not present here", because only the second is something a
+    user can go and fix.
+    """
+    import sys
+
+    if report.has_gpu:
+        return ""
+    if not report.tensorflow_available:
+        return "TensorFlow is not installed, so no GPU can be used."
+    if sys.platform == "win32":
+        return (
+            "Not possible on native Windows: TensorFlow has shipped no Windows "
+            "GPU build since 2.11. A card here needs WSL2."
+        )
+    if sys.platform == "darwin":
+        return "Not possible on macOS: TensorFlow has no CUDA support there."
+    return "No GPU is visible to TensorFlow on this machine."
 
 
 @dataclass(frozen=True)
@@ -272,4 +344,5 @@ __all__ = [
     "advise_device",
     "configure_device",
     "describe_compute",
+    "gpu_unavailable_summary",
 ]

@@ -19,7 +19,7 @@ Spin chains are HamLeT's first fully implemented application. Its modular
 experiment → simulation → learning → inference workflow is designed for
 Hamiltonian-learning problems based on STM/STS measurements.
 
-HamLeT **1.0 is a complete, working toolkit for spin-chain Hamiltonian
+HamLeT **0.1.0 is a complete, working toolkit for spin-chain Hamiltonian
 inference**. Its spin-chain workflows are implemented end to end and extensively
 tested: experimentalists can import site-resolved STM/STS measurements, inspect
 and crop spectra, match compatible pretrained models, generate simulated
@@ -48,6 +48,17 @@ The local browser interface guides the full workflow:
 It binds to localhost and does not upload measurements elsewhere. Long jobs run
 in the background. Close it with the **Stop server** button or `Ctrl+C`.
 
+The *Start here* page lists every folder it writes to, and `hamlet where`
+prints the same layout from the terminal: `results/` beside a source checkout,
+`~/.hamlet/workspace/` for an installed package, or `HAMLET_WORKSPACE`.
+
+Dataset generation is the stage that costs hours, and every chain is
+independent, so set **chains at once** (`dataset.generate.workers`, or `0` for
+one per core) to shorten it. The result does not depend on it — the dataset is
+bit-identical however many run at a time. See
+[Making generation faster](docs/user-guide.md#making-generation-faster),
+which also covers why a GPU makes this stage *slower*.
+
 ## Installation options
 
 The base installation includes the interface, experimental I/O, plotting,
@@ -58,7 +69,14 @@ python -m pip install "hamlet-toolkit[ml]"          # Keras MLP and CNN
 python -m pip install "hamlet-toolkit[simulation]"  # DMRGPy generation
 python -m pip install "hamlet-toolkit[tune]"        # Optuna search
 python -m pip install "hamlet-toolkit[all]"         # all optional features
+python -m pip install "hamlet-toolkit[gpu]"         # CUDA TensorFlow, Linux only
 ```
+
+`[gpu]` is not part of `[all]`, and is worth reading about before installing:
+the CUDA wheels are several gigabytes, only the Keras models can use a card,
+and dataset generation — the long stage — is CPU-bound and gains nothing from
+one. `hamlet compute` reports what this machine will actually use for each
+stage, and why. See [Using a GPU](docs/user-guide.md#using-a-gpu).
 
 For development from a clone:
 

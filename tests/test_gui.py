@@ -276,7 +276,7 @@ def test_running_jobs_are_listed_newest_first():
 
 # --- http layer -------------------------------------------------------------
 
-@pytest.mark.parametrize("route", ["/", "/style.css", "/app.js"])
+@pytest.mark.parametrize("route", ["/", "/style.css", "/app.js", "/quotes.js"])
 def test_static_assets_are_served(server, route):
     status, body = get(server, route)
     assert status == 200
@@ -323,6 +323,224 @@ def test_index_mentions_every_panel_the_script_drives():
     # Every element the script fetches by id must exist in the page.
     for match in sorted(set(re.findall(r'el\("([a-z0-9-]+)"\)', script))):
         assert f'id="{match}"' in html, f"app.js drives #{match}, missing from the page"
+
+
+def test_a_shakespeare_quote_keeps_the_user_company_while_a_job_runs():
+    """The waits here run to hours, so the page offers a line for them."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+    style = (STATIC_ROOT / "style.css").read_text(encoding="utf-8")
+
+    # The bank has to load first, or the first render calls a function that
+    # does not exist yet and takes the panel down with it.
+    assert html.index('src="/quotes.js"') < html.index('src="/app.js"')
+    assert "function waitingQuote" in quotes
+    # Every surface that holds the user through a wait, not just one of them:
+    # the jobs list, the analysis, and the sample simulation.
+    assert script.count("quoteFor(job.job_id, job.elapsed_seconds)") == 3
+    assert ".wait-quote" in style
+
+
+def test_a_missing_quote_cannot_take_the_jobs_page_down():
+    """Decoration must not be load-bearing.
+
+    `waitingQuote` lives in its own file. If that file does not arrive -- an
+    older install, a stale cache -- calling it throws from inside jobBlock(),
+    which propagates to refreshJobs(), whose catch reports the server as
+    stopped. A missing quote would then black out the jobs page and claim the
+    run had died.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "function quoteFor" in script
+    # The guard, not the raw function, is what the render paths call.
+    assert "waitingQuote(job.job_id" not in script
+    guard = script[script.index("function quoteFor") :][:600]
+    assert 'typeof waitingQuote === "function"' in guard
+    assert "catch" in guard
+
+
+def test_one_job_shows_one_quote_across_every_surface():
+    """The surfaces do not share a poll, so they must share the choice.
+
+    The jobs list refreshes every 3s and a job's own page every 2s. Deriving
+    the line from the elapsed time sampled at render made the two disagree
+    whenever their polls fell either side of a rotation, and the same run
+    quoted two different lines on two pages at once.
+    """
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+
+    assert "const showing = new Map()" in quotes
+    body = quotes[quotes.index("function waitingQuote") :]
+    # Rotation is decided on a stored timestamp, not recomputed from elapsed.
+    assert "showing.get(key)" in body and "showing.set(key" in body
+    assert "state.since" in body
+    assert "Math.floor(elapsed / QUOTE_ROTATE_SECONDS)" not in body
+
+
+def test_the_quote_tiers_stay_in_order():
+    """Each tier's pool has to be a prefix of the whole bank.
+
+    The rotation holds an index, and the pool grows as a wait crosses into a
+    later tier. That index only keeps pointing at the same line if the gated
+    quotes all sit after the ungated ones -- insert one in the middle and a
+    long wait would jump to an unrelated line at three minutes.
+    """
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+    bank = quotes[quotes.index("const SHAKESPEARE_QUOTES") : quotes.index("const showing")]
+    gates = []
+    for block in re.findall(r"\{(.*?)\}", bank, re.S):
+        if 'source: "' not in block:
+            continue
+        match = re.search(r"after: (\d+)", block)
+        gates.append(int(match.group(1)) if match else 0)
+
+    assert gates, "no quotes found"
+    assert gates == sorted(gates), (
+        "gated quotes must come after ungated ones, or the rotation jumps "
+        "when a wait crosses a tier"
+    )
+
+
+def test_quotes_turned_off_can_be_turned_back_on():
+    """A preference that outlives the page needs a control that shows it.
+
+    Hiding them with no way back left clearing site data as the only route,
+    which is how they came to be off with no way to discover why.
+    """
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+
+    assert 'id="quotes-on"' in html, "no control to switch them back on"
+    assert "function setQuotesHidden" in quotes
+    assert "removeItem(QUOTES_OFF_KEY)" in quotes, "off is a one-way door"
+    # The control must be able to display a preference it did not set.
+    assert "function syncQuoteToggle" in quotes
+    assert "DOMContentLoaded" in quotes
+
+
+def test_static_assets_are_served_uncached():
+    """A cached index.html against a new bundle is a page from two versions."""
+    server_source = (
+        Path(__file__).resolve().parents[1] / "src" / "hamlet" / "gui" / "server.py"
+    ).read_text(encoding="utf-8")
+    assert "no-store" in server_source
+
+
+def test_the_gpu_device_card_says_when_this_machine_cannot_honour_it():
+    """Selecting a GPU on a machine with none must not look like it worked."""
+    api_source = (
+        Path(__file__).resolve().parents[1] / "src" / "hamlet" / "gui" / "api.py"
+    ).read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+
+    assert "unavailable_here" in api_source
+    assert "gpu_help_url" in api_source
+    assert "unavailable_here" in script
+    # Warned, not forbidden: a config built here may be bound for a cluster.
+    assert 'id="device-warning"' in html
+    assert "will train on the CPU" in script
+
+
+def test_every_quote_carries_its_attribution():
+    """An unattributed line is a misquotation waiting to happen."""
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+    bank = quotes[quotes.index("const SHAKESPEARE_QUOTES") : quotes.index("QUOTES_OFF_KEY")]
+    lines = re.findall(r"line:\s", bank)
+    sources = re.findall(r'source: "([^"]+)"', bank)
+    assert len(lines) == len(sources), "a quote is missing its source"
+    assert len(sources) >= 20
+    for source in sources:
+        # "Play, act.scene", or the Induction that The Shrew has instead of a
+        # first act. A reader who wants to check a line has to be able to.
+        assert re.fullmatch(
+            r"[A-Za-z' ]+, (?:[IVX]+\.[ivx]+|Induction [ivx]+)", source
+        ), source
+
+
+def test_quotes_can_be_turned_off_and_stay_off():
+    """A decorative flourish nobody can silence stops being a flourish."""
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+    assert "data-quote-hide" in quotes
+    assert "localStorage" in quotes
+    # The surfaces re-render on a timer, so the handler cannot be bound to the
+    # button itself, and the storage call has to survive a private window.
+    assert 'document.addEventListener("click"' in quotes
+    assert "catch" in quotes
+
+
+def test_the_page_says_where_it_writes_things(server):
+    """The workspace is not in the same place for everyone.
+
+    Beside a checkout, under the home directory for an installed package, or
+    wherever HAMLET_WORKSPACE points. Someone who does not know which case
+    they are in cannot find their own results, so the front page says.
+    """
+    status, body = get(server, "/api/locations")
+    assert status == 200
+    info = json.loads(body)
+
+    assert info["workspace"]
+    assert info["explanation"], "the reason for this location is not explained"
+    titles = {item["title"] for item in info["locations"]}
+    assert {"Uploads", "Projects", "Analyses"} <= titles
+    for item in info["locations"]:
+        assert item["purpose"], f"{item['title']} has no description"
+        assert item["path"].startswith(info["workspace"])
+
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert 'id="locations-out"' in html
+    assert "loadLocations()" in script
+
+
+def test_every_output_location_is_described(tmp_path, monkeypatch):
+    """A folder nobody can explain should not be appearing on disk."""
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    info = api.describe_output_locations()
+    assert info["override"] == str(tmp_path)
+    assert "HAMLET_WORKSPACE" in info["explanation"]
+    # Nothing has been written yet, which the report states rather than hides.
+    assert all(not item["exists"] for item in info["locations"])
+
+
+def test_parallel_chains_are_offered_in_the_form():
+    """Generation is the long stage; the setting that shortens it belongs here."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="f-workers"' in html
+    assert "workers:" in script
+    # A cleared box must not silently mean "saturate the machine".
+    assert 'el("f-workers").value === ""' in script
+
+
+def test_the_form_writes_parallel_chains_into_the_config(tmp_path):
+    """The number has to reach generation, not just sit on the page."""
+    import yaml
+
+    from hamlet.gui import api
+
+    built = api.build_project_config(_builder_form(workers=4), workspace=tmp_path)
+    config = yaml.safe_load(Path(built["config_path"]).read_text(encoding="utf-8"))
+    assert config["dataset"]["generate"]["workers"] == 4
+
+    # One is the default and carries no meaning, so it is left out rather than
+    # written into every configuration the form produces.
+    plain = api.build_project_config(_builder_form(), workspace=tmp_path)
+    config = yaml.safe_load(Path(plain["config_path"]).read_text(encoding="utf-8"))
+    assert "workers" not in config["dataset"]["generate"]
+
+
+def test_a_negative_worker_count_is_refused_by_the_form(tmp_path):
+    from hamlet.gui import api
+
+    with pytest.raises(ValueError, match="negative"):
+        api.build_project_config(_builder_form(workers=-2), workspace=tmp_path)
 
 
 def test_local_couplings_are_drawn_as_a_spin_chain_not_generic_bars():

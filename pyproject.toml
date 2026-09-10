@@ -58,6 +58,22 @@ Changelog = "https://github.com/GretaLupi/hamlet-toolkit/blob/main/CHANGELOG.md"
 io = []
 # Genuinely optional: only the Keras MLP and CNN need TensorFlow.
 ml = ["tensorflow>=2.13"]
+# A GPU takes more than the plain TensorFlow wheel. On Linux that wheel is
+# built with CUDA but ships none of the CUDA runtime libraries, so it finds no
+# device unless the system already provides them -- which is why `[ml]` and
+# `[all]` alone never produce a GPU, on any platform. The `and-cuda` extra
+# adds the libraries pip can install.
+#
+# The floor is 2.14 because that is the first release where `and-cuda` exists.
+# Asked of 2.13 it is not an error: pip warns that the extra is unknown and
+# installs a TensorFlow that will never find the card, which is a worse
+# outcome than a resolution failure.
+#
+# Deliberately left out of `all`: these wheels are several GB, and the marker
+# keeps them off platforms where they buy nothing. Native Windows has had no
+# TensorFlow GPU support since 2.11, so a GPU there means WSL2 with this extra
+# installed inside it.
+gpu = ["tensorflow[and-cuda]>=2.14; sys_platform == 'linux'"]
 simulation = ["dmrgpy>=0.1.0"]
 # Optuna's TPE sampler spends later trials near the good region, which is worth
 # real accuracy at the trial counts a search here can afford. Optional because
