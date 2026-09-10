@@ -1,5 +1,5 @@
 {
-  "dataset": "/scratch/work/lupig1/hamlet-overnight/out-dmiimp/dmi_impurity_l8.npz",
+  "dataset": "dmi_impurity_l8.npz",
   "dataset_name": "dmi_impurity_l8.npz",
   "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
   "view": "global",

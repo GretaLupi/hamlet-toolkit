@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible problem in HamLeT
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Please remove private experimental data before attaching files.
+  - type: input
+    id: version
+    attributes:
+      label: HamLeT version
+      placeholder: "0.1.0 (python -c 'import hamlet; print(hamlet.__version__)')"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Python version and operating system
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Browser interface
+        - Experimental import or preprocessing
+        - Dataset generation or simulation
+        - Training or tuning
+        - Inference or reporting
+        - Installation or packaging
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include the command or interface actions and the smallest non-private input that reproduces the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual result
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error or log output
+      render: shell

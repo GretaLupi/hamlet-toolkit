@@ -405,7 +405,8 @@ def test_analysis_cli_runs_manual_cutoff_preflight(workflow_resources, tmp_path)
 
 
 PUBLISHED_DMI_ARTIFACT = (
-    "models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+    "src/hamlet/resources/models/"
+    "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
 )
 
 # The conditions this published artifact was actually trained under.

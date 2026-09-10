@@ -3,19 +3,19 @@
 ## Getting set up
 
 ```bash
-python -m pip install -e '.[dev,io]'      # core, plotting, pytest
-python -m pip install -e '.[dev,io,ml]'   # add the Keras MLP and CNN
+python -m pip install -e '.[dev]'      # core, interface, plotting, tests
+python -m pip install -e '.[dev,ml]'   # add the Keras MLP and CNN
 pytest
 ```
 
-The core install includes scikit-learn, because the ridge and random-forest
-models are part of the ordinary workflow rather than an add-on. TensorFlow is
-genuinely optional: without it the suite is 135 passed and 2 skipped.
+The core install includes scikit-learn, pandas, and matplotlib because the
+ordinary interface loads experimental files, draws reports, and offers ridge
+and random-forest models. TensorFlow remains optional.
 
-The `simulation` extra pulls DMRGPy, which compiles a C++ backend from a git
-checkout. It is only needed to *generate* datasets; everything else, including
-the whole test suite, runs without it. Tests that need an optional backend skip
-themselves rather than fail.
+The `simulation` extra installs DMRGPy from PyPI. It is only needed to
+*generate* datasets; everything else runs without it. DMRGPy's optional
+compiled backend may still require its upstream source installation. Tests
+that need an unavailable backend skip themselves rather than fail.
 
 ## Before opening a pull request
 
@@ -23,11 +23,14 @@ themselves rather than fail.
 pytest                     # the full suite
 ruff check src tests       # correctness rules; must be clean
 python -m build            # the wheel must build
+python -m twine check dist/*
 ```
 
 CI runs the suite on 3.10/3.11/3.12, exercises the Keras paths separately, and
 verifies that the built wheel contains every module, installs into a clean
-environment, and exposes all console scripts.
+environment, exposes all console scripts, and retains the GUI's published
+model catalog. The maintainer release procedure is in
+[RELEASING.md](RELEASING.md).
 
 ## Conventions that are not negotiable
 

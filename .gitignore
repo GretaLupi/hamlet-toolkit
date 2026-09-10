@@ -17,15 +17,9 @@ __pycache__/
 /data/
 /results/
 
-# models/ is excluded by its *contents* rather than as a directory, because git
-# never descends into an excluded directory and so cannot re-include anything
-# beneath one. Writing "/models/" here would make the exception below dead.
-/models/*
-
-# Exception: artifacts under models/published/ are the distributable reference
-# models that ship with the package, so they are tracked deliberately. Keep
-# them small and accompanied by a MODEL_CARD.md recording provenance.
-!/models/published/
+# Local training artifacts. Published reference models live under
+# src/hamlet/resources/models so they are part of source and wheel installs.
+/models/
 
 # Greta's private, local working documentation. Never commit this folder.
 /personal_docs/
@@ -38,8 +32,11 @@ __pycache__/
 /AUGMENTATION_CALIBRATION_FINDINGS.txt
 /MODELS_TO_PRETRAIN.txt
 
-# Internal research/pilot scripts and validation-gate runners.
-/scripts/
+# Internal research/pilot scripts and validation-gate runners. The two scripts
+# cited by shipped model cards are part of the public reproducibility record.
+/scripts/*
+!/scripts/benchmark_homogeneous.py
+!/scripts/publish_homogeneous_artifact.py
 /validation/
 
 # Stray local DMRGPy/MPS solver scratch output.

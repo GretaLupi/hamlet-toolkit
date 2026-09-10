@@ -1,5 +1,5 @@
 {
-  "dataset": "/u/06/lupig1/data/Desktop/Hamiltonian_Learning_package/results/triton_n3000/homogeneous_heisenberg_l8_ed.npz",
+  "dataset": "homogeneous_heisenberg_l8_ed.npz",
   "dataset_name": "homogeneous_heisenberg_l8_ed.npz",
   "system_type": "homogeneous_heisenberg",
   "view": "global",

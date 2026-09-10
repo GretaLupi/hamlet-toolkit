@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, is_dataclass
 import json
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -247,12 +247,20 @@ def train_supervised(
     model_options: Mapping[str, Any] | None = None,
     coupling_unit: str = "meV",
     verbose: int = 0,
+    should_stop: "Callable[[], bool] | None" = None,
 ) -> TrainingRun:
     """Train and evaluate a supervised ensemble with safe defaults.
 
     The target scaler is fit on training chains only. Validation and test
     metrics are always reported after conversion back to physical units.
+
+    ``should_stop`` is asked between ensemble members, and once per epoch for
+    the Keras models, so a run can be stopped without waiting out the whole
+    budget. It raises :class:`~hamlet.cancellation.OperationCancelled` rather
+    than returning a half-trained ensemble, because an ensemble missing members
+    is not the artifact its manifest would claim.
     """
+    from ..cancellation import OperationCancelled, check_cancelled
     policy = get_training_preset(preset)
     supervised = as_supervised(prepared.dataset, view)  # type: ignore[arg-type]
     split = grouped_split(
@@ -272,6 +280,7 @@ def train_supervised(
     histories: list[dict[str, list[float]]] = []
 
     for seed in policy.seeds:
+        check_cancelled(should_stop, f"training {model}")
         current_options = dict(options)
         if model == "random_forest":
             current_options.setdefault("random_state", seed)
@@ -304,6 +313,8 @@ def train_supervised(
                     monitor="val_loss", patience=max(2, policy.patience // 2), factor=0.5
                 ),
             ]
+            if should_stop is not None:
+                callbacks.append(_StopWhenAsked(should_stop))
             history = estimator.fit(
                 split.train.inputs,
                 train_y,
@@ -313,6 +324,11 @@ def train_supervised(
                 callbacks=callbacks,
                 verbose=verbose,
             )
+            # Keras stops the loop rather than propagating, so the request has
+            # to be re-raised here or a stopped fit would look like a finished
+            # one and be saved as an artifact.
+            if should_stop is not None and should_stop():
+                raise OperationCancelled(f"training {model} was stopped before it finished")
             histories.append(
                 {key: [float(value) for value in values] for key, values in history.history.items()}
             )
@@ -369,6 +385,25 @@ def _predict(model: Any, inputs: NDArray[np.float32]) -> NDArray[np.float32]:
     except TypeError:
         values = model.predict(inputs)
     return np.asarray(values, dtype=np.float32)
+
+
+class _StopWhenAsked:
+    """A Keras callback that ends ``fit`` when the caller asks it to.
+
+    Defined lazily rather than subclassing ``keras.callbacks.Callback`` at
+    import time, because Keras is an optional dependency and importing this
+    module must not require it.
+    """
+
+    def __new__(cls, should_stop: "Callable[[], bool]"):
+        import keras
+
+        class _Callback(keras.callbacks.Callback):
+            def on_epoch_end(self, epoch, logs=None):  # noqa: D102, ANN001
+                if should_stop():
+                    self.model.stop_training = True
+
+        return _Callback()
 
 
 def _evaluate(

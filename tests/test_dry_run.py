@@ -183,3 +183,53 @@ def test_cli_dry_run_exit_code_signals_a_run_that_would_be_refused(tmp_path):
     (analysis / "couplings.csv").write_text("", encoding="utf-8")
 
     assert project_cli_main(["run", str(config_path), "--dry-run"]) == 1
+
+
+# --- what a run says when it stops after training ----------------------------
+
+def _model_only_config(tmp_path):
+    """A project the guided form could have written: a model, no measurement."""
+    import sys
+
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+    from test_guided_training import make_training_dataset
+
+    make_training_dataset(n_samples=40).save(tmp_path / "dataset.npz")
+    payload = {
+        "config_schema_version": 1,
+        "name": "model only",
+        "output_dir": str(tmp_path / "out"),
+        "dataset": {"format": "portable", "path": str(tmp_path / "dataset.npz")},
+        "training": {
+            "cutoffs_mev": [50.0], "manual_cutoff_mev": 50.0, "output_points": 30,
+            "view": "local_bonds", "model": "ridge", "preset": "quick", "verbose": 0,
+        },
+    }
+    path = tmp_path / "project.yaml"
+    path.write_text(yaml.safe_dump(payload), encoding="utf-8")
+    return path
+
+
+def test_the_cli_runs_a_model_only_project_and_says_what_to_do_next(tmp_path, capsys):
+    """The configuration the interface writes has to be runnable by the command
+    it prints, and the artifact is the input to the next step -- nothing else in
+    the output says so."""
+    assert project_cli_main(["run", str(_model_only_config(tmp_path))]) == 0
+    printed = capsys.readouterr().out
+    assert "no experiment configured" in printed
+    assert "hamlet advise" in printed
+    assert "--artifact-root" in printed
+    assert "--cutoff 50" in printed
+    assert (tmp_path / "out" / "artifact" / "manifest.json").exists()
+
+
+def test_the_cli_dry_run_of_a_model_only_project_names_no_analysis(tmp_path, capsys):
+    config = _model_only_config(tmp_path)
+    assert project_cli_main(["run", str(config), "--dry-run"]) == 0
+    printed = capsys.readouterr().out
+    assert "Ready to run." in printed
+    assert "no experiment configured" in printed
+    # Nothing was written by a dry run, least of all the artifact.
+    assert not (tmp_path / "out" / "artifact").exists()
+    for absent in ("couplings.csv", "report.html", "calibration"):
+        assert absent not in printed, f"a dry run promised {absent} with no experiment"

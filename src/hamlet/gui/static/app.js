@@ -12,6 +12,68 @@ async function api(route, body) {
   return payload;
 }
 
+// The file itself, not a JSON envelope: base64 would inflate a measurement by
+// a third and buy nothing.
+async function uploadRequest(route, file) {
+  let response;
+  try {
+    response = await fetch(route, {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+  } catch (_error) {
+    throw new Error(
+      "HamLeT could not reach its local server while uploading. Check that the " +
+      "terminal running ‘hamlet gui’ is still open, then reload this page.",
+    );
+  }
+  let payload;
+  try {
+    payload = await response.json();
+  } catch (_error) {
+    throw new Error(`The upload server returned an unreadable response (HTTP ${response.status}).`);
+  }
+  if (!response.ok || (payload && payload.error)) {
+    throw new Error(payload?.error || `Upload failed with HTTP ${response.status}.`);
+  }
+  return payload;
+}
+
+async function upload(file) {
+  return uploadRequest(`/api/upload?name=${encodeURIComponent(file.name)}`, file);
+}
+
+async function uploadFolder(files, onProgress) {
+  const accepted = [...files].filter((file) => /\.(dat|txt)$/i.test(file.name));
+  if (!accepted.length) {
+    throw new Error("That folder contains no .dat or .txt STS spectra.");
+  }
+  const firstPath = accepted[0].webkitRelativePath || accepted[0].name;
+  const folderName = firstPath.split("/")[0] || "experiment";
+  const session = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  let cursor = 0;
+  let completed = 0;
+  let folderPath = null;
+
+  async function worker() {
+    while (cursor < accepted.length) {
+      const file = accepted[cursor];
+      cursor += 1;
+      const route = "/api/upload-folder" +
+        `?session=${encodeURIComponent(session)}` +
+        `&folder=${encodeURIComponent(folderName)}` +
+        `&name=${encodeURIComponent(file.name)}`;
+      const stored = await uploadRequest(route, file);
+      folderPath = stored.folder_path;
+      completed += 1;
+      onProgress(completed, accepted.length, file.name);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(4, accepted.length) }, worker));
+  return { path: folderPath, count: accepted.length, folderName };
+}
+
 const el = (id) => document.getElementById(id);
 const esc = (text) =>
   String(text).replace(/[&<>"']/g, (c) =>
@@ -29,11 +91,27 @@ function num(value, digits = 3) {
   return value === null || value === undefined ? "—" : Number(value).toFixed(digits);
 }
 
+function fileLink(path, label) {
+  return `<a href="/api/file?path=${encodeURIComponent(path)}" target="_blank"
+    rel="noopener">${esc(label)}</a>`;
+}
+
+function humanSize(bytes) {
+  if (bytes === null || bytes === undefined) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} kB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 // --- tabs -------------------------------------------------------------------
 
 function activate(name) {
-  document.querySelectorAll("#tabs button").forEach((b) =>
-    b.classList.toggle("active", b.dataset.panel === name));
+  document.querySelectorAll("#tabs button").forEach((b) => {
+    const current = b.dataset.panel === name;
+    b.classList.toggle("active", current);
+    if (current) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".panel").forEach((p) =>
     p.classList.toggle("active", p.id === `panel-${name}`));
 }
@@ -43,57 +121,303 @@ document.querySelectorAll("#tabs button").forEach((b) =>
 // --- start ------------------------------------------------------------------
 
 const SITUATION_PANEL = {
-  inspect: "data", advise: "reuse", models: "models", train: "train", dmi: "dmi",
+  inspect: "data", advise: "reuse", models: "models", analyse: "analyse",
+  train: "train", dmi: "dmi",
+};
+const SITUATION_TITLE = {
+  inspect: "Inspect a measurement", advise: "Find a suitable model",
+  models: "Explore existing models", analyse: "Get my couplings",
+  train: "Train for my system", dmi: "Design a DMI experiment",
 };
 
 api("/api/overview").then(({ situations }) => {
   el("situations").innerHTML = situations.map((s) => `
-    <div class="card" data-go="${esc(SITUATION_PANEL[s.id] || "start")}">
-      <div class="have">${esc(s.have)}</div>
-      <div class="does">${esc(s.does)}</div>
-      <div class="meta"><b>Needs:</b> ${esc(s.needs)} &nbsp;·&nbsp; <b>Takes:</b> ${esc(s.cost)}</div>
-    </div>`).join("");
+    <button type="button" class="card situation-card" data-go="${esc(SITUATION_PANEL[s.id] || "start")}">
+      <span class="have">${esc(SITUATION_TITLE[s.id] || s.have)}<span class="card-arrow" aria-hidden="true">↗</span></span>
+      <span class="does">${esc(s.does)}</span>
+      <span class="meta"><span><b>Needs</b> ${esc(s.needs)}</span><span class="card-time"><b>Time</b> ${esc(s.cost)}</span></span>
+    </button>`).join("");
   document.querySelectorAll("#situations .card").forEach((card) =>
     card.addEventListener("click", () => activate(card.dataset.go)));
 }).catch((e) => showError(el("situations"), e));
 
+// --- choosing a file --------------------------------------------------------
+// Three ways in, because the file can be in two places. Drag-and-drop and the
+// file picker send it from the machine showing this page; Browse picks one
+// that is already on the machine running the server, which is what you need
+// over an SSH tunnel. The chosen path is kept in a hidden text input so the
+// rest of the page reads it the same way regardless of how it got there.
+
+const fileFields = [];
+
+// A file dropped anywhere but a drop zone would otherwise navigate the page to
+// it, losing whatever was on screen. Missing the target is easy; the cost of
+// missing it should not be starting over.
+["dragover", "drop"].forEach((name) =>
+  document.addEventListener(name, (event) => {
+    if (!event.target.closest || !event.target.closest(".filefield")) {
+      event.preventDefault();
+    }
+  }));
+
+function attachFileField({ prefix, onPicked }) {
+  const drop = el(`${prefix}-drop`);
+  const path = el(`${prefix}-path`);
+  const chosen = el(`${prefix}-chosen`);
+  const picker = el(`${prefix}-upload`);
+  const folderPicker = el(`${prefix}-folder-upload`);
+  const field = { prefix, autofilled: false };
+
+  function announce(value, detail, { autofilled = false } = {}) {
+    path.value = value;
+    field.autofilled = autofilled;
+    chosen.hidden = false;
+    chosen.innerHTML = `<b>Using:</b> <code>${esc(value)}</code>${detail ? ` <span class="hint">${esc(detail)}</span>` : ""}`;
+    if (onPicked) onPicked(value);
+  }
+
+  async function send(file) {
+    chosen.hidden = false;
+    chosen.textContent = `Sending ${file.name}…`;
+    try {
+      const stored = await upload(file);
+      announce(stored.path, `${humanSize(stored.size_bytes)}, copied into the workspace`);
+    } catch (e) {
+      chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
+    }
+  }
+
+  async function sendFolder(files) {
+    chosen.hidden = false;
+    chosen.textContent = "Preparing folder upload…";
+    try {
+      const stored = await uploadFolder(files, (done, total, name) => {
+        chosen.textContent = `Uploading spectrum ${done} of ${total}: ${name}`;
+      });
+      announce(
+        stored.path,
+        `${stored.count} per-site STS files copied into the workspace`,
+      );
+    } catch (e) {
+      chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
+    } finally {
+      folderPicker.value = "";
+    }
+  }
+
+  drop.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    drop.classList.add("dragging");
+  });
+  drop.addEventListener("dragleave", () => drop.classList.remove("dragging"));
+  drop.addEventListener("drop", (event) => {
+    event.preventDefault();
+    drop.classList.remove("dragging");
+    const file = event.dataTransfer.files[0];
+    if (file) send(file);
+  });
+  el(`${prefix}-choose`).addEventListener("click", () => picker.click());
+  picker.addEventListener("change", () => {
+    if (picker.files[0]) send(picker.files[0]);
+  });
+  el(`${prefix}-choose-folder`).addEventListener("click", () => folderPicker.click());
+  folderPicker.addEventListener("change", () => {
+    if (folderPicker.files.length) sendFolder(folderPicker.files);
+  });
+  el(`${prefix}-browse`).addEventListener("click", () => openBrowser(announce));
+
+  field.announce = announce;
+  fileFields.push(field);
+  return field;
+}
+
+// Announce a path everywhere, so inspecting a file leaves the other pages
+// pointed at the same measurement rather than asking for it again. A field the
+// user chose for themselves is left alone; one that was carried over before is
+// updated, so re-inspecting a second file does not leave the first behind.
+function shareChosenFile(value, except) {
+  fileFields.forEach((field) => {
+    if (field.prefix === except) return;
+    if (el(`${field.prefix}-path`).value && !field.autofilled) return;
+    field.announce(value, "carried over from the previous step", { autofilled: true });
+  });
+}
+
+// --- the server-side file browser -------------------------------------------
+
+let browserTarget = null;
+let browserPath = null;
+let browserFolderInfo = null;
+
+function openBrowser(onPicked) {
+  browserTarget = onPicked;
+  el("browser-backdrop").hidden = false;
+  loadBrowser(browserPath);
+}
+
+function closeBrowser() {
+  el("browser-backdrop").hidden = true;
+  browserTarget = null;
+}
+
+async function loadBrowser(path) {
+  const list = el("browser-list");
+  list.innerHTML = `<p class="hint">Reading…</p>`;
+  try {
+    const query = path ? `?path=${encodeURIComponent(path)}` : "";
+    const d = await api(`/api/browse${query}`);
+    browserPath = d.path;
+    browserFolderInfo = d;
+    el("browser-path").textContent = d.path;
+    el("browser-up").disabled = !d.parent;
+    el("browser-shortcuts").innerHTML = d.shortcuts.map((s) =>
+      `<button data-shortcut="${esc(s.path)}">${esc(s.label)}</button>`).join("");
+    el("browser-shortcuts").querySelectorAll("button[data-shortcut]").forEach((b) =>
+      b.addEventListener("click", () => loadBrowser(b.dataset.shortcut)));
+    list.innerHTML = d.entries.length
+      ? `<table>${d.entries.map((entry) => `<tr>
+          <td><button class="linky" data-kind="${entry.kind}" data-path="${esc(entry.path)}">${
+            entry.kind === "directory" ? "📁 " : "📄 "}${esc(entry.name)}</button></td>
+          <td class="num hint">${entry.kind === "file" ? esc(humanSize(entry.size_bytes)) : ""}</td>
+        </tr>`).join("")}</table>`
+      : `<p class="hint">Nothing here that this workflow can read.</p>`;
+    list.querySelectorAll("button[data-path]").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (b.dataset.kind === "directory") {
+          loadBrowser(b.dataset.path);
+        } else if (browserTarget) {
+          browserTarget(b.dataset.path, "on this machine; not copied");
+          closeBrowser();
+        }
+      }));
+    el("browser-note").textContent =
+      `Showing directories and ${d.readable_suffixes.join(", ")} files` +
+      (d.n_hidden_other_files ? `; ${d.n_hidden_other_files} other file(s) hidden.` : ".") +
+      (d.truncated ? " The listing was truncated." : "");
+    el("browser-select-folder").disabled = !d.selectable_as_measurement;
+    el("browser-folder-summary").textContent = d.selectable_as_measurement
+      ? `${d.raw_sts_file_count} raw STS file(s) found here. HamLeT will combine them in natural filename order.`
+      : "Open a folder containing one .dat or .txt STS file per site to select it.";
+  } catch (e) {
+    browserFolderInfo = null;
+    el("browser-select-folder").disabled = true;
+    el("browser-folder-summary").textContent = "";
+    showError(list, e);
+  }
+}
+
+el("browser-close").addEventListener("click", closeBrowser);
+el("browser-up").addEventListener("click", async () => {
+  const d = await api(`/api/browse?path=${encodeURIComponent(browserPath)}`);
+  if (d.parent) loadBrowser(d.parent);
+});
+el("browser-select-folder").addEventListener("click", () => {
+  if (!browserTarget || !browserFolderInfo?.selectable_as_measurement) return;
+  browserTarget(
+    browserFolderInfo.path,
+    `${browserFolderInfo.raw_sts_file_count} per-site STS files; imported automatically`,
+  );
+  closeBrowser();
+});
+el("browser-backdrop").addEventListener("click", (event) => {
+  if (event.target === el("browser-backdrop")) closeBrowser();
+});
+
 // --- inspect data -----------------------------------------------------------
 
-function spectraSvg(plot) {
+const PLOT_COLOURS = [
+  "#00798c", "#d1495b", "#edae49", "#30638e",
+  "#6a4c93", "#2a9d8f", "#e76f51", "#5f6f52",
+];
+
+function spectraSvg(plot, { cutoffMev = null, compact = false } = {}) {
   const bias = plot.bias_mev;
   const sites = plot.sites;
-  const w = 920, h = 260, padL = 46, padR = 12, padT = 12, padB = 30;
+  const labels = plot.site_labels || sites.map((_, index) => index + 1);
+  const w = 920, h = compact ? 230 : 300, padL = 64, padR = 18, padT = 24, padB = 48;
   const flat = sites.flat().filter(Number.isFinite);
-  const lo = Math.min(...flat), hi = Math.max(...flat);
+  const lo = flat.length ? Math.min(...flat) : 0;
+  const hi = flat.length ? Math.max(...flat) : 1;
   const span = hi - lo || 1;
-  const x = (i) => padL + (i / (bias.length - 1)) * (w - padL - padR);
+  const biasLo = Math.min(...bias), biasHi = Math.max(...bias);
+  const biasSpan = biasHi - biasLo || 1;
+  const xValue = (value) => padL + ((value - biasLo) / biasSpan) * (w - padL - padR);
   const y = (v) => padT + (1 - (v - lo) / span) * (h - padT - padB);
   const paths = sites.map((row, index) => {
-    const hue = Math.round((index / Math.max(sites.length, 1)) * 300);
-    const d = row.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
-    return `<path d="${d}" fill="none" stroke="hsl(${hue} 62% 48%)" stroke-width="1.4"/>`;
+    const colour = PLOT_COLOURS[index % PLOT_COLOURS.length];
+    let connected = false;
+    const d = row.map((v, i) => {
+      if (!Number.isFinite(v)) { connected = false; return ""; }
+      const command = connected ? "L" : "M";
+      connected = true;
+      return `${command}${xValue(bias[i]).toFixed(1)},${y(v).toFixed(1)}`;
+    }).join("");
+    return `<path d="${d}" fill="none" stroke="${colour}" stroke-width="1.6" vector-effect="non-scaling-stroke"/>`;
   }).join("");
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => {
-    const i = Math.round(f * (bias.length - 1));
-    return `<text x="${x(i).toFixed(1)}" y="${h - 10}" font-size="11" text-anchor="middle" fill="currentColor" opacity="0.65">${bias[i].toFixed(1)}</text>`;
+  const xTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => {
+    const value = biasLo + f * biasSpan;
+    const px = xValue(value);
+    return `<line class="plot-grid" x1="${px}" x2="${px}" y1="${padT}" y2="${h - padB}"/>
+      <text class="plot-tick" x="${px}" y="${h - 27}" text-anchor="middle">${value.toFixed(1)}</text>`;
   }).join("");
-  return `<svg class="spectra" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-    ${paths}${ticks}
-    <text x="${w / 2}" y="${h - 22}" font-size="11" text-anchor="middle" fill="currentColor" opacity="0.65">bias [meV]</text>
-    <text x="6" y="${padT + 10}" font-size="11" fill="currentColor" opacity="0.65">dI/dV</text>
-  </svg>`;
+  const yTicks = [0, 0.5, 1].map((f) => {
+    const value = lo + f * span;
+    const py = y(value);
+    return `<line class="plot-grid" x1="${padL}" x2="${w - padR}" y1="${py}" y2="${py}"/>
+      <text class="plot-tick" x="${padL - 9}" y="${py + 4}" text-anchor="end">${value.toExponential(1)}</text>`;
+  }).join("");
+  let cutoff = "";
+  if (Number.isFinite(Number(cutoffMev)) && Number(cutoffMev) >= biasLo && Number(cutoffMev) <= biasHi) {
+    const left = Math.max(biasLo, 0);
+    const right = Number(cutoffMev);
+    const x0 = xValue(left), xc = xValue(right);
+    cutoff = `<rect class="outside-window" x="${padL}" y="${padT}" width="${Math.max(0, x0 - padL)}" height="${h - padT - padB}"/>
+      <rect class="outside-window" x="${xc}" y="${padT}" width="${Math.max(0, w - padR - xc)}" height="${h - padT - padB}"/>
+      <line class="cutoff-line" x1="${xc}" x2="${xc}" y1="${padT}" y2="${h - padB}"/>
+      <text class="cutoff-label" x="${Math.min(xc + 7, w - 105)}" y="${padT + 14}">${right.toFixed(1)} meV cutoff</text>`;
+  }
+  const legend = labels.map((label, index) => `<span class="legend-item">
+    <i style="background:${PLOT_COLOURS[index % PLOT_COLOURS.length]}"></i>site ${esc(label)}</span>`).join("");
+  return `<div class="spectrum-figure">
+    <svg class="spectra${compact ? " compact" : ""}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(plot.title || "signal")} spectra by site">
+      ${xTicks}${yTicks}${cutoff}${paths}
+      <line class="plot-axis" x1="${padL}" x2="${w - padR}" y1="${h - padB}" y2="${h - padB}"/>
+      <line class="plot-axis" x1="${padL}" x2="${padL}" y1="${padT}" y2="${h - padB}"/>
+      <text class="plot-axis-label" x="${(padL + w - padR) / 2}" y="${h - 7}" text-anchor="middle">Bias [meV]</text>
+      <text class="plot-axis-label" transform="translate(15 ${(padT + h - padB) / 2}) rotate(-90)" text-anchor="middle">${esc(plot.y_label || "dI/dV [A]")}</text>
+    </svg>
+    <div class="plot-legend" aria-label="Site legend">${legend}</div>
+  </div>`;
 }
+
+attachFileField({ prefix: "data" });
+attachFileField({ prefix: "reuse" });
+attachFileField({ prefix: "an" });
 
 el("data-go").addEventListener("click", async () => {
   const out = el("data-out");
-  busy(out, "Reading…");
+  const path = el("data-path").value.trim();
+  if (!path) { showError(out, new Error("choose a measurement first")); return; }
+  busy(out, "Reading the measurement… folders are combined into one site map the first time.");
   try {
-    const d = await api("/api/inspect", { path: el("data-path").value.trim() });
+    const d = await api("/api/inspect", { path });
     const problems = [];
     if (!d.is_complete) problems.push(`${d.missing_points} missing data point(s) — the workflow refuses incomplete maps`);
-    if (!d.starts_at_zero) problems.push(`the bias axis starts at ${num(d.bias_min_mev, 2)} meV, not 0`);
+    if (!d.covers_zero) problems.push(`the bias window ${num(d.bias_min_mev, 2)} to ${num(d.bias_max_mev, 2)} meV does not include zero`);
     if (d.bias_units !== "meV") problems.push(`bias axis is in ${d.bias_units}, not meV`);
+    const maximumCutoff = Math.max(1, Math.floor(d.bias_max_mev));
+    const initialCutoff = Math.min(maximumCutoff, Math.max(1, Number(el("reuse-cutoff").value) || 20));
+    const plots = d.plots || { [d.primary_channel]: d.plot };
+    const channelNames = Object.keys(plots);
+    const channelChoices = channelNames.length > 1
+      ? `<div class="plot-channel-switch" role="group" aria-label="Signal to plot">${channelNames.map((name) => {
+          const plot = plots[name];
+          return `<button type="button" data-plot-channel="${esc(name)}" class="${name === d.primary_channel ? "active" : ""}">${esc(plot.title || name)} <small>${esc(plot.role || "")}</small></button>`;
+        }).join("")}</div>`
+      : "";
+    const imported = d.input?.input_kind === "sts_folder";
     out.innerHTML = `
+      ${imported ? `<div class="import-banner"><b>Folder imported</b><span>${d.input.source_file_count} per-site spectra → one canonical measurement</span><span>${d.input.auxiliary_d2idv2 ? "d²I/dV² kept for plotting/QC" : "dI/dV channel imported"}</span></div>` : ""}
       <div class="box">
         <table>
           <tr><th>Sites in the chain</th><td class="num"><b>${d.n_sites}</b></td></tr>
@@ -105,15 +429,54 @@ el("data-go").addEventListener("click", async () => {
         </table>
         ${problems.length
           ? `<ul class="checks">${problems.map((p) => `<li class="fail">${esc(p)}</li>`).join("")}</ul>`
-          : `<ul class="checks"><li class="pass">Structurally usable: complete, in meV, and starting at zero bias.</li></ul>`}
+          : `<ul class="checks"><li class="pass">Structurally usable: complete, in meV, and covering zero bias.</li></ul>`}
       </div>
-      <div class="box">${spectraSvg(d.plot)}
+      <div class="box plot-box">
+        <div class="plot-heading"><div><span class="eyebrow">Measured signal</span><h3>Site-resolved dI/dV</h3></div>
+          <span class="plot-window" id="data-window-label">Analysis window 0–${initialCutoff.toFixed(1)} meV</span></div>
+        ${channelChoices}
+        <div id="data-spectrum">${spectraSvg(d.plot, { cutoffMev: initialCutoff })}</div>
         <p class="hint">One line per site. ${d.n_bias_points > d.plot.bias_mev.length
           ? `Thinned to ${d.plot.bias_mev.length} points for display.` : ""}</p>
       </div>
-      <div class="box"><b>Next:</b> ask whether a published model fits this measurement — go to
-        <em>Can I reuse a model?</em> and use the same path.</div>`;
-    el("reuse-path").value = d.path;
+      <div class="cutoff-control">
+        <div><span class="eyebrow">Your analysis choice</span><h3>Choose the positive-bias cutoff</h3>
+          <p class="hint">Move the marker while looking at the spectra. HamLeT will require a model trained for this exact window.</p></div>
+        <div class="cutoff-inputs">
+          <input type="range" id="data-cutoff-range" min="1" max="${maximumCutoff}" step="0.5" value="${initialCutoff}">
+          <label><input type="number" id="data-cutoff-number" min="1" max="${maximumCutoff}" step="0.5" value="${initialCutoff}"> meV</label>
+          <button id="data-use-cutoff" class="primary">Check matching models →</button>
+        </div>
+      </div>`;
+    const range = out.querySelector("#data-cutoff-range");
+    const number = out.querySelector("#data-cutoff-number");
+    let selectedChannel = d.primary_channel;
+    const updateCutoff = (value) => {
+      const selected = Math.min(maximumCutoff, Math.max(1, Number(value) || initialCutoff));
+      range.value = selected;
+      number.value = selected;
+      el("reuse-cutoff").value = selected;
+      out.querySelector("#data-window-label").textContent = `Analysis window 0–${selected.toFixed(1)} meV`;
+      out.querySelector("#data-spectrum").innerHTML = spectraSvg(plots[selectedChannel], { cutoffMev: selected });
+    };
+    out.querySelectorAll("button[data-plot-channel]").forEach((button) => {
+      button.addEventListener("click", () => {
+        selectedChannel = button.dataset.plotChannel;
+        out.querySelectorAll("button[data-plot-channel]").forEach((candidate) =>
+          candidate.classList.toggle("active", candidate === button));
+        out.querySelector(".plot-heading h3").textContent =
+          `Site-resolved ${plots[selectedChannel].title || selectedChannel}`;
+        updateCutoff(number.value);
+      });
+    });
+    range.addEventListener("input", () => updateCutoff(range.value));
+    number.addEventListener("input", () => updateCutoff(number.value));
+    out.querySelector("#data-use-cutoff").addEventListener("click", () => {
+      updateCutoff(number.value);
+      activate("reuse");
+    });
+    updateCutoff(initialCutoff);
+    shareChosenFile(d.path, "data");
   } catch (e) { showError(out, e); }
 });
 
@@ -121,13 +484,14 @@ el("data-go").addEventListener("click", async () => {
 
 el("reuse-go").addEventListener("click", async () => {
   const out = el("reuse-out");
-  busy(out, "Comparing against every published model's contract…");
+  const path = el("reuse-path").value.trim();
+  if (!path) { showError(out, new Error("choose a measurement first")); return; }
+  busy(out, "Comparing against every model's contract…");
   try {
-    const d = await api("/api/advise", {
-      path: el("reuse-path").value.trim(),
-      cutoff_mev: el("reuse-cutoff").value,
-    });
+    const d = await api("/api/advise", { path, cutoff_mev: el("reuse-cutoff").value });
+    shareChosenFile(d.path, "reuse");
     const klass = d.can_use_existing_model ? "good" : "warn";
+    const usable = d.artifacts.filter((a) => a.compatible);
     out.innerHTML = `
       <div class="box">
         <div class="verdict ${klass}">${esc(d.action.replace(/_/g, " "))}</div>
@@ -152,14 +516,18 @@ el("reuse-go").addEventListener("click", async () => {
             <td>${a.compatible ? "<b style='color:var(--good)'>yes</b>" : "no"}</td>
             <td>${a.reasons.length ? a.reasons.map(esc).join("<br>") : "—"}</td>
           </tr>`).join("")}
-        </table>` : "<p class='hint'>No published models were found to compare against.</p>"}
+        </table>` : "<p class='hint'>No models were found to compare against.</p>"}
       </div>
+      ${usable.length ? `<div class="box"><b>Next:</b> go to <em>Get my couplings</em> to run
+        the analysis — it is already pointed at this measurement.</div>` : ""}
       ${d.next_steps.length ? `<div class="box"><h3>What to do next</h3>
         <ul class="checks">${d.next_steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>` : ""}`;
   } catch (e) { showError(out, e); }
 });
 
 // --- models -----------------------------------------------------------------
+
+let knownModels = [];
 
 function conditionsText(conditions) {
   const keys = Object.keys(conditions || {});
@@ -169,9 +537,11 @@ function conditionsText(conditions) {
 
 async function loadModels() {
   const out = el("models-out");
-  busy(out, "Reading published models…");
+  busy(out, "Reading models…");
   try {
     const { models } = await api("/api/models");
+    knownModels = models;
+    renderAnalysisModels();
     if (!models.length) {
       out.innerHTML = `<div class="box">No models found yet. Train one on the
         <em>Train a model</em> page and it will appear here.</div>`;
@@ -208,6 +578,238 @@ async function showCard(name) {
   } catch (e) { showError(out, e); }
 }
 
+// --- get my couplings -------------------------------------------------------
+
+let chosenAnalysisModel = null;
+
+function renderAnalysisModels() {
+  const box = el("an-models");
+  if (!knownModels.length) {
+    box.innerHTML = `<div class="box hint">No models yet. Train one, or check the
+      published models on <em>Existing models</em>.</div>`;
+    return;
+  }
+  box.innerHTML = knownModels.map((m) => `
+    <div class="card${(m.label || m.name) === chosenAnalysisModel ? " chosen" : ""}"
+         data-model="${esc(m.label || m.name)}">
+      <div class="have">${esc(m.label || m.name)}
+        <span class="pill ${m.origin === "yours" ? "finished" : "running"}">${
+          m.origin === "yours" ? "yours" : "published"}</span></div>
+      <div class="does">${esc(m.system_type)} · L = ${m.n_sites} · ${esc(m.view)} view</div>
+      <div class="meta"><b>Applies to:</b> 0 to ${num(m.bias_cutoff_mev, 1)} meV of
+        ${esc(m.observable)} &nbsp;·&nbsp; <b>Held-out MAE:</b> ${num(m.test_mae_mev)} meV
+        &nbsp;·&nbsp; ${esc(m.preset || "")} preset</div>
+    </div>`).join("");
+  box.querySelectorAll(".card").forEach((c) =>
+    c.addEventListener("click", () => {
+      chosenAnalysisModel = c.dataset.model;
+      renderAnalysisModels();
+    }));
+}
+
+el("an-go").addEventListener("click", async () => {
+  const out = el("an-out");
+  const path = el("an-path").value.trim();
+  if (!path) { showError(out, new Error("choose a measurement first")); return; }
+  if (!chosenAnalysisModel) { showError(out, new Error("choose a model first")); return; }
+  busy(out, "Checking the model against this measurement…");
+  try {
+    const built = await api("/api/build-analysis", {
+      path,
+      model: chosenAnalysisModel,
+      name: el("an-name").value.trim(),
+      allow_development_artifacts: el("an-allow-dev").checked,
+    });
+    const job = await api("/api/run-analysis", { config_path: built.config_path });
+    out.innerHTML = `<div class="box">
+      <p>Running at the model's own cutoff of <b>${num(built.cutoff_mev, 1)} meV</b>.
+        Results appear here and on the <em>Running</em> tab.</p>
+      <p class="hint">Saved as <code>${esc(built.config_path)}</code>, so the same
+        analysis can be repeated with <code>hamlet run ${esc(built.config_path)}</code>.</p>
+    </div>`;
+    pollJob(job.job_id,
+      (done) => {
+        if (done.status === "failed") {
+          showError(out, new Error(done.error || "the analysis failed"));
+          return;
+        }
+        out.innerHTML = analysisResult(done.result) +
+          `<pre class="log">${esc(done.lines.join("\n"))}</pre>`;
+        refreshJobs();
+      },
+      (job) => { if (job.lines.length) busy(out, job.lines[job.lines.length - 1]); });
+  } catch (e) { showError(out, e); }
+});
+
+function couplingRows(table) {
+  const valueIndex = table.columns.indexOf("coupling");
+  if (valueIndex < 0 || !table.rows.length) return [];
+  const uncertaintyIndex = table.columns.indexOf("uncertainty");
+  const parameterIndex = table.columns.indexOf("parameter");
+  const leftIndex = table.columns.indexOf("left_site");
+  const rightIndex = table.columns.indexOf("right_site");
+  const bondIndex = table.columns.indexOf("bond");
+  return table.rows.slice(0, 20).map((row, index) => ({
+    label: parameterIndex >= 0 ? row[parameterIndex]
+      : leftIndex >= 0 && rightIndex >= 0 ? `${row[leftIndex]}–${row[rightIndex]}`
+      : bondIndex >= 0 ? `bond ${row[bondIndex]}` : `parameter ${index + 1}`,
+    left: leftIndex >= 0 ? Number(row[leftIndex]) : null,
+    right: rightIndex >= 0 ? Number(row[rightIndex]) : null,
+    value: Number(row[valueIndex]),
+    uncertainty: uncertaintyIndex >= 0 ? Math.abs(Number(row[uncertaintyIndex])) : 0,
+  })).filter((row) => Number.isFinite(row.value));
+}
+
+function bondChainChart(rows) {
+  const sites = [...new Set(rows.flatMap((row) => [row.left, row.right]))]
+    .filter(Number.isFinite).sort((a, b) => a - b);
+  const sitePosition = new Map(sites.map((site, index) => [site, index]));
+  const gap = sites.length <= 10 ? 96 : 112;
+  const edge = sites.length <= 10 ? 48 : 62;
+  const y = 126;
+  const w = Math.max(760, edge * 2 + Math.max(1, sites.length - 1) * gap);
+  const h = 230;
+  const maxMagnitude = Math.max(...rows.map((row) => Math.abs(row.value)), 1e-9);
+  const bonds = rows.map((row) => {
+    const leftPosition = sitePosition.get(row.left);
+    const rightPosition = sitePosition.get(row.right);
+    if (leftPosition === undefined || rightPosition === undefined) return "";
+    const x1 = edge + leftPosition * gap;
+    const x2 = edge + rightPosition * gap;
+    const mid = (x1 + x2) / 2;
+    const width = 5 + 5 * Math.abs(row.value) / maxMagnitude;
+    const colourClass = row.value < 0 ? "negative" : "positive";
+    const uncertainty = Number.isFinite(row.uncertainty) && row.uncertainty > 0
+      ? `± ${row.uncertainty.toFixed(2)}` : "";
+    return `<g class="chain-bond ${colourClass}">
+      <title>sites ${esc(row.label)}: ${row.value.toFixed(3)} meV${uncertainty ? ` ${uncertainty} meV` : ""}</title>
+      <line x1="${x1 + 23}" x2="${x2 - 23}" y1="${y}" y2="${y}" style="stroke-width:${width.toFixed(1)}"/>
+      <rect class="bond-value-bg" x="${mid - 43}" y="35" width="86" height="52" rx="8"/>
+      <text class="bond-symbol" x="${mid}" y="53" text-anchor="middle">J${esc(row.left)},${esc(row.right)}</text>
+      <text class="bond-value" x="${mid}" y="70" text-anchor="middle">${row.value.toFixed(2)} meV</text>
+      ${uncertainty ? `<text class="bond-uncertainty" x="${mid}" y="83" text-anchor="middle">${uncertainty}</text>` : ""}
+    </g>`;
+  }).join("");
+  const atoms = sites.map((site, index) => {
+    const x = edge + index * gap;
+    return `<g class="chain-site"><circle cx="${x}" cy="${y}" r="23"/>
+      <circle class="site-highlight" cx="${x - 7}" cy="${y - 8}" r="5"/>
+      <text x="${x}" y="${y + 5}" text-anchor="middle">${esc(site)}</text></g>`;
+  }).join("");
+  return `<div class="coupling-chart chain-coupling-chart">
+    <div class="chain-scroll"><svg viewBox="0 0 ${w} ${h}" style="min-width:${w}px" role="img" aria-label="Spin chain with inferred nearest-neighbour couplings in meV">
+      <text class="chain-axis-title" x="${edge}" y="18">INFERRED BOND COUPLINGS</text>
+      ${bonds}${atoms}
+      <text class="chain-caption" x="${w / 2}" y="181" text-anchor="middle">chain site</text>
+      <g class="chain-key" transform="translate(${Math.max(edge, w / 2 - 190)} 204)">
+        <line x1="0" x2="32" y1="0" y2="0" class="positive"/><text x="42" y="4">positive J</text>
+        <line x1="150" x2="182" y1="0" y2="0" class="negative"/><text x="192" y="4">negative J</text>
+      </g>
+    </svg></div>
+    <p class="chart-explanation">Each circle is a measured site. The number above each bond is the inferred coupling; <b>±</b> is model spread, and line thickness compares |J| within this chain.</p>
+  </div>`;
+}
+
+function parameterCouplingChart(rows) {
+  if (!rows.length) return "";
+  const bounds = rows.flatMap((row) => [row.value - row.uncertainty, row.value + row.uncertainty, 0]);
+  let lo = Math.min(...bounds), hi = Math.max(...bounds);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const w = 880, labelWidth = 118, right = 32, top = 28, rowHeight = 35, bottom = 38;
+  const h = top + rows.length * rowHeight + bottom;
+  const x = (value) => labelWidth + ((value - lo) / (hi - lo)) * (w - labelWidth - right);
+  const zero = x(0);
+  const ticks = [0, .25, .5, .75, 1].map((fraction) => {
+    const value = lo + fraction * (hi - lo), px = x(value);
+    return `<line class="plot-grid" x1="${px}" x2="${px}" y1="${top - 8}" y2="${h - bottom}"/>
+      <text class="plot-tick" x="${px}" y="${h - 13}" text-anchor="middle">${value.toFixed(1)}</text>`;
+  }).join("");
+  const bars = rows.map((row, index) => {
+    const y = top + index * rowHeight + 6;
+    const valueX = x(row.value), errorLo = x(row.value - row.uncertainty), errorHi = x(row.value + row.uncertainty);
+    return `<text class="coupling-label" x="${labelWidth - 10}" y="${y + 13}" text-anchor="end">${esc(row.label)}</text>
+      <rect class="coupling-bar" x="${Math.min(zero, valueX)}" y="${y}" width="${Math.max(2, Math.abs(valueX - zero))}" height="18" rx="4"/>
+      ${row.uncertainty ? `<line class="error-bar" x1="${errorLo}" x2="${errorHi}" y1="${y + 9}" y2="${y + 9}"/>
+        <line class="error-bar" x1="${errorLo}" x2="${errorLo}" y1="${y + 4}" y2="${y + 14}"/>
+        <line class="error-bar" x1="${errorHi}" x2="${errorHi}" y1="${y + 4}" y2="${y + 14}"/>` : ""}
+      <text class="coupling-value" x="${Math.min(w - right, Math.max(labelWidth, valueX))}" y="${y + 14}" dx="${valueX >= zero ? 7 : -7}" text-anchor="${valueX >= zero ? "start" : "end"}">${row.value.toFixed(2)}</text>`;
+  }).join("");
+  return `<div class="coupling-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Inferred couplings in meV">
+    ${ticks}<line class="zero-line" x1="${zero}" x2="${zero}" y1="${top - 8}" y2="${h - bottom}"/>${bars}
+    <text class="plot-axis-label" x="${(labelWidth + w - right) / 2}" y="${h - 1}" text-anchor="middle">Coupling [meV]</text>
+  </svg></div>`;
+}
+
+function couplingChart(table) {
+  const rows = couplingRows(table);
+  if (!rows.length) return "";
+  const isBondChain = rows.every((row) =>
+    Number.isFinite(row.left) && Number.isFinite(row.right));
+  return isBondChain ? bondChainChart(rows) : parameterCouplingChart(rows);
+}
+
+function prettyTable(table) {
+  const numeric = new Set(["coupling", "uncertainty"]);
+  return `<div class="table-scroll"><table class="coupling-table">
+    <tr>${table.columns.map((column) => `<th>${esc(column.replace(/_/g, " "))}</th>`).join("")}</tr>
+    ${table.rows.map((row) => `<tr>${row.map((value, index) => {
+      const column = table.columns[index];
+      const shown = numeric.has(column) && Number.isFinite(Number(value)) ? Number(value).toFixed(3) : value;
+      return `<td class="${numeric.has(column) ? "num" : ""}">${esc(shown)}</td>`;
+    }).join("")}</tr>`).join("")}
+  </table></div>`;
+}
+
+function analysisResult(result) {
+  if (!result) return "";
+  const table = result.couplings || { columns: [], rows: [] };
+  const diagnostics = result.diagnostics || {};
+  const warnings = diagnostics.warnings || [];
+  const statusLabel = result.status === "ok" ? "Ready to inspect" : "Review suggested";
+  const hasBondRows = table.columns.includes("left_site") && table.columns.includes("right_site");
+  return `<div class="result-dashboard">
+    <div class="result-hero">
+      <div><span class="eyebrow">Inference complete</span><h3>Your coupling estimate</h3>
+        <p class="hint">Generated with ${esc(result.model_label || "the selected model")}.</p></div>
+      <span class="result-status ${result.status === "ok" ? "good" : "warn"}">${esc(statusLabel)}</span>
+    </div>
+    <div class="result-facts">
+      <div><span>Model</span><strong>${esc(result.model_name || result.model_label || "—")}</strong></div>
+      <div><span>Analysis window</span><strong>0–${num(result.cutoff_mev, 1)} meV</strong></div>
+      <div><span>Chain</span><strong>${result.n_sites || "—"} sites</strong></div>
+      <div><span>View</span><strong>${esc((result.view || "—").replace(/_/g, " "))}</strong></div>
+    </div>
+    ${table.rows.length ? `<div class="result-section"><div class="plot-heading"><div><span class="eyebrow">Estimated Hamiltonian</span><h3>Couplings</h3></div>
+      <span class="hint">${hasBondRows
+        ? "The diagram follows the physical chain; exact values remain in the table below."
+        : "Bars show the estimates; whiskers show model spread where available."}</span></div>
+      ${couplingChart(table)}${prettyTable(table)}
+      ${table.truncated ? `<p class="hint">Showing the first ${table.rows.length} of
+      ${table.n_rows} rows; the CSV has all of them.</p>` : ""}` : ""}
+    </div>
+    <div class="result-section diagnostics-panel">
+      <span class="eyebrow">Quality checks</span><h3>${warnings.length ? "What deserves attention" : "Checks passed"}</h3>
+      ${warnings.length ? `<ul class="checks">${warnings.map((warning) => `<li class="fail">${esc(warning)}</li>`).join("")}</ul>`
+        : `<ul class="checks"><li class="pass">No automatic warnings were raised.</li></ul>`}
+      ${diagnostics.ensemble_size ? `<p class="hint">Ensemble: ${diagnostics.ensemble_size} model${diagnostics.ensemble_size === 1 ? "" : "s"}
+        ${Number.isFinite(diagnostics.max_ensemble_std) ? ` · largest spread ${num(diagnostics.max_ensemble_std)} meV` : ""}</p>` : ""}
+    </div>
+    ${result.summary_png ? `<div class="result-section"><span class="eyebrow">Quality-control figure</span><h3>Spectra and reconstruction</h3>
+      <a href="/api/file?path=${encodeURIComponent(result.summary_png)}" target="_blank" rel="noopener">
+        <img class="result-figure" src="/api/file?path=${encodeURIComponent(result.summary_png)}" alt="Quality-control summary of the inferred couplings">
+      </a></div>` : ""}
+    <div class="result-section"><span class="eyebrow">Files</span><h3>Open or share the result</h3>
+    <div class="result-files">${[
+      ["report_html", "report.html", "the full report, self-contained"],
+      ["summary_png", "summary.png", "quality-control figure"],
+      ["couplings_csv", "couplings.csv", "the coupling table"],
+      ["report_json", "report.json", "the same numbers, machine-readable"],
+    ].filter(([key]) => result[key])
+     .map(([key, label, what]) => `<div>${fileLink(result[key], label)}<span>${esc(what)}</span></div>`)
+     .join("")}</div></div>
+  </div>`;
+}
+
 // --- train: a guided form, no YAML ------------------------------------------
 // The options come from the server so the form cannot offer choices the
 // library would reject.
@@ -228,9 +830,8 @@ function modelSpec() {
 function renderCouplingRows() {
   const spec = systemSpec();
   const body = el("f-couplings").querySelector("tbody");
-  const header = spec.coupling_mode === "single_range"
-    ? "<tr><th>coupling</th><th class='num'>from [meV]</th><th class='num'>to [meV]</th><th></th></tr>"
-    : "<tr><th>coupling</th><th class='num'>from [meV]</th><th class='num'>to [meV]</th><th></th></tr>";
+  const header =
+    "<tr><th>coupling</th><th class='num'>from [meV]</th><th class='num'>to [meV]</th><th></th></tr>";
   body.innerHTML = header + spec.couplings.map((c, i) => `
     <tr>
       <td><code>${esc(c.name)}</code></td>
@@ -265,7 +866,13 @@ function renderImpurities(list) {
   const body = el("f-impurities").querySelector("tbody");
   body.innerHTML = list.map(impurityRow).join("");
   body.querySelectorAll(".imp-remove").forEach((b) =>
-    b.addEventListener("click", () => { b.closest("tr").remove(); }));
+    b.addEventListener("click", () => {
+      b.closest("tr").remove();
+      drawImpurityChain();
+    }));
+  body.querySelectorAll(".imp-site, .imp-spin").forEach((input) =>
+    input.addEventListener("change", drawImpurityChain));
+  drawImpurityChain();
 }
 
 function readImpurities() {
@@ -277,6 +884,169 @@ function readImpurities() {
   }));
 }
 
+// --- the chain, drawn -------------------------------------------------------
+// Impurity positions are the thing people get wrong: they are zero-based, they
+// have to be distinct, and whether an arrangement can expose DMI at all depends
+// on where they sit relative to the ends. A row of numbers hides all of that; a
+// picture of the chain does not, and clicking the site you mean is a shorter
+// path than typing its index.
+
+const CHAIN_GEOMETRY = { radius: 13, padX: 20, padY: 30, longChain: 14 };
+
+function chainSvg(nSites, marked, labelFor) {
+  const { padX, padY, longChain } = CHAIN_GEOMETRY;
+  // Long chains draw smaller and closer together so a 20-site chain still fits
+  // across the panel. Both shrink, so the sticks stay visible rather than the
+  // balls growing into each other; the circles stay large enough to click.
+  const long = nSites > longChain;
+  const radius = long ? 11 : CHAIN_GEOMETRY.radius;
+  const gap = long ? 36 : 46;
+  const width = 2 * (padX + radius) + Math.max(nSites - 1, 0) * gap;
+  const height = 2 * (padY + radius);
+  const cy = height / 2;
+  const x = (i) => padX + radius + i * gap;
+
+  const bonds = [];
+  for (let i = 0; i < nSites - 1; i += 1) {
+    bonds.push(`<line class="bond" x1="${x(i) + radius}" y1="${cy}"
+      x2="${x(i + 1) - radius}" y2="${cy}"/>`);
+  }
+  const sites = [];
+  for (let i = 0; i < nSites; i += 1) {
+    const on = marked.includes(i);
+    const label = on && labelFor ? labelFor(i) : "";
+    sites.push(`<g class="site${on ? " marked" : ""}" data-site="${i}"
+        role="button" tabindex="0">
+      <title>site ${i}${on ? " — impurity here; click to remove" : " — click to put an impurity here"}</title>
+      <circle class="hit" cx="${x(i)}" cy="${cy}" r="${radius + 8}"/>
+      <circle class="ball" cx="${x(i)}" cy="${cy}" r="${radius}"/>
+      <text class="index" x="${x(i)}" y="${cy + radius + 15}">${i}</text>
+      ${label ? `<text class="site-label" x="${x(i)}" y="${cy - radius - 8}">${esc(label)}</text>` : ""}
+    </g>`);
+  }
+  return `<svg class="chain-svg" viewBox="0 0 ${width} ${height}"
+    style="max-width:${width}px" preserveAspectRatio="xMidYMid meet"
+    role="group" aria-label="chain of ${nSites} sites">
+    ${bonds.join("")}${sites.join("")}</svg>`;
+}
+
+function renderChain(host, { nSites, marked, onToggle, labelFor }) {
+  host.innerHTML = chainSvg(nSites, marked, labelFor);
+  host.querySelectorAll("[data-site]").forEach((node) => {
+    const site = Number(node.dataset.site);
+    node.addEventListener("click", () => onToggle(site));
+    // Reachable by keyboard as well: the diagram is the primary control here,
+    // not decoration on top of one.
+    node.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        onToggle(site);
+      }
+    });
+  });
+}
+
+// A site that fell off the end when the chain was shortened cannot be drawn.
+// Saying so beats dropping it silently, which would change the design behind
+// the user's back, or hiding it, which would leave a run to fail later.
+function offChainWarning(sites, nSites) {
+  const stray = sites.filter((site) => site >= nSites || site < 0);
+  if (!stray.length) return "";
+  return `<p class="hint failtext">Impurity site(s) ${stray.join(", ")} lie
+    outside a ${nSites}-site chain, so they are not drawn. Remove them, or make
+    the chain longer.</p>`;
+}
+
+function drawImpurityChain() {
+  const host = el("f-chain");
+  if (!host) return;
+  const nSites = Number(el("f-n-sites").value) || 0;
+  const impurities = readImpurities();
+  const sites = impurities.map((item) => item.site);
+  const bySite = new Map(impurities.map((item) => [item.site, item]));
+  renderChain(host, {
+    nSites,
+    marked: sites.filter((site) => site >= 0 && site < nSites),
+    labelFor: (site) => (bySite.get(site) || {}).spin || "",
+    onToggle: (site) => {
+      const existing = readImpurities();
+      const already = existing.some((item) => item.site === site);
+      renderImpurities(
+        already
+          ? existing.filter((item) => item.site !== site)
+          : [...existing, { site, ...defaultImpurity() }].sort(
+              (a, b) => a.site - b.site
+            )
+      );
+    },
+  });
+  host.insertAdjacentHTML("beforeend", offChainWarning(sites, nSites));
+}
+
+// A new impurity copies the system's own default arrangement rather than an
+// invented one, so clicking a site produces something that can actually expose
+// DMI instead of an inert S=1 with no transverse anisotropy.
+function defaultImpurity() {
+  const template = (systemSpec().default_impurities || [])[0];
+  return {
+    spin: (template && template.spin) || "S=1",
+    transverse_mev: template ? template.transverse_mev : 2.0,
+    axial_mev: template ? template.axial_mev : 0.0,
+  };
+}
+
+// --- hyperparameters, including the layer stack -----------------------------
+// A network's shape is the thing people most want to change and the thing a
+// text box expresses worst, so layers get their own editor: one row per layer,
+// added and removed like the impurity list above.
+
+function currentWidths(name) {
+  return [...el(`layers-${name}`).querySelectorAll(".layer-units")]
+    .map((input) => Number(input.value));
+}
+
+// Re-rendered rather than mutated: replacing the container's contents drops the
+// old listeners with them, so adding a layer cannot leave a second handler
+// behind on the ones that were already there.
+function renderLayers(name, widths) {
+  const host = el(`layers-${name}`);
+  host.innerHTML = widths.map((units, index) => `<span class="layer">
+      <label>${index + 1}<input type="number" class="layer-units" min="1" step="16"
+        value="${units}" style="width:6.5em"></label>
+      <button class="layer-remove" title="remove this layer"${
+        widths.length > 1 ? "" : " disabled"}>×</button>
+    </span>`).join("") + `<button class="layer-add">+ layer</button>`;
+  host.querySelector(".layer-add").addEventListener("click", () => {
+    const current = currentWidths(name);
+    const last = current.length ? current[current.length - 1] : 128;
+    renderLayers(name, [...current, Math.max(16, Math.round(last / 2))]);
+  });
+  host.querySelectorAll(".layer-remove").forEach((button, index) =>
+    button.addEventListener("click", () => {
+      const current = currentWidths(name);
+      if (current.length > 1) renderLayers(name, current.filter((_, i) => i !== index));
+    }));
+}
+
+function optionField(option) {
+  const common = `data-option="${esc(option.name)}" data-type="${esc(option.type)}"`;
+  if (option.type === "layers") {
+    return `<div class="layers" id="layers-${esc(option.name)}"
+      data-layers="${esc(option.name)}"></div>`;
+  }
+  if (option.type === "boolean") {
+    return `<input type="checkbox" ${common}${option.default ? " checked" : ""}>`;
+  }
+  if (option.type === "choice") {
+    return `<select ${common}>${option.choices.map((c) =>
+      `<option value="${esc(c)}"${c === option.default ? " selected" : ""}>${esc(c)}</option>`).join("")}</select>`;
+  }
+  const step = option.type === "integer" ? 1 : "any";
+  const value = option.default === null || option.default === undefined ? "" : option.default;
+  return `<input type="number" ${common} value="${value}" step="${step}" style="width:9em"
+    placeholder="library default">`;
+}
+
 function renderModelOptions() {
   const spec = modelSpec();
   const box = el("f-model-options");
@@ -285,15 +1055,64 @@ function renderModelOptions() {
       hyperparameters exposed here; the defaults are used.</div>`;
     return;
   }
-  box.innerHTML = `<div class="box"><p class="hint">Leave these alone unless you
-    have a reason. The defaults are what the published models used.</p>` +
-    spec.options.map((o) => `<div class="row">
-      <label>${esc(o.label)}
-        <input type="number" data-option="${esc(o.name)}" value="${o.default}"
-          step="${o.type === "integer" ? 1 : "any"}" style="width:9em">
-      </label>
-      <span class="hint">default ${o.default}</span>
+  box.innerHTML = `<div class="box"><p class="hint">Every value here starts at the
+    library default, which is what the published models used. Clear a field to
+    return that one setting to its default.</p>` +
+    spec.options.map((o) => `<div class="option">
+      <label class="option-label">${esc(o.label)}</label>
+      <div class="option-input">${optionField(o)}</div>
+      <div class="hint option-hint">${esc(o.hint || "")}</div>
     </div>`).join("") + "</div>";
+  spec.options.filter((o) => o.type === "layers").forEach((o) =>
+    renderLayers(o.name, o.default || []));
+}
+
+function readModelOptions() {
+  const options = {};
+  const box = el("f-model-options");
+  box.querySelectorAll("[data-option]").forEach((input) => {
+    const name = input.dataset.option;
+    if (input.dataset.type === "boolean") options[name] = input.checked;
+    else if (input.dataset.type === "choice") options[name] = input.value;
+    else if (input.value !== "") options[name] = Number(input.value);
+  });
+  box.querySelectorAll(".layers").forEach((editor) => {
+    options[editor.dataset.layers] = currentWidths(editor.dataset.layers);
+  });
+  return options;
+}
+
+function renderTuningNote() {
+  const tuning = builder.tuning;
+  const searched = tuning.searched[chosenModel];
+  const box = el("f-tune-note");
+  const enabled = el("f-tune").checked;
+  if (!searched) {
+    box.innerHTML = `<div class="box hint">There is no search space for
+      ${esc(modelSpec().title)}.</div>`;
+    el("f-tune").checked = false;
+    el("f-tune").disabled = true;
+    return;
+  }
+  el("f-tune").disabled = false;
+  if (!enabled) {
+    box.innerHTML = `<p class="hint">Off: the settings above are used exactly as
+      they stand.</p>`;
+    return;
+  }
+  const trials = Number(el("f-tune-trials").value) || 0;
+  box.innerHTML = `<div class="box">
+    <p>Will vary: ${searched.map((s) => `<code>${esc(s)}</code>`).join(", ")}.</p>
+    <p class="hint">
+      ${trials} trial(s), each one short training run at the
+      <code>${esc(tuning.trial_preset)}</code> preset, after generation and
+      before the real training. Using <b>${esc(tuning.backend)}</b>${
+        tuning.optuna_available ? "" : " — install the <code>tune</code> extra for Optuna's TPE sampler, which spends later trials near the good region"}.
+      The library defaults are trial zero and are kept if nothing beats them, and
+      only the validation split is read, so the held-out score stays honest.
+      Anything you set above that the search does not vary is held fixed.
+    </p>
+  </div>`;
 }
 
 function selectSystem(systemType) {
@@ -329,6 +1148,7 @@ function selectModel(name) {
   document.querySelectorAll("#f-model-cards .card").forEach((c) =>
     c.classList.toggle("chosen", c.dataset.model === name));
   renderModelOptions();
+  renderTuningNote();
 }
 
 function readForm() {
@@ -338,10 +1158,6 @@ function readForm() {
     Number(rows.find((r) => +r.dataset.range === i && r.dataset.edge === "low").value),
     Number(rows.find((r) => +r.dataset.range === i && r.dataset.edge === "high").value),
   ]);
-  const options = {};
-  el("f-model-options").querySelectorAll("input[data-option]").forEach((i) => {
-    options[i.dataset.option] = Number(i.value);
-  });
   const form = {
     name: el("f-name").value.trim() || spec.title,
     system_type: chosenSystem,
@@ -356,7 +1172,13 @@ function readForm() {
     output_points: Number(el("f-output-points").value),
     model: chosenModel,
     preset: el("f-preset").value,
-    model_options: options,
+    model_options: readModelOptions(),
+    device: chosenDevice,
+    tuning: {
+      enabled: el("f-tune").checked,
+      n_trials: Number(el("f-tune-trials").value),
+      timeout_minutes: el("f-tune-timeout").value === "" ? null : Number(el("f-tune-timeout").value),
+    },
   };
   if (spec.supports_impurities) {
     form.impurities = readImpurities();
@@ -365,24 +1187,11 @@ function readForm() {
   return form;
 }
 
-function sampleSvg(bias, sites) {
-  const w = 900, h = 190, padL = 44, padR = 10, padT = 10, padB = 26;
-  const flat = sites.flat().filter(Number.isFinite);
-  const lo = Math.min(...flat), hi = Math.max(...flat), span = (hi - lo) || 1;
-  const x = (i) => padL + (i / (bias.length - 1)) * (w - padL - padR);
-  const y = (v) => padT + (1 - (v - lo) / span) * (h - padT - padB);
-  const paths = sites.map((row, index) => {
-    const hue = Math.round((index / Math.max(sites.length, 1)) * 300);
-    return `<path d="${row.map((v, i) => `${i ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("")}"
-      fill="none" stroke="hsl(${hue} 62% 48%)" stroke-width="1.3"/>`;
-  }).join("");
-  const ticks = [0, 0.5, 1].map((f) => {
-    const i = Math.round(f * (bias.length - 1));
-    return `<text x="${x(i).toFixed(1)}" y="${h - 8}" font-size="11" text-anchor="middle"
-      fill="currentColor" opacity=".65">${bias[i].toFixed(1)} meV</text>`;
-  }).join("");
-  return `<svg class="spectra" style="height:190px" viewBox="0 0 ${w} ${h}"
-    preserveAspectRatio="none">${paths}${ticks}</svg>`;
+function sampleSvg(bias, sites, siteLabels, cutoffMev) {
+  return spectraSvg(
+    { bias_mev: bias, sites, site_labels: siteLabels },
+    { cutoffMev, compact: true },
+  );
 }
 
 async function pollJob(jobId, onDone, onTick) {
@@ -411,7 +1220,9 @@ el("f-preview").addEventListener("click", async () => {
           <h4>Sample ${i + 1}</h4>
           <p class="hint">${r.target_names.map((n, j) =>
             `${esc(n)} = ${sample.couplings_mev[j].toFixed(2)}`).join(" · ")} meV</p>
-          ${sampleSvg(r.bias_mev, sample.sites)}`).join("") +
+          ${sampleSvg(
+            r.bias_mev, sample.sites, r.evaluated_sites, Number(el("f-cutoff").value)
+          )}`).join("") +
           `<p class="hint">
              ${r.showing_all_sites
                ? `One line per site, all ${r.n_sites} of them.`
@@ -486,10 +1297,16 @@ el("f-add-impurity").addEventListener("click", () => {
   renderImpurities([...existing, { site, spin: "S=1", transverse_mev: 2.0, axial_mev: 0 }]);
 });
 
+// The diagram has to follow the chain length, or it shows a chain that is no
+// longer the one being configured.
+el("f-n-sites").addEventListener("input", drawImpurityChain);
+
 el("f-toggle-advanced").addEventListener("click", () => {
   const box = el("f-model-options");
   box.hidden = !box.hidden;
 });
+el("f-tune").addEventListener("change", renderTuningNote);
+el("f-tune-trials").addEventListener("input", renderTuningNote);
 
 api("/api/builder-options").then((options) => {
   builder = options;
@@ -520,62 +1337,497 @@ api("/api/builder-options").then((options) => {
     `<option value="${esc(o.name)}">${esc(o.title)}</option>`).join("");
   el("f-preset").innerHTML = options.presets.map((p) =>
     `<option value="${esc(p.name)}">${esc(p.title)} — ${esc(p.notes)}</option>`).join("");
+  el("f-tune-trials").value = options.tuning.default_trials;
+  el("f-tune-trials").max = options.tuning.max_trials;
 
   selectSystem(options.systems[0].system_type);
 }).catch((e) => showError(el("sys-cards"), e));
 
-// --- dmi --------------------------------------------------------------------
+// --- dmi sample design ------------------------------------------------------
 
-el("dmi-preview").addEventListener("click", async () => {
+let screening = null;
+let builtScreening = null;
+
+// One card per candidate, each with its own chain to click sites on. This page
+// is entirely about *where* the impurities go, so the sites are the control and
+// the numbers are the annotation, not the other way round.
+
+function candidateCard(entry, index) {
+  return `<div class="candidate" data-candidate="${index}">
+    <div class="row" style="justify-content:space-between">
+      <label>name <input type="text" class="cand-label" value="${esc(entry.label || "")}"
+        placeholder="what you would build" size="26"></label>
+      <button class="cand-remove">remove</button>
+    </div>
+    <div class="chain cand-chain"></div>
+    <input type="hidden" class="cand-sites" value="${esc(siteText(entry.sites))}">
+    <div class="row">
+      <label>spin <select class="cand-spin">${screening.spins.map((s) =>
+        `<option value="${esc(s)}"${s === entry.spin ? " selected" : ""}>${esc(s)}</option>`).join("")}</select></label>
+      <label>transverse E <input type="number" class="cand-transverse" step="0.1"
+        value="${entry.transverse_mev ?? 2.0}" style="width:5.5em"> meV</label>
+      <label>axial D <input type="number" class="cand-axial" step="0.1"
+        value="${entry.axial_mev ?? 0}" style="width:5.5em"> meV</label>
+      <label>field B <input type="number" class="cand-field" step="0.1"
+        value="${entry.transverse_field_mev ?? 0}" style="width:5.5em"> meV</label>
+    </div>
+    <p class="hint cand-verdict"></p>
+  </div>`;
+}
+
+function siteText(sites) {
+  if (Array.isArray(sites)) return sites.join(", ");
+  return sites || "";
+}
+
+function parseSites(text) {
+  return String(text || "")
+    .replace(/;/g, ",")
+    .split(",")
+    .map((part) => Number(part.trim()))
+    .filter((value) => Number.isInteger(value) && value >= 0);
+}
+
+// The free symmetry rule, restated on each card as the sites are chosen: one
+// impurity can never break it, and neither can none without a field. Saying so
+// while the design is being drawn beats saying it after a screening run.
+function candidateVerdict(sites, field) {
+  const distinct = new Set(sites).size;
+  if (distinct >= 2) {
+    return ["good", `${distinct} impurities at distinct sites can break the symmetry that hides D_z.`];
+  }
+  if (field > 0) {
+    return ["good", "A transverse field can break the symmetry that hides D_z."];
+  }
+  if (distinct === 1) {
+    return ["bad", "One impurity cannot break the symmetry: D_z stays hidden however good the data."];
+  }
+  return ["bad", "Nothing here breaks the symmetry that hides D_z."];
+}
+
+function drawCandidateChain(card) {
+  const host = card.querySelector(".cand-chain");
+  const store = card.querySelector(".cand-sites");
+  const nSites = Number(el("d-n-sites").value) || 0;
+  const sites = parseSites(store.value);
+  const spin = card.querySelector(".cand-spin").value;
+  renderChain(host, {
+    nSites,
+    marked: sites.filter((site) => site < nSites),
+    labelFor: () => spin,
+    onToggle: (site) => {
+      const current = parseSites(store.value);
+      const next = current.includes(site)
+        ? current.filter((value) => value !== site)
+        : [...current, site].sort((a, b) => a - b);
+      store.value = next.join(", ");
+      drawCandidateChain(card);
+    },
+  });
+  host.insertAdjacentHTML("beforeend", offChainWarning(sites, nSites));
+  const [tone, message] = candidateVerdict(
+    sites.filter((site) => site < nSites),
+    Number(card.querySelector(".cand-field").value) || 0
+  );
+  const verdict = card.querySelector(".cand-verdict");
+  verdict.className = `hint cand-verdict ${tone === "good" ? "goodtext" : "failtext"}`;
+  verdict.textContent = message;
+}
+
+function renderCandidates(list) {
+  const host = el("d-candidates");
+  host.innerHTML = list.map(candidateCard).join("");
+  host.querySelectorAll(".candidate").forEach((card) => {
+    card.querySelector(".cand-remove").addEventListener("click", () => {
+      const remaining = readCandidates().filter(
+        (_, index) => index !== Number(card.dataset.candidate)
+      );
+      renderCandidates(remaining);
+    });
+    card.querySelector(".cand-spin").addEventListener("change", () =>
+      drawCandidateChain(card));
+    card.querySelector(".cand-field").addEventListener("input", () =>
+      drawCandidateChain(card));
+    drawCandidateChain(card);
+  });
+}
+
+function readCandidates() {
+  return [...el("d-candidates").querySelectorAll(".candidate")].map((card) => ({
+    label: card.querySelector(".cand-label").value.trim(),
+    sites: card.querySelector(".cand-sites").value,
+    spin: card.querySelector(".cand-spin").value,
+    transverse_mev: Number(card.querySelector(".cand-transverse").value),
+    axial_mev: Number(card.querySelector(".cand-axial").value),
+    transverse_field_mev: Number(card.querySelector(".cand-field").value),
+  }));
+}
+
+function readScreeningForm() {
+  return {
+    name: el("d-name").value.trim(),
+    chain: {
+      n_sites: Number(el("d-n-sites").value),
+      j_eff_mev: Number(el("d-jeff").value),
+      d_z_mev: Number(el("d-dz").value),
+      jz_mev: Number(el("d-jz").value),
+      j2_mev: Number(el("d-j2").value),
+      j3_mev: Number(el("d-j3").value),
+    },
+    protocol: {
+      bias_range_mev: [Number(el("d-bias-lo").value), Number(el("d-bias-hi").value)],
+      bias_points: Number(el("d-bias-points").value),
+      broadening_mev: Number(el("d-broadening").value),
+      observable: el("d-observable").value,
+    },
+    candidates: readCandidates(),
+  };
+}
+
+function symmetryTable(d) {
+  const hopeless = d.n_candidates - d.n_can_break_symmetry;
+  return `<div class="box">
+    <div class="verdict ${d.n_can_break_symmetry ? "good" : "bad"}">
+      ${d.n_can_break_symmetry} of ${d.n_candidates} arrangement(s) can break the symmetry
+    </div>
+    ${hopeless ? `<p class="hint">${hopeless} cannot, and will be skipped without
+      simulating — they cannot constrain D_z however good the data is.</p>` : ""}
+    <table><tr><th>Design</th><th>Impurities</th><th>Field</th><th>Can expose DMI?</th></tr>
+    ${d.candidates.map((c) => `<tr>
+      <td>${esc(c.label)}</td>
+      <td>${c.impurities.map((i) => `site ${i.site} ${esc(i.spin)} E=${i.transverse_mev}`).join("<br>") || "none"}</td>
+      <td class="num">${c.transverse_field_mev || 0} meV</td>
+      <td>${c.breaks_symmetry ? "<b style='color:var(--good)'>yes</b>"
+        : "<span class='pill hidden'>no</span>"}</td></tr>`).join("")}
+    </table>
+    <p class="hint">Saved as <code>${esc(d.config_path)}</code>, so the same screen
+      runs from the command line with
+      <code>hamlet screen-dmi ${esc(d.config_path)}</code>.</p>
+  </div>`;
+}
+
+function calibrationBox() {
+  return `<div class="box">
+    <h3>What an imprint means</h3>
+    <p class="hint">The imprint is how far apart the two chains of a gauge pair
+      look. The thresholds are not chosen — each is anchored to the D_z skill a
+      model trained on that design actually reached.</p>
+    <table><tr><th class="num">Imprint</th><th>Measured outcome</th></tr>
+      ${screening.calibration.map((c) => `<tr>
+        <td class="num">${c.imprint.toExponential(2)}</td>
+        <td>${esc(c.note)}</td></tr>`).join("")}
+    </table>
+    <table><tr><th>Verdict</th><th>Means</th></tr>
+      ${screening.verdicts.map((v) => `<tr>
+        <td><span class="pill ${esc(v.name)}">${esc(v.name)}</span></td>
+        <td>${esc(v.means)}</td></tr>`).join("")}
+    </table>
+  </div>`;
+}
+
+el("d-check").addEventListener("click", async () => {
   const out = el("dmi-out");
   busy(out, "Checking the symmetry rule…");
   try {
-    const d = await api("/api/screening-preview", { config_path: el("dmi-path").value.trim() });
-    const hopeless = d.n_candidates - d.n_can_break_symmetry;
-    out.innerHTML = `
-      <div class="box">
-        <div class="verdict ${d.n_can_break_symmetry ? "good" : "bad"}">
-          ${d.n_can_break_symmetry} of ${d.n_candidates} candidate(s) can break the symmetry
-        </div>
-        ${hopeless ? `<p class="hint">${hopeless} cannot, and will be skipped without simulating —
-          they cannot constrain D_z however good the data is.</p>` : ""}
-        <table><tr><th>Design</th><th>Impurities</th><th>Field</th><th>Can expose DMI?</th></tr>
-        ${d.candidates.map((c) => `<tr>
-          <td>${esc(c.label)}</td>
-          <td>${c.impurities.map((i) => `site ${i.site} ${esc(i.spin)} E=${i.transverse_mev}`).join("<br>") || "none"}</td>
-          <td class="num">${c.transverse_field_mev || 0} meV</td>
-          <td>${c.breaks_symmetry ? "<b style='color:var(--good)'>yes</b>"
-            : "<span class='pill hidden'>no</span>"}</td></tr>`).join("")}
-        </table>
-      </div>`;
+    builtScreening = await api("/api/build-screening", { form: readScreeningForm() });
+    out.innerHTML = symmetryTable(builtScreening);
+    el("dmi-calibration").innerHTML = calibrationBox();
+  } catch (e) { showError(out, e); builtScreening = null; }
+});
+
+el("d-run").addEventListener("click", async () => {
+  const out = el("dmi-out");
+  try {
+    // Always rebuilt first, so the run screens what is on the page rather than
+    // whatever an earlier symmetry check happened to save.
+    builtScreening = await api("/api/build-screening", { form: readScreeningForm() });
+    if (!builtScreening.n_can_break_symmetry) {
+      out.innerHTML = symmetryTable(builtScreening) +
+        `<div class="error">Nothing here can break the symmetry that hides D_z, so
+          there is nothing worth simulating. Two impurities carrying transverse
+          anisotropy at distinct sites, or a transverse field, are the mechanisms
+          that work.</div>`;
+      return;
+    }
+    await api("/api/run-screening", { config_path: builtScreening.config_path });
+    activate("jobs"); refreshJobs();
   } catch (e) { showError(out, e); }
 });
 
-el("dmi-run").addEventListener("click", async () => {
+el("d-n-sites").addEventListener("input", () =>
+  el("d-candidates").querySelectorAll(".candidate").forEach(drawCandidateChain));
+
+el("d-add").addEventListener("click", () => {
+  renderCandidates([...readCandidates(), {
+    label: "", sites: [], spin: "S=1", transverse_mev: 2.0,
+    axial_mev: 0, transverse_field_mev: 0,
+  }]);
+});
+
+el("d-reset").addEventListener("click", () => {
+  renderCandidates(screening.defaults.candidates);
+});
+
+api("/api/screening-options").then((options) => {
+  screening = options;
+  const d = options.defaults;
+  el("d-name").value = d.name;
+  el("d-n-sites").value = d.chain.n_sites;
+  el("d-jeff").value = d.chain.j_eff_mev;
+  el("d-dz").value = d.chain.d_z_mev;
+  el("d-jz").value = d.chain.jz_mev;
+  el("d-j2").value = d.chain.j2_mev;
+  el("d-j3").value = d.chain.j3_mev;
+  el("d-bias-lo").value = d.protocol.bias_range_mev[0];
+  el("d-bias-hi").value = d.protocol.bias_range_mev[1];
+  el("d-bias-points").value = d.protocol.bias_points;
+  el("d-broadening").value = d.protocol.broadening_mev;
+  el("d-observable").innerHTML = options.observables.map((o) =>
+    `<option value="${esc(o)}"${o === d.protocol.observable ? " selected" : ""}>${esc(o)}</option>`).join("");
+  renderCandidates(d.candidates);
+  el("dmi-calibration").innerHTML = calibrationBox();
+}).catch((e) => showError(el("dmi-out"), e));
+
+// --- where it runs ----------------------------------------------------------
+
+let compute = null;
+let chosenDevice = "auto";
+
+function renderCompute() {
+  const gpus = compute.accelerators.filter((a) => a.kind === "gpu");
+  el("compute-out").innerHTML = `<div class="box">
+    <table>
+      <tr><th>CPU cores</th><td class="num">${compute.cpu_count}</td></tr>
+      <tr><th>TensorFlow</th><td>${compute.tensorflow_available
+        ? "installed" : "<b>not installed</b> — the neural models are unavailable"}</td></tr>
+      <tr><th>GPU</th><td>${gpus.length
+        ? gpus.map((g) => `${esc(g.name)}${g.detail ? ` <span class="hint">(${esc(g.detail)})</span>` : ""}`).join("<br>")
+        : "none visible"}</td></tr>
+      <tr><th>Can use a GPU</th><td>${compute.gpu_capable_models.map((m) =>
+        `<code>${esc(m)}</code>`).join(", ")}</td></tr>
+    </table>
+    <ul class="checks">${compute.notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>
+  </div>`;
+
+  el("device-cards").innerHTML = compute.devices.map((d) => `
+    <div class="card${d.name === chosenDevice ? " chosen" : ""}" data-device="${esc(d.name)}">
+      <div class="have">${esc(d.title)}</div>
+      <div class="does">${esc(d.notes)}</div>
+    </div>`).join("");
+  el("device-cards").querySelectorAll(".card").forEach((c) =>
+    c.addEventListener("click", () => {
+      chosenDevice = c.dataset.device;
+      renderCompute();
+    }));
+
+  const schedulers = compute.cluster.schedulers;
+  el("scheduler-out").innerHTML = `<div class="box">
+    <table><tr><th>Scheduler</th><th>Submits with</th><th>Notes</th></tr>
+    ${Object.entries(schedulers).map(([name, p]) => `<tr>
+      <td><code>${esc(name)}</code></td>
+      <td><code>${esc(p.submit_command.join(" "))}</code></td>
+      <td class="hint">${esc(p.notes)}</td></tr>`).join("")}
+    </table></div>`;
+}
+
+api("/api/compute").then((options) => {
+  compute = options;
+  renderCompute();
+}).catch((e) => showError(el("compute-out"), e));
+
+api("/api/cluster-config").then((saved) => {
+  el("cluster-text").value = saved.text;
+  el("cluster-path").textContent = saved.exists
+    ? `saved at ${saved.path}`
+    : `will be saved at ${saved.path}`;
+}).catch((e) => showError(el("cluster-out"), e));
+
+el("cluster-save").addEventListener("click", async () => {
+  const out = el("cluster-out");
+  busy(out, "Checking the settings…");
   try {
-    await api("/api/run-screening", { config_path: el("dmi-path").value.trim() });
-    activate("jobs"); refreshJobs();
-  } catch (e) { showError(el("dmi-out"), e); }
+    const saved = await api("/api/save-cluster-config", {
+      text: el("cluster-text").value,
+    });
+    out.innerHTML = `<div class="box">
+      <div class="verdict good">Saved</div>
+      <table>
+        <tr><th>Host</th><td>${esc(saved.summary.host || "this machine")}</td></tr>
+        <tr><th>Directory there</th><td><code>${esc(saved.summary.remote_dir)}</code></td></tr>
+        <tr><th>Scheduler</th><td>${esc(saved.summary.scheduler)}</td></tr>
+        <tr><th>Asking for</th><td>${Object.entries(saved.summary.resources)
+          .map(([k, v]) => `${esc(k)} = ${esc(v)}`).join(" · ") || "the queue default"}</td></tr>
+      </table>
+      <p class="hint">Now test the connection before sending a real run.</p>
+    </div>`;
+  } catch (e) { showError(out, e); }
+});
+
+el("cluster-check").addEventListener("click", async () => {
+  const out = el("cluster-out");
+  busy(out, "Connecting… this uses your own ssh, so it may prompt in the terminal.");
+  try {
+    const d = await api("/api/check-cluster", {});
+    const ok = d.reachable && d.scheduler_found;
+    out.innerHTML = `<div class="box">
+      <div class="verdict ${ok ? "good" : "bad"}">
+        ${ok ? "Reachable, and the scheduler is there"
+             : d.reachable ? "Reachable, but the scheduler was not found"
+                           : "Could not reach it"}</div>
+      <table>
+        <tr><th>Host</th><td>${esc(d.host)}</td></tr>
+        <tr><th>Scheduler</th><td>${esc(d.scheduler)} — ${
+          d.scheduler_found ? "found" : "<b>not on the PATH there</b>"}</td></tr>
+      </table>
+      ${d.detail ? `<pre class="log">${esc(d.detail)}</pre>` : ""}
+      ${d.hint ? `<p class="hint">${esc(d.hint)}</p>` : ""}
+      ${d.reachable && !d.scheduler_found ? `<p class="hint">A login node often
+        needs a module loaded before the scheduler is on the PATH. Add that to
+        <code>setup:</code> above, or pick the profile your site actually
+        uses.</p>` : ""}
+    </div>`;
+  } catch (e) { showError(out, e); }
+});
+
+function requireBuiltConfig(out) {
+  if (!builtConfig) {
+    showError(out, new Error(
+      "assemble the run on the Train a model page first — its configuration is "
+      + "what gets sent"));
+    return null;
+  }
+  return builtConfig.config_path;
+}
+
+el("cluster-script-btn").addEventListener("click", async () => {
+  const out = el("cluster-submit-out");
+  const configPath = requireBuiltConfig(out);
+  if (!configPath) return;
+  busy(out, "Building the job script…");
+  try {
+    const d = await api("/api/cluster-script", { config_path: configPath });
+    out.innerHTML = `<div class="box">
+      <table>
+        <tr><th>Goes to</th><td>${esc(d.host)}:<code>${esc(d.remote_dir)}</code></td></tr>
+        <tr><th>Scheduler</th><td>${esc(d.scheduler)}</td></tr>
+      </table>
+      ${d.portable ? "" : `<div class="error"><b>These paths point outside the
+        project directory and will not be copied:</b><br>${
+        d.outside_project_dir.map(esc).join("<br>")}</div>`}
+      <pre class="log">${esc(d.script)}</pre>
+      <p class="hint">Nothing has been sent. If your site needs another
+        directive, copy this, add it, and submit by hand.</p>
+    </div>`;
+  } catch (e) { showError(out, e); }
+});
+
+el("cluster-submit").addEventListener("click", async () => {
+  const out = el("cluster-submit-out");
+  const configPath = requireBuiltConfig(out);
+  if (!configPath) return;
+  if (!confirm("Copy the project to the cluster and submit it?")) return;
+  try {
+    const job = await api("/api/submit-to-cluster", { config_path: configPath });
+    activate("jobs");
+    refreshJobs();
+  } catch (e) { showError(out, e); }
 });
 
 // --- jobs -------------------------------------------------------------------
 
+function screeningTable(results) {
+  return `<table><tr><th>Design</th><th class="num">Imprint</th><th>Verdict</th></tr>
+    ${results.map((r) => `<tr><td>${esc(r.label)}</td>
+      <td class="num">${r.imprint.toExponential(3)}</td>
+      <td><span class="pill ${esc(r.verdict)}">${esc(r.verdict)}</span></td></tr>`).join("")}</table>`;
+}
+
+function trainingResult(result) {
+  const tuning = result.tuning;
+  return `<table>
+    <tr><th>Artifact</th><td><code>${esc(result.artifact_path)}</code></td></tr>
+    <tr><th>Validation MAE</th><td class="num">${num(result.validation_mae_mev)} meV</td></tr>
+    <tr><th>Held-out MAE</th><td class="num">${num(result.test_mae_mev)} meV</td></tr>
+  </table>
+  ${tuning ? `<p class="hint">Hyperparameter search (${esc(tuning.backend)}):
+    ${tuning.kept_defaults
+      ? "nothing beat the library defaults, so they were kept."
+      : `best was ${num(tuning.improvement_mev, 4)} meV better on validation —
+         <code>${esc(JSON.stringify(tuning.best_options))}</code>.`}
+    Full trial table in <code>${esc(tuning.report_path)}</code>.</p>` : ""}
+  <p class="hint">It is now offered on <em>Get my couplings</em> and
+    <em>Existing models</em>.</p>`;
+}
+
+function clusterResult(result) {
+  return `<table>
+      <tr><th>Job id there</th><td><code>${esc(result.job_id)}</code></td></tr>
+      <tr><th>Host</th><td>${esc(result.host)}</td></tr>
+      <tr><th>Scheduler</th><td>${esc(result.scheduler)}</td></tr>
+      <tr><th>Script</th><td><code>${esc(result.script)}</code></td></tr>
+    </table>
+    <div class="row">
+      <button data-cluster-status="${esc(result.job_id)}">Check on it</button>
+      <button data-cluster-cancel="${esc(result.job_id)}">Stop it there</button>
+      <button data-cluster-fetch="${esc(result.project_dir)}">Bring results back</button>
+    </div>
+    <p class="hint">It is queued on the cluster now, not here — this page can be
+      closed and the run carries on.</p>`;
+}
+
+function jobResult(job) {
+  const result = job.result;
+  if (!result) return "";
+  if (Array.isArray(result)) return screeningTable(result);
+  if (result.kind === "analysis") return analysisResult(result);
+  if (result.kind === "training") return trainingResult(result);
+  if (result.kind === "cluster") return clusterResult(result);
+  if (result.kind === "fetch") {
+    return `<p class="hint">Fetched into <code>${esc(result.project_dir)}</code>.</p>`;
+  }
+  return "";
+}
+
 function jobBlock(job) {
-  const results = Array.isArray(job.result) ? job.result : null;
+  const running = job.status === "running";
   return `<div class="box">
     <div class="row" style="justify-content:space-between">
       <b>${esc(job.label)}</b>
-      <span><span class="pill ${esc(job.status)}">${esc(job.status)}</span>
+      <span>
+        ${running ? `<button data-stop="${esc(job.job_id)}"${
+          job.stopping ? " disabled" : ""}>${
+          job.stopping ? "stopping…" : "Stop this"}</button>` : ""}
+        <span class="pill ${esc(job.status)}">${esc(job.status)}</span>
         <span class="hint">${job.elapsed_seconds}s</span></span>
     </div>
-    ${job.error ? `<div class="error">${esc(job.error)}</div>` : ""}
-    ${results ? `<table><tr><th>Design</th><th class="num">Imprint</th><th>Verdict</th></tr>
-      ${results.map((r) => `<tr><td>${esc(r.label)}</td>
-        <td class="num">${r.imprint.toExponential(3)}</td>
-        <td><span class="pill ${esc(r.verdict)}">${esc(r.verdict)}</span></td></tr>`).join("")}</table>` : ""}
+    ${job.stopping ? `<p class="hint">Asked to stop; it finishes the step it is
+      on first, so nothing is left half-written.</p>` : ""}
+    ${job.error ? `<div class="${job.status === "cancelled" ? "box" : "error"}">${
+      esc(job.error)}</div>` : ""}
+    ${jobResult(job)}
     ${job.lines.length ? `<pre class="log">${esc(job.lines.join("\n"))}</pre>` : ""}
   </div>`;
 }
+
+// Stopping is cooperative -- a thread cannot be killed, and killing one
+// mid-write would leave a dataset the next run has to distrust -- so the
+// confirmation says what will actually happen rather than implying an
+// instant halt.
+async function stopJob(jobId) {
+  try {
+    const answer = await api("/api/cancel-job", { job_id: jobId });
+    if (answer.stopping) {
+      const note = el("jobs-note");
+      note.hidden = false;
+      note.textContent = answer.detail;
+    }
+    refreshJobs();
+  } catch (e) {
+    showError(el("jobs-out"), e);
+  }
+}
+
+let finishedJobs = new Set();
 
 async function refreshJobs() {
   try {
@@ -587,6 +1839,52 @@ async function refreshJobs() {
     el("jobs-out").innerHTML = jobs.length
       ? jobs.map(jobBlock).join("")
       : `<div class="box">Nothing has been run yet.</div>`;
+    el("jobs-out").querySelectorAll("button[data-cluster-status]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const note = el("jobs-note");
+        note.hidden = false;
+        note.textContent = "asking the cluster…";
+        try {
+          const d = await api("/api/cluster-status", { job_id: b.dataset.clusterStatus });
+          note.textContent = (d.known ? "still queued or running. " : "not listed. ")
+            + d.note + " " + (d.detail || "");
+        } catch (e) { note.textContent = e.message; }
+      }));
+    el("jobs-out").querySelectorAll("button[data-cluster-cancel]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        if (!confirm("Cancel this job on the cluster?")) return;
+        try {
+          const d = await api("/api/cancel-cluster-job", { job_id: b.dataset.clusterCancel });
+          const note = el("jobs-note");
+          note.hidden = false;
+          note.textContent = d.cancelled
+            ? `cancelled ${d.job_id} on the cluster. ${d.detail}`
+            : `the cluster refused: ${d.detail}`;
+        } catch (e) { showError(el("jobs-out"), e); }
+      }));
+    el("jobs-out").querySelectorAll("button[data-cluster-fetch]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        try {
+          await api("/api/fetch-from-cluster", { project_dir: b.dataset.clusterFetch });
+          refreshJobs();
+        } catch (e) { showError(el("jobs-out"), e); }
+      }));
+    el("jobs-out").querySelectorAll("button[data-stop]").forEach((b) =>
+      b.addEventListener("click", () => {
+        if (confirm("Stop this run? It finishes the step it is on first, and "
+                    + "anything already written is kept.")) {
+          stopJob(b.dataset.stop);
+        }
+      }));
+    // A finished training run produces a model, and the pages that offer models
+    // are stale until they are told.
+    jobs.filter((j) => j.kind === "project" && j.status === "finished")
+      .forEach((j) => {
+        if (!finishedJobs.has(j.job_id)) {
+          finishedJobs.add(j.job_id);
+          loadModels();
+        }
+      });
   } catch (e) {
     // A failed poll is how this page learns the server was stopped from the
     // terminal, which is otherwise indistinguishable from a hung interface.

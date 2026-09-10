@@ -63,6 +63,10 @@ class _Handler(BaseHTTPRequestHandler):
             ".html": "text/html; charset=utf-8",
             ".css": "text/css; charset=utf-8",
             ".js": "text/javascript; charset=utf-8",
+            # Without this a browser is handed the favicon as an octet-stream
+            # and quietly declines to use it, which looks like a missing file.
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
         }
         body = target.read_bytes()
         self.send_response(200)
@@ -87,6 +91,20 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(api.read_model_card(query["name"][0]))
             elif route == "/api/builder-options":
                 self._send_json(api.describe_builder_options())
+            elif route == "/api/screening-options":
+                self._send_json(api.describe_screening_options())
+            elif route == "/api/compute":
+                self._send_json(api.describe_compute_options())
+            elif route == "/api/cluster-config":
+                self._send_json(api.read_cluster_config())
+            elif route == "/api/browse":
+                self._send_json(
+                    api.browse_directory(
+                        query["path"][0] if query.get("path") else None
+                    )
+                )
+            elif route == "/api/file":
+                self._serve_result_file(query["path"][0])
             elif route == "/api/examples":
                 self._send_json(api.list_example_configs())
             elif route == "/api/config":
@@ -109,8 +127,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_error_json(exc, status=500)
 
     def do_POST(self) -> None:  # noqa: N802
-        route = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        route = parsed.path
         try:
+            if route in {"/api/upload", "/api/upload-folder"}:
+                # Handled before the body is read as JSON: this one carries raw
+                # file bytes, and base64 in a JSON envelope would inflate a
+                # measurement by a third for no benefit.
+                self._receive_upload(
+                    parse_qs(parsed.query), folder=route == "/api/upload-folder"
+                )
+                return
             payload = self._read_json()
             if route == "/api/inspect":
                 self._send_json(api.inspect_experiment(payload["path"]))
@@ -140,12 +167,43 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(
                     api.write_config_text(payload["path"], payload["text"])
                 )
+            elif route == "/api/build-screening":
+                self._send_json(api.build_screening_config(payload["form"]))
             elif route == "/api/screening-preview":
                 self._send_json(api.screening_preview(payload["config_path"]))
             elif route == "/api/run-screening":
                 self._send_json(self._submit_screening(payload).to_dict())
+            elif route == "/api/build-analysis":
+                self._send_json(
+                    api.build_analysis_config(
+                        payload["path"],
+                        payload["model"],
+                        name=payload.get("name") or None,
+                        allow_development_artifacts=bool(
+                            payload.get("allow_development_artifacts", False)
+                        ),
+                    )
+                )
+            elif route == "/api/run-analysis":
+                self._send_json(self._submit_analysis(payload).to_dict())
             elif route == "/api/run-project":
                 self._send_json(self._submit_project(payload).to_dict())
+            elif route == "/api/cancel-job":
+                self._send_json(self.registry.cancel(payload["job_id"]))
+            elif route == "/api/save-cluster-config":
+                self._send_json(api.write_cluster_config(payload["text"]))
+            elif route == "/api/check-cluster":
+                self._send_json(api.check_cluster())
+            elif route == "/api/cluster-script":
+                self._send_json(api.cluster_script(payload["config_path"]))
+            elif route == "/api/submit-to-cluster":
+                self._send_json(self._submit_to_cluster(payload).to_dict())
+            elif route == "/api/cluster-status":
+                self._send_json(api.cluster_job_status(payload["job_id"]))
+            elif route == "/api/cancel-cluster-job":
+                self._send_json(api.cancel_cluster_job(payload["job_id"]))
+            elif route == "/api/fetch-from-cluster":
+                self._send_json(self._submit_fetch(payload).to_dict())
             elif route == "/api/shutdown":
                 self._shutdown()
             else:
@@ -159,6 +217,74 @@ class _Handler(BaseHTTPRequestHandler):
             self._send_error_json(exc, status=400)
         except Exception as exc:  # noqa: BLE001 - surfaced to the browser
             self._send_error_json(exc, status=500)
+
+    def _receive_upload(
+        self, query: dict[str, list[str]], *, folder: bool = False
+    ) -> None:
+        """Accept one dropped file and reply with the path it was stored at."""
+        length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            self._send_error_json(ValueError("no file content was sent"))
+            return
+        if length > api.MAX_UPLOAD_BYTES:
+            # Refused without reading the body: the point of a size limit is not
+            # to spend memory finding out it was exceeded.
+            self._send_error_json(
+                ValueError(
+                    f"that file is {length / 1e6:.0f} MB; the interface accepts "
+                    f"up to {api.MAX_UPLOAD_BYTES // (1024 * 1024)} MB"
+                ),
+                status=413,
+            )
+            return
+        data = self.rfile.read(length)
+        name = query.get("name", ["measurement"])[0]
+        try:
+            if folder:
+                self._send_json(
+                    api.save_folder_upload(
+                        query.get("session", [""])[0],
+                        query.get("folder", ["experiment"])[0],
+                        name,
+                        data,
+                    )
+                )
+            else:
+                self._send_json(api.save_upload(name, data))
+        except ValueError as exc:
+            self._send_error_json(exc, status=400)
+
+    def _serve_result_file(self, path: str) -> None:
+        """Serve a file this interface produced, so results open in the browser.
+
+        A report is an HTML file whose whole purpose is to be looked at; making
+        the user find it on disk to do that would undo the point of running the
+        analysis from a page.
+        """
+        try:
+            target = api.resolve_readable_file(path)
+        except PermissionError as exc:
+            self._send_error_json(exc, status=403)
+            return
+        content_types = {
+            ".html": "text/html; charset=utf-8",
+            ".json": "application/json",
+            ".csv": "text/csv; charset=utf-8",
+            ".png": "image/png",
+            ".md": "text/plain; charset=utf-8",
+            ".yaml": "text/plain; charset=utf-8",
+            ".yml": "text/plain; charset=utf-8",
+            ".txt": "text/plain; charset=utf-8",
+        }
+        body = target.read_bytes()
+        self.send_response(200)
+        self.send_header(
+            "Content-Type",
+            content_types.get(target.suffix.lower(), "application/octet-stream"),
+        )
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
     def _shutdown(self) -> None:
         """Stop the server at the browser's request.
@@ -193,8 +319,8 @@ class _Handler(BaseHTTPRequestHandler):
         form = payload["form"]
         n_samples = int(payload.get("n_samples", 2))
 
-        def work() -> Any:
-            return api.preview_samples(form, n_samples=n_samples)
+        def work(token: Any) -> Any:
+            return api.preview_samples(form, n_samples=n_samples, should_stop=token)
 
         return self.registry.submit("preview", "sample simulation", work)
 
@@ -202,7 +328,8 @@ class _Handler(BaseHTTPRequestHandler):
         config_path = payload["config_path"]
         verify = bool(payload.get("verify_symmetric", False))
 
-        def work() -> Any:
+        def work(token: Any) -> Any:
+            from ..cancellation import check_cancelled
             from ..dmi_design import (
                 format_screening_table,
                 load_screening_config,
@@ -212,14 +339,19 @@ class _Handler(BaseHTTPRequestHandler):
 
             designs, protocol = load_screening_config(config_path)
             print(f"screening {len(designs)} candidate design(s)")
+
+            def report(item: Any) -> None:
+                print(f"  {item.design.name}: {item.imprint:.3e} ({item.verdict})")
+                # After reporting, so a stopped screen still shows the verdict
+                # of the candidate it had just finished.
+                check_cancelled(token, "the screening")
+
             results = screen_dmi_designs(
                 designs,
                 DmrgpySimulator(dynamics_mode="ED"),
                 protocol,
                 skip_symmetric=not verify,
-                progress=lambda item: print(
-                    f"  {item.design.name}: {item.imprint:.3e} ({item.verdict})"
-                ),
+                progress=report,
             )
             print()
             print(format_screening_table(results))
@@ -237,46 +369,79 @@ class _Handler(BaseHTTPRequestHandler):
             "screening", f"screen {Path(config_path).name}", work
         )
 
-    def _submit_project(self, payload: dict[str, Any]) -> api.GuiJob:
+    def _submit_to_cluster(self, payload: dict[str, Any]) -> api.GuiJob:
+        """Staging is a file copy that can take minutes, so it is a job."""
         config_path = payload["config_path"]
 
         def work() -> Any:
+            return api.submit_to_cluster(config_path)
+
+        return self.registry.submit(
+            "cluster", f"send {Path(config_path).parent.name} to the cluster", work
+        )
+
+    def _submit_fetch(self, payload: dict[str, Any]) -> api.GuiJob:
+        project_dir = payload["project_dir"]
+
+        def work() -> Any:
+            return api.fetch_from_cluster(project_dir)
+
+        return self.registry.submit(
+            "fetch", f"fetch {Path(project_dir).name} from the cluster", work
+        )
+
+    def _submit_analysis(self, payload: dict[str, Any]) -> api.GuiJob:
+        config_path = payload["config_path"]
+
+        def work(token: Any) -> Any:
+            return api.run_analysis(config_path, should_stop=token)
+
+        return self.registry.submit(
+            "analysis", f"analyse {Path(config_path).parent.name}", work
+        )
+
+    def _submit_project(self, payload: dict[str, Any]) -> api.GuiJob:
+        """Run a project exactly as `hamlet run` would.
+
+        The stages are the library's, not the interface's: a run started here
+        and the same configuration run from the command line have to do the
+        same thing, or the path printed on the plan is a lie.
+        """
+        config_path = payload["config_path"]
+
+        def work(token: Any) -> Any:
             from ..project import HamiltonianLearningProject
 
+            api.use_headless_plotting()
             project = HamiltonianLearningProject.from_config(config_path)
-            # `run()` ends in inference and therefore requires an experiment.
-            # Projects built by the guided form have no experiment attached --
-            # their whole purpose is to produce a model -- so the generate and
-            # train stages are driven directly. With an experiment configured,
-            # the full pipeline including the report is the right thing.
-            if project.config.experiment_csv is not None:
-                outcome = project.run()
-                return {
-                    "kind": "full",
-                    "artifact_path": str(outcome.artifact_path),
-                    "report_path": str(outcome.report_path),
-                    "status": str(outcome.status),
-                }
-
-            if project.config.generation is not None:
-                print("generating the training dataset")
-                project.generate_training_dataset(
-                    progress=lambda done, total: print(f"  {done} of {total} chains")
-                )
-            # No experiment means no augmentation to calibrate against, so the
-            # uncalibrated path is used deliberately rather than by accident.
-            print("preparing training data at the chosen cutoff")
-            project.prepare_training_data_without_experiment()
-            print("training")
-            run = project.train()
-            artifact = project.config.output_dir / "artifact"
-            print(f"done; artifact written to {artifact}")
-            return {
-                "kind": "train_only",
-                "artifact_path": str(artifact),
-                "validation_mae_mev": run.metrics["validation"]["ensemble"]["mae"],
-                "test_mae_mev": run.metrics["test"]["ensemble"]["mae"],
+            outcome = project.run(
+                progress=lambda done, total: print(f"  {done} of {total} chains"),
+                should_stop=token,
+            )
+            result: dict[str, Any] = {
+                "kind": "analysis" if outcome.report_path else "training",
+                "artifact_path": str(outcome.artifact_path),
+                "status": str(outcome.status),
+                "cutoff_mev": outcome.selected_cutoff_mev,
             }
+            if outcome.report_path is not None:
+                result["report_html"] = str(outcome.report_path)
+                result["couplings_csv"] = str(outcome.analysis_dir / "couplings.csv")
+                result["summary_png"] = str(outcome.analysis_dir / "summary.png")
+            elif project.training_run is not None:
+                metrics = project.training_run.metrics
+                result["validation_mae_mev"] = metrics["validation"]["ensemble"]["mae"]
+                result["test_mae_mev"] = metrics["test"]["ensemble"]["mae"]
+            if project.tuning_report is not None:
+                result["tuning"] = {
+                    "backend": project.tuning_report.backend,
+                    "kept_defaults": project.tuning_report.kept_defaults,
+                    "best_options": project.tuning_report.best_options,
+                    "improvement_mev": project.tuning_report.improvement_mev,
+                    "report_path": str(project.config.output_dir / "tuning.json"),
+                }
+            print(f"done; artifact written to {outcome.artifact_path}")
+            return result
 
         return self.registry.submit(
             "project", f"run {Path(config_path).name}", work
@@ -345,6 +510,11 @@ def serve(
     explicit port is honoured strictly, because someone who chose a port
     usually needs that one.
     """
+    # Jobs run on worker threads and every figure they make is written to a
+    # file, so the process is settled onto a non-interactive backend up front
+    # rather than discovering the problem inside an hours-long run.
+    api.use_headless_plotting()
+
     requested = port
     first = DEFAULT_PORT if port is None else int(port)
     candidates = (

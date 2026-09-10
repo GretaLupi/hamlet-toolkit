@@ -31,6 +31,23 @@ from .project import (
     ProjectConfig,
     ProjectOutcome,
     ProjectPlan,
+    TuningConfig,
+)
+from .cancellation import CancelToken, OperationCancelled
+from .cluster import (
+    BUILT_IN_PROFILES,
+    ClusterConfig,
+    ClusterSession,
+    SchedulerProfile,
+    available_profiles,
+    render_job_script,
+)
+from .compute import (
+    ComputeReport,
+    DeviceRequest,
+    advise_device,
+    configure_device,
+    describe_compute,
 )
 from .measurements import Measurement
 from .experiments import (
@@ -72,6 +89,20 @@ __all__ = [
     "ProjectConfig",
     "ProjectPlan",
     "ProjectOutcome",
+    "TuningConfig",
+    "BUILT_IN_PROFILES",
+    "CancelToken",
+    "ClusterConfig",
+    "ClusterSession",
+    "ComputeReport",
+    "DeviceRequest",
+    "OperationCancelled",
+    "SchedulerProfile",
+    "advise_device",
+    "available_profiles",
+    "configure_device",
+    "describe_compute",
+    "render_job_script",
     "Measurement",
     "ExperimentInspectionResult",
     "ExperimentModeSelectionResult",

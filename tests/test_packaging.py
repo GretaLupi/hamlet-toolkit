@@ -12,6 +12,7 @@ way to catch a file that is present locally but missing from a fresh clone.
 
 from pathlib import Path
 import subprocess
+import tomllib
 
 import pytest
 
@@ -90,6 +91,7 @@ def test_declared_public_api_is_importable():
 # neither the git-tracking check above nor an import check would notice them
 # missing. An installed package would then import fine and 404 on every page.
 GUI_STATIC_ROOT = SOURCE_ROOT / "gui" / "static"
+PUBLISHED_MODEL_ROOT = SOURCE_ROOT / "resources" / "models"
 
 
 @requires_git
@@ -118,8 +120,76 @@ def test_gui_static_assets_are_declared_as_package_data():
         "pyproject.toml declares no package-data, so the interface's HTML, CSS "
         "and JS would be absent from an installed package"
     )
-    for suffix in (".html", ".css", ".js"):
+    for suffix in (".html", ".css", ".js", ".png"):
         assert f"static/*{suffix}" in text, f"package-data does not cover static/*{suffix}"
+
+
+@requires_git
+def test_published_model_bank_is_tracked_and_package_owned():
+    """The GUI model catalog must survive installation from a wheel."""
+    manifests = sorted(PUBLISHED_MODEL_ROOT.glob("*/manifest.json"))
+    assert len(manifests) >= 3, "expected the three documented reference models"
+    tracked = _tracked_files()
+    missing = sorted(
+        str(path.relative_to(REPO_ROOT))
+        for path in PUBLISHED_MODEL_ROOT.rglob("*")
+        if path.is_file() and path.resolve() not in tracked
+    )
+    assert not missing, f"published model files missing from git: {missing}"
+
+
+def test_published_model_bank_is_declared_as_package_data():
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    patterns = project["tool"]["setuptools"]["package-data"]["hamlet"]
+    assert "resources/models/*/*" in patterns
+
+
+def test_release_metadata_is_consistent_and_index_installable():
+    """Catch stale versions and requirements PyPI cannot install."""
+    import hamlet
+
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert project["project"]["version"] == hamlet.__version__
+    requirements = list(project["project"]["dependencies"])
+    for values in project["project"]["optional-dependencies"].values():
+        requirements.extend(values)
+    assert not any(" @ git+" in requirement for requirement in requirements)
+    assert project["project"]["license"] == "MIT"
+    assert project["project"]["license-files"] == ["LICENSE"]
+
+
+def test_source_distribution_manifest_contains_public_release_material():
+    text = (REPO_ROOT / "MANIFEST.in").read_text(encoding="utf-8")
+    for name in (
+        "CHANGELOG.md",
+        "CITATION.cff",
+        "CONTRIBUTING.md",
+        "RELEASING.md",
+        "SECURITY.md",
+    ):
+        assert f"include {name}" in text
+    assert "include docs/user-guide.md" in text
+    assert "include docs/dmi-experiment-spec.md" in text
+    assert "recursive-include examples" in text
+
+
+def test_the_interface_serves_every_asset_its_page_asks_for():
+    """A page that links an asset the wheel does not carry renders broken.
+
+    Neither the git check nor the package-data check above would notice: both
+    look at what exists, not at what the page actually requests.
+    """
+    import re
+
+    from hamlet.gui.server import STATIC_ROOT
+
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    referenced = set(re.findall(r'(?:href|src)="/([A-Za-z0-9._-]+)"', html))
+    assert referenced, "the page references no local assets, which cannot be right"
+    for name in sorted(referenced):
+        assert (STATIC_ROOT / name).is_file(), (
+            f"index.html asks for /{name}, which is not in the interface's assets"
+        )
 
 
 def test_gui_serves_only_from_its_static_directory():

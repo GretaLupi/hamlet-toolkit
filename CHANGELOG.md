@@ -8,6 +8,64 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Added
 
+- A PyPI release workflow using Trusted Publishing, release instructions,
+  citation metadata, a security policy, and structured issue and pull-request
+  templates.
+- Installation tests now open the published-model catalog from the built
+  wheel, catching source-only resources that an import smoke test misses.
+- The chain is drawn, and you click the sites you mean. Impurity positions are
+  zero-based, must be distinct, and whether an arrangement can expose DMI at
+  all depends on where they sit relative to the ends -- a row of numbers hides
+  every bit of that. Both pages that choose sites now show a ball-and-stick
+  chain: click a site to place an impurity or take one off, keyboard-reachable,
+  with the impurity's spin labelled above it. The DMI page restates the free
+  symmetry rule under each candidate as the sites are chosen, so "one impurity
+  cannot break the symmetry" arrives while the design is being drawn rather
+  than after a screening run. A site left off the end by a shortened chain is
+  reported rather than silently dropped.
+- The HamLeT mark in the page header and as the browser-tab icon, shipped
+  inside the package so a wheel install serves them, and inverted under a dark
+  theme where black line art on transparency would otherwise vanish.
+- Files are chosen, not typed. Every page that needs a measurement accepts a
+  drag-and-drop or a file picker -- which uploads to the local server and keeps
+  the copy under `results/gui-uploads/` -- and a **Browse this machine** dialog
+  over the server's own filesystem, which is the one to use over an SSH tunnel
+  where the data never needs to travel. A file chosen on one page carries over
+  to the others. `POST /api/upload`, `GET /api/browse` and `GET /api/file` back
+  this; the last serves only files the interface itself produced.
+- A **Get my couplings** page, which applies a trained model to a measurement
+  and writes `report.html`, `summary.png`, `couplings.csv` and `report.json`,
+  all openable from the page. This was the one stage the interface could not
+  do: you could train a model in the browser and then had to leave for the
+  command line to use it, which is exactly where a configuration file
+  reappeared. It asks for no cutoff, because the cutoff is part of the model's
+  contract and copying it from the manifest removes the chance to disagree with
+  it and be refused later.
+- DMI sample design is a form rather than a screening YAML: the chain you can
+  build, the measurement you can take, and one row per candidate arrangement.
+  The free symmetry verdict comes back as soon as the design is written down,
+  with the calibration table that makes an imprint mean something. The design
+  is still saved as a configuration, so `hamlet screen-dmi <path>` repeats it.
+- The neural networks are designed in the form: one row per hidden layer with
+  its width, added and removed like any other list, plus activation, dropout,
+  weight decay, learning rate, batch normalisation and Huber delta; the CNN
+  additionally exposes its convolution blocks, kernel width and dense layers.
+  Every field starts at the library default and clearing one returns that
+  setting to it. Values the library would reject are refused at the form rather
+  than after generation. The `research` preset is offered alongside `standard`
+  and `quick`.
+- `hamlet.training.tuning`: hyperparameter search over any of the four models,
+  reachable from the form as **search before training** and from a
+  configuration as `training.tuning`. Two rules make it safe to leave on: the
+  library defaults are evaluated first and kept if nothing beats them, so a
+  search cannot produce a worse model than not searching; and selection reads
+  the validation split only, so the artifact's held-out MAE stays an estimate
+  of a model whose hyperparameters it did not choose. Every trial is written to
+  `tuning.json` beside the artifact. Optuna's TPE sampler is used when the new
+  `tune` extra is installed, and the same space is sampled at random when it is
+  not, so the feature works either way.
+- `HamiltonianLearningProject.tune()`, `ProjectConfig.tuning`, and a
+  `TuningConfig` parsed from `training.tuning`.
 - The impurity-assisted DMI family is available through project YAML. Users
   may list any number of impurities at arbitrary distinct sites and provide the
   measured spin, axial anisotropy, transverse anisotropy, and in-plane angle
@@ -17,7 +75,7 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
   0.539 +/- 0.005 skill across five held-out splits with ridge regression.
 - Models trained through the interface now appear on the models page, tagged
   as yours rather than published, and the reuse advisor searches them too.
-  Previously both looked only in `models/published/`, so the model you had just
+  Previously both looked only in the published resource bank, so the model you had just
   trained was invisible exactly when you would ask about it.
 - `HamiltonianLearningProject.prepare_training_data_without_experiment()`, so a
   model can be trained before any measurement exists. The calibrated path
@@ -131,7 +189,7 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
   sliding-window inference on a held-out chain.
 - `examples/l8_demo/`: three small exact-diagonalisation datasets, with recipe
   fingerprints, so that notebook runs immediately after cloning.
-- `models/published/homogeneous_heisenberg_l8_random_forest_standard_v1`: the
+- `src/hamlet/resources/models/homogeneous_heisenberg_l8_random_forest_standard_v1`: the
   first reference artifact for a homogeneous system, trained on 3000 L=8
   exact-diagonalisation chains. 0.114 meV held-out test MAE, accepted by the
   advisor, and documented by a model card recording provenance, valid
@@ -140,7 +198,55 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
   split seeds and reports the spread, because single-split per-parameter
   scores at these dataset sizes are noisy enough to invert a conclusion.
 
+### Removed
+
+- The XXZ + J2 + J3 + DMI system with no symmetry breaking is no longer offered
+  in the training form. `D_z` is exactly unidentifiable in a chain conserving
+  total `S^z`, and models trained on it were measured at about zero `D_z` skill
+  at every dataset size tried; a warning is the wrong instrument for a choice
+  that is never right. The family remains in the library, because reproducing
+  that measurement needs it, and the impurity system -- which does work -- is
+  unaffected.
+
+### Fixed
+
+- Figures are drawn on a non-interactive backend. Every job runs on a worker
+  thread, and matplotlib documents creating a figure on an interactive backend
+  from one as likely to fail -- so an analysis started from the page could hang
+  or crash on any machine with a display, which is most of them.
+- `train()` and `tune()` prepare training data by whichever path the project
+  actually has. Both took the calibrated one unconditionally and so demanded a
+  calibration step that cannot exist without a measurement, which meant calling
+  either directly on a model-only project failed.
+- The test suite no longer writes into the user's real `results/` directory.
+  Tests that go through the HTTP routes cannot be handed a workspace, so they
+  left projects and screenings behind in the tree, and a stale one would then
+  appear in the interface's own list of models the user had trained.
+- An uploaded file keeps a readable name and its extension. Every disallowed
+  character became an underscore, including the ones in the extension, so a
+  dropped `.npz` could be stored as `_npz` and then read as a CSV.
+
 ### Changed
+
+- Published model artifacts now live under `src/hamlet/resources/models/` and
+  are included as package data, so the GUI catalog contains the same reference
+  models after `pip install` as it does in a source checkout.
+- Experimental I/O and plotting moved into the base installation because the
+  browser interface depends on them. DMRGPy is now an ordinary PyPI
+  requirement in the `simulation` extra rather than a direct Git URL, making
+  the distribution acceptable to public package indexes.
+- The README is a concise interface-first entry point. The browser-superseded
+  experimental notebook and the internal validation-study notebook were
+  removed; notebooks are examples, while `pytest` is the executable test
+  suite.
+- `HamiltonianLearningProject.run()` handles a project with no experiment: it
+  generates if needed, trains, and stops, rather than failing on the inspection
+  stage. Building a model before the measurement exists is an ordinary thing to
+  want, and the configuration the guided form writes could not previously be
+  re-run by the `hamlet run` command the form printed -- so the interface
+  reimplemented the stages itself and the two could drift. `ProjectOutcome`
+  gained optional `analysis_dir` and `report_path`, which are `None` for such a
+  run.
 
 - `scikit-learn` moved from the optional `ml` extra into the core
   dependencies. The ridge and random-forest models are documented first-class

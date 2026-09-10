@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use HamLeT in your work, please cite this software and the model-specific references in the relevant model card."
+title: "HamLeT: Hamiltonian Learning Toolkit"
+type: software
+authors:
+  - family-names: Lupi
+    given-names: Greta
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/GretaLupi/hamlet-toolkit"
+url: "https://github.com/GretaLupi/hamlet-toolkit"
+keywords:
+  - Hamiltonian learning
+  - spin chains
+  - scanning tunneling spectroscopy
+  - machine learning

@@ -66,7 +66,7 @@ The quoted accuracy is against **simulated** spectra drawn from the same generat
 python scripts/publish_homogeneous_artifact.py \
   --dataset homogeneous_heisenberg_l8_ed.npz \
   --model random_forest --preset standard \
-  --output-dir models/published/homogeneous_heisenberg_l8_random_forest_standard_v1
+  --output-dir models/reproduced-homogeneous-heisenberg-l8
 ```
 
 Generated 2026-09-03 with hamlet 0.1.0 on Python 3.11.5.

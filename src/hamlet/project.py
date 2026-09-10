@@ -5,11 +5,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 import numpy as np
 
 from .branding import brand_manifest
+from .cancellation import check_cancelled
+from .compute import DeviceRequest, configure_device
 from .data import (
     CheckpointedGenerationResult,
     SpectroscopyDataset,
@@ -32,10 +34,13 @@ from .training import (
     AugmentationConfig,
     TrainingPreprocessingConfig,
     TrainingRun,
+    TuningReport,
     augment_experimental_like,
     calibrate_augmentation,
+    format_tuning_table,
     prepare_training_dataset,
     train_supervised,
+    tune_supervised,
 )
 
 PROJECT_CONFIG_SCHEMA_VERSION = 1
@@ -174,6 +179,28 @@ class DatasetGenerationConfig:
 
 
 @dataclass(frozen=True)
+class TuningConfig:
+    """Search hyperparameters before the real training run.
+
+    A search costs ``n_trials`` short trainings, so it is only affordable at a
+    small per-trial budget: ``preset`` is that budget, deliberately separate
+    from the project's own preset, which trains the winning configuration
+    properly afterwards.
+    """
+
+    n_trials: int = 20
+    preset: str = "quick"
+    timeout_seconds: float | None = None
+    seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.n_trials < 1:
+            raise ValueError("training.tuning.n_trials must be at least 1")
+        if self.timeout_seconds is not None and self.timeout_seconds <= 0:
+            raise ValueError("training.tuning.timeout_seconds must be positive")
+
+
+@dataclass(frozen=True)
 class ProjectConfig:
     """Portable configuration for one training and analysis project."""
 
@@ -194,6 +221,8 @@ class ProjectConfig:
     model: str = "keras_mlp"
     preset: str = "standard"
     model_options: dict[str, Any] = field(default_factory=dict)
+    tuning: TuningConfig | None = None
+    device: DeviceRequest = field(default_factory=DeviceRequest)
     allow_development_artifacts: bool = False
     max_validation_mae_mev: float | None = None
     max_test_mae_mev: float | None = None
@@ -348,6 +377,8 @@ class ProjectConfig:
             model=str(training.get("model", "keras_mlp")),
             preset=str(training.get("preset", "standard")),
             model_options=dict(training.get("model_options") or {}),
+            tuning=_parse_tuning_config(training.get("tuning")),
+            device=_parse_device(training.get("device")),
             allow_development_artifacts=bool(
                 training.get("allow_development_artifacts", False)
             ),
@@ -367,11 +398,18 @@ class ProjectConfig:
 
 @dataclass(frozen=True)
 class ProjectOutcome:
+    """What a completed run produced.
+
+    ``analysis_dir`` and ``report_path`` are ``None`` for a project with no
+    experiment configured: such a run stops after training, which is the
+    ordinary way to build a model before the measurement exists.
+    """
+
     selected_cutoff_mev: float
     artifact_path: Path
-    analysis_dir: Path
-    report_path: Path
     status: str
+    analysis_dir: Path | None = None
+    report_path: Path | None = None
 
 
 # Order-of-magnitude anchor for the generation budget, measured on this
@@ -462,6 +500,8 @@ class HamiltonianLearningProject:
         self.selected_augmentation: AugmentationConfig | None = None
         self.prepared: Any | None = None
         self.training_run: TrainingRun | None = None
+        self.tuning_report: TuningReport | None = None
+        self.device_report: dict[str, Any] | None = None
         self.experimental_result: ExperimentalChainResult | ExperimentalGlobalResult | None = None
         self.generation_result: CheckpointedGenerationResult | None = None
         self.workflow_decision: Any | None = None
@@ -720,7 +760,33 @@ class HamiltonianLearningProject:
                     "calibration summary",
                     blocks=False,
                 )
-            stages.append(f"train {config.model} ({config.preset} preset, view={config.view})")
+            if config.tuning is not None:
+                stages.append(
+                    f"search {config.model} hyperparameters "
+                    f"({config.tuning.n_trials} trials at the "
+                    f"{config.tuning.preset} preset)"
+                )
+                add_output(
+                    output_dir / "tuning.json",
+                    "hyperparameter search: every trial, and why the winner won",
+                    blocks=False,
+                )
+                notes.append(
+                    "hyperparameters are selected on the validation split only, "
+                    "and the library defaults are evaluated first so a search "
+                    "that finds nothing better keeps them"
+                )
+            from .compute import advise_device
+
+            advice = advise_device(config.model)
+            stages.append(
+                f"train {config.model} ({config.preset} preset, "
+                f"view={config.view}, on the {advice['will_use']})"
+            )
+            if config.device.device == "gpu" and advice["will_use"] != "gpu":
+                notes.append(f"a GPU was asked for but {advice['why']}")
+            elif not advice["can_use_gpu"]:
+                notes.append(advice["why"])
             artifact_dir = output_dir / "artifact"
             artifact_populated = artifact_dir.exists() and any(artifact_dir.iterdir())
             outputs.append(
@@ -947,21 +1013,87 @@ class HamiltonianLearningProject:
         )
         return self.prepared
 
-    def train(self) -> TrainingRun:
-        if self.prepared is None:
-            self.prepare_training_data()
+    def _ensure_prepared(self):
+        """Prepare training data by whichever path this project actually has.
+
+        With an experiment, augmentation is calibrated against it first. With
+        none there is nothing to calibrate to, and the uncalibrated path is the
+        only one that can run. Choosing between them in one place keeps
+        :meth:`tune` and :meth:`train` from having to know which they are in,
+        and stops either from demanding a calibration step that cannot exist.
+        """
+        if self.prepared is not None:
+            return self.prepared
+        if self.config.experiment_csv is None:
+            return self.prepare_training_data_without_experiment()
+        return self.prepare_training_data()
+
+    def tune(
+        self, *, should_stop: "Callable[[], bool] | None" = None
+    ) -> TuningReport:
+        """Search hyperparameters on the prepared data, without training a model.
+
+        Separate from :meth:`train` so a search can be run, inspected, and
+        repeated without committing to the full training budget it feeds.
+        """
+        if self.config.tuning is None:
+            raise RuntimeError("this project does not configure training.tuning")
+        self._ensure_prepared()
+        settings = self.config.tuning
+        report = tune_supervised(
+            self.prepared,
+            view=self.config.view,
+            model=self.config.model,
+            n_trials=settings.n_trials,
+            preset=settings.preset,
+            base_options=self.config.model_options,
+            seed=settings.seed,
+            timeout_seconds=settings.timeout_seconds,
+            should_stop=should_stop,
+            progress=lambda trial: print(
+                f"  trial {trial.number}: "
+                + (
+                    f"{trial.validation_mae_mev:.4f} meV validation MAE"
+                    if trial.validation_mae_mev is not None
+                    else f"failed ({trial.error})"
+                ),
+                flush=True,
+            ),
+        )
+        self.tuning_report = report
+        self.config.output_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(self.config.output_dir / "tuning.json", report.to_dict())
+        print(format_tuning_table(report))
+        return report
+
+    def train(
+        self, *, should_stop: "Callable[[], bool] | None" = None
+    ) -> TrainingRun:
+        self._ensure_prepared()
         artifact = self.config.output_dir / "artifact"
         if artifact.exists() and any(artifact.iterdir()):
             raise FileExistsError(
                 f"artifact directory is not empty: {artifact}; choose a new output_dir"
             )
+        # Before any model is built: TensorFlow fixes its visible devices at
+        # initialisation and refuses the choice afterwards.
+        self.device_report = configure_device(self.config.device)
+        for warning in self.device_report["warnings"]:
+            print(f"device: {warning}")
+        # The search runs before the empty-artifact check would have fired, so a
+        # project that cannot save its model does not first spend an hour
+        # tuning one.
+        options = dict(self.config.model_options)
+        if self.config.tuning is not None:
+            options = dict(self.tune(should_stop=should_stop).best_options)
         self.training_run = train_supervised(
             self.prepared,
             view=self.config.view,
             model=self.config.model,
             preset=self.config.preset,
-            model_options=self.config.model_options,
+            model_options=options,
             verbose=self.config.verbose,
+            should_stop=should_stop,
         )
         self.training_run.save(artifact)
         return self.training_run
@@ -1056,12 +1188,31 @@ class HamiltonianLearningProject:
         )
         return self.experimental_result
 
-    def run(self) -> ProjectOutcome:
+    def run(
+        self,
+        *,
+        progress: "Callable[[int, int], None] | None" = None,
+        should_stop: "Callable[[], bool] | None" = None,
+    ) -> ProjectOutcome:
+        """Carry the configuration through every stage it declares.
+
+        With an experiment: inspect, calibrate the cutoff, train, infer, report.
+        Without one: generate if needed, then train and stop -- building a model
+        before the measurement exists is an ordinary thing to want, and it used
+        to be reachable only through the Python API, which meant a
+        configuration the interface wrote could not be re-run from the command
+        line it printed.
+        """
+        if self.config.experiment_csv is None:
+            return self._run_without_experiment(
+                progress=progress, should_stop=should_stop
+            )
+        check_cancelled(should_stop, "this run")
         self.inspect_experiment()
         if self.config.artifact_path is None:
             self.calibrate_preprocessing()
             self.prepare_training_data()
-            self.train()
+            self.train(should_stop=should_stop)
             artifact = self.config.output_dir / "artifact"
         else:
             artifact = self.config.artifact_path
@@ -1076,10 +1227,97 @@ class HamiltonianLearningProject:
         _write_json(self.config.output_dir / "project_summary.json", asdict(outcome))
         return outcome
 
+    def _run_without_experiment(
+        self,
+        *,
+        progress: "Callable[[int, int], None] | None" = None,
+        should_stop: "Callable[[], bool] | None" = None,
+    ) -> ProjectOutcome:
+        if self.config.artifact_path is not None:
+            raise RuntimeError(
+                "this project reuses a saved artifact but configures no "
+                "experiment, so there is nothing for it to do; add an "
+                "experiment to analyse, or remove the artifact to train"
+            )
+        check_cancelled(should_stop, "this run")
+        if self.config.generation is not None:
+            reporter = progress if progress is not None else _console_progress
+
+            # Generation is checkpointed per chunk, so asking here means a
+            # stopped run keeps every chain it had already written and the next
+            # run resumes from there rather than starting over.
+            def report(done: int, total: int) -> None:
+                check_cancelled(should_stop, "generation")
+                reporter(done, total)
+
+            self.generate_training_dataset(progress=report)
+        # No experiment means no measurement to calibrate augmentation against,
+        # so the uncalibrated path is taken deliberately rather than by
+        # accident; the model sees clean simulated spectra only.
+        self.prepare_training_data_without_experiment()
+        run = self.train(should_stop=should_stop)
+        outcome = ProjectOutcome(
+            selected_cutoff_mev=float(self.selected_cutoff_mev),
+            artifact_path=self.config.output_dir / "artifact",
+            status="trained; no experiment configured, so nothing was inferred",
+        )
+        _write_json(
+            self.config.output_dir / "project_summary.json",
+            {
+                **asdict(outcome),
+                "validation_mae_mev": run.metrics["validation"]["ensemble"]["mae"],
+                "test_mae_mev": run.metrics["test"]["ensemble"]["mae"],
+            },
+        )
+        return outcome
+
 
 def _resolve_path(base: Path, value: str | Path) -> Path:
     path = Path(value)
     return path.resolve() if path.is_absolute() else (base / path).resolve()
+
+
+def _parse_device(values: Any) -> DeviceRequest:
+    """Read ``training.device``, accepting a bare name or a mapping.
+
+    ``device: gpu`` is what people write, so it is what is accepted; the
+    mapping form exists for choosing between several cards.
+    """
+    if values is None:
+        return DeviceRequest()
+    if isinstance(values, str):
+        return DeviceRequest(device=values)
+    if not isinstance(values, Mapping):
+        raise ValueError("training.device must be a name or a mapping")
+    unknown = set(values) - {"device", "gpu_index", "memory_growth"}
+    if unknown:
+        raise ValueError(f"training.device has unknown fields: {sorted(unknown)}")
+    index = values.get("gpu_index")
+    return DeviceRequest(
+        device=str(values.get("device", "auto")),
+        gpu_index=int(index) if index is not None else None,
+        memory_growth=bool(values.get("memory_growth", True)),
+    )
+
+
+def _parse_tuning_config(values: Any) -> "TuningConfig | None":
+    """Read ``training.tuning``, accepting a bare ``true`` for the defaults."""
+    if values is None or values is False:
+        return None
+    if values is True:
+        return TuningConfig()
+    if not isinstance(values, Mapping):
+        raise ValueError("training.tuning must be a mapping, true, or omitted")
+    unknown = set(values) - {"n_trials", "preset", "timeout_seconds", "seed"}
+    if unknown:
+        raise ValueError(f"training.tuning has unknown fields: {sorted(unknown)}")
+    timeout = values.get("timeout_seconds")
+    return TuningConfig(
+        n_trials=int(values.get("n_trials", 20)),
+        preset=str(values.get("preset", "quick")),
+        timeout_seconds=float(timeout) if timeout is not None else None,
+        seed=int(values.get("seed", 0)),
+    )
 
 
 def _parse_generation_config(

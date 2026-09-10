@@ -1,214 +1,115 @@
 <p align="center">
-  <img src="assets/logos/hamlet-logo.png" alt="HamLeT — Hamiltonian Learning Toolkit" width="360">
+  <img src="assets/logos/hamlet-logo.png" alt="HamLeT — Hamiltonian Learning Toolkit" width="390">
 </p>
 
 # HamLeT
 
-**Hamiltonian Learning Toolkit**
+[![CI](https://github.com/GretaLupi/hamlet-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/GretaLupi/hamlet-toolkit/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
+[![Python](https://img.shields.io/pypi/pyversions/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-087f8c.svg)](LICENSE)
 
-> "Though this be madness, yet there is method in't." — Hamlet, Act 2.
+HamLeT (Hamiltonian Learning Toolkit) is an experimentalist-facing Python
+package for generating spin-chain spectroscopy datasets, training supervised
+inverse models, and inferring Hamiltonian parameters from measured dI/dV maps.
 
-HamLeT is an experimentalist-facing Python toolkit for generating spectroscopy
-datasets, training inverse models, and reconstructing physical Hamiltonians
-from measurements of spin-1/2 Heisenberg chains.
+The package is an **alpha release**: the complete Heisenberg workflow works,
+while additional physical systems and experimental formats are still being
+added. Physical energies are expressed in meV; at the simulator boundary,
+`1 DMRGPy energy unit = 10 meV`.
 
-The installable distribution is `hamlet-toolkit`, the canonical Python import
-is `hamlet`, and the canonical command is `hamlet`. (The bare `hamlet`
-distribution name is already used by an unrelated project on
-[PyPI](https://pypi.org/project/hamlet/), hence the distinct distribution
-name.)
-
-## Status
-
-- **Bond-inhomogeneous Heisenberg chains** (`local_bonds` view) — the
-  validated, ready-to-use workflow, and the one with a published model from
-  peer-reviewed work. A three-site sliding-window estimator predicts local
-  exchange couplings and, because its input is a local window rather than the
-  whole chain, works on any chain length. The
-  [L=12 reference artifact](models/published/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1)
-  is the trained Keras ensemble from *Learning Inhomogeneous Heisenberg
-  Hamiltonians in Nanographene Spin Chains* (Lupi et al., 2026): 1.404 meV
-  held-out test MAE on raw data over 3000 simulated chains, with both bonds at
-  ~0.55 skill against a training-mean baseline and correlation ~0.88. Requires
-  the `ml` extra, since it is a Keras model. Validated end-to-end against a
-  real experimental chain and a small physical DMRGPy recovery benchmark. See
-  its
-  [model card](models/published/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
-  for attribution, the valid 30-45 meV coupling range, and the limits.
-- **Homogeneous `J1-J2` chains at L=8** (`global` view) — a first reference
-  model ships in
-  [models/published/](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1),
-  trained on 3000 exact-diagonalisation chains: 0.114 meV held-out test MAE,
-  with both couplings recovered well clear of a training-mean baseline across
-  five resampled splits. Validated against simulated spectra only — not yet
-  against a measurement with independently known parameters. See its
-  [model card](models/published/homogeneous_heisenberg_l8_random_forest_standard_v1/MODEL_CARD.md)
-  for the valid parameter ranges and the conditions under which it must not be
-  reused.
-- **Anisotropic XXZ+J2+J3 at L=8** (`global` view) — implemented end to end
-  with a configurable simulated observable (`Sz` or `total_spin`). At 3000
-  exact-diagonalisation chains every one of the four couplings carries real
-  signal, with skill over a training-mean baseline of 0.76 (`J1_xy`), 0.80
-  (`J2`), 0.77 (`J3`) and 0.59 (`Jz`) for the better of the two models. `Jz` is
-  the hardest, not `J3` — an earlier 64-chain pilot reported the opposite, and
-  that was small-sample noise. Development-only: no reference artifact is
-  published yet, and the accuracy is an order of magnitude behind the isotropic
-  case above.
-- **Uniform DMI magnitude** (`heisenberg/xxz_dmi`) — implemented, and
-  **measured as not identifiable** from this observable. Across 32, 500 and
-  3000 chains, with both ridge and random forest, `D_z_magnitude` never beats
-  simply predicting the training mean (skill 0.11, −0.36, −0.06 and −0.02,
-  −0.02, −0.03), while every other parameter in the very same spectra improves
-  monotonically with data over that 100-fold range. Adding chains fixes the
-  exchange couplings and does nothing for DMI, because the limitation is
-  structural rather than statistical: a uniform DM vector along z is removable
-  from a nearest-neighbour chain by a gauge rotation that leaves every on-site
-  autocorrelator invariant, so these spectra constrain only
-  `sqrt(J1_xy^2 + D_z^2)`. Measured directly, a gauge pair agrees to one part
-  in 10^13.
-
-  A field transverse to the DM axis breaks that symmetry and is implemented as
-  `HomogeneousXXZDMIFieldFamily`, with the field treated as a known condition
-  rather than a target. The requirement is a ratio: recovering `D_z` needs
-  roughly `B/J >= 10%`, so it is realistic for chains with exchange of a few
-  meV and out of reach for the tens-of-meV chains measured so far. A field
-  along the DM axis does not help at any strength, being invariant under the
-  same rotation.
-
-  A field-free route is now validated too. Three `S=1` impurities at sites
-  1/4/6 with 2 meV transverse anisotropy resolve `D_z` on a 3000-chain L=8
-  benchmark: ridge reaches 0.258 +/- 0.004 meV held-out MAE and 0.539 +/- 0.005
-  skill over the training-mean baseline across five splits. Impurities are not
-  hard-coded to that recipe: `dataset.generate.impurities` accepts any number
-  of distinct, zero-based sites, each with its experimentally measured spin,
-  axial/transverse anisotropy, and in-plane angle. Each configuration is a
-  different dataset contract and needs a matching model. See
-  [the configurable example](examples/heisenberg_xxz_dmi_impurities_l8.yaml)
-  and the validated
-  [L=8 reference artifact](models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1).
-
-Physical energy inputs and outputs are always in meV. See
-[docs/user-guide.md](docs/user-guide.md) for the complete workflow.
-
-### The easiest way in
+## Start with the interface
 
 ```bash
+python -m pip install hamlet-toolkit
 hamlet gui
 ```
 
-Opens a local browser interface organised around what you have rather than
-which command to run: inspect a measurement, ask whether an existing model
-fits it, browse the published models and their contracts, plan a training run
-before it costs anything, and screen impurity designs for measuring DMI. Long
-runs happen in the background with their output streamed to the page. It binds
-to localhost and nothing leaves your machine.
+The local browser interface guides the full workflow:
 
-It is a server, so closing the browser tab does not stop it. Use the **Stop
-server** button on the page, or `Ctrl+C` in the terminal.
+1. select a prepared measurement or a folder containing one Nanonis
+   `.dat`/`.txt` spectrum per site;
+2. inspect every site and choose the visible bias cutoff;
+3. check whether a shipped or locally trained model matches the system, chain
+   length, view, cutoff, and preprocessing contract;
+4. reuse it, or generate a dataset and train ridge, random-forest, MLP, or CNN
+   models from the interface;
+5. infer the couplings and export an HTML report, plot, CSV, and JSON result.
 
-## Install
+It binds to localhost and does not upload measurements elsewhere. Long jobs run
+in the background. Close it with the **Stop server** button or `Ctrl+C`.
+
+## Installation options
+
+The base installation includes the interface, experimental I/O, plotting,
+ridge and random-forest models, and the published reference-model catalog.
 
 ```bash
-python -m pip install -e '.[dev,io]'
+python -m pip install "hamlet-toolkit[ml]"          # Keras MLP and CNN
+python -m pip install "hamlet-toolkit[simulation]"  # DMRGPy generation
+python -m pip install "hamlet-toolkit[tune]"        # Optuna search
+python -m pip install "hamlet-toolkit[all]"         # all optional features
+```
+
+For development from a clone:
+
+```bash
+python -m pip install -e ".[dev,ml,simulation,tune]"
 pytest
 ```
 
-That already includes the ridge and random-forest models. Add the `ml` extra
-for the Keras MLP and CNN, and `simulation` for DMRGPy dataset generation, or
-install everything with the `all` extra.
+## Supported workflows
 
-## Quick start
+| Workflow | Model view | Current status |
+| --- | --- | --- |
+| Bond-inhomogeneous Heisenberg | three-site local windows; variable chain length | validated workflow; published Keras ensemble |
+| Homogeneous Heisenberg `J1-J2` | complete chain; exactly L=8 | published random-forest reference model; simulation-validated |
+| XXZ `J1-J2-J3` with impurity-assisted DMI | complete chain; exactly L=8 | published ridge reference model; experimental-design workflow |
 
-The simplest interface is one configuration and one command:
+Global models are chain-length specific. Local sliding-window models can be
+applied to other lengths when the stored model contract is otherwise
+compatible. HamLeT reports a mismatch instead of padding spectra or silently
+changing the cutoff.
 
-```bash
-hamlet run examples/heisenberg_train_and_analyze.yaml
-```
+Each shipped artifact has a model card under
+[`src/hamlet/resources/models`](src/hamlet/resources/models) documenting its
+training distribution, expected observable, accuracy, and limitations.
 
-This calibrates the manually selected cutoff against the experiment, freezes
-its preprocessing contract, trains and validates the requested model,
-performs inference, and exports a self-contained HTML analysis report.
+## Command line
 
-The full path — importing raw per-site files, choosing a cutoff, letting the
-package decide whether to reuse, retrain, or generate a model, and reading the
-report — is in [docs/user-guide.md](docs/user-guide.md).
-
-Measuring DMI needs a specific sample, because a DM vector along `z` is exactly
-unidentifiable in any chain conserving total `S^z`.
-[docs/dmi-experiment-spec.md](docs/dmi-experiment-spec.md) specifies the chain
-to build, the measurement to take, and the precision required of the impurity
-characterisation — including the measured cost of getting each one wrong.
-
-## Python API
-
-```python
-import numpy as np
-
-from hamlet.inference import LocalChainEstimator
-from hamlet.preprocessing import SpectralPreprocessor
-
-# One experimental map with shape (sites, measured bias points).
-didv = np.load("didv.npy")
-measured_bias = np.load("bias_mev.npy")
-
-preprocessor = SpectralPreprocessor(
-    output_points=200,
-    bias_range_mev=(0.0, 50.0),
-    baseline_range_mev=(0.0, 3.0),
-    scale_range_mev=(40.0, 50.0),
-)
-processed = preprocessor.transform_map(didv, measured_bias)
-
-# Any object exposing predict(windows) -> (n_windows, 2) can be used.
-estimator = LocalChainEstimator(model, coupling_range_mev=(30.0, 45.0))
-result = estimator.predict(processed)
-
-print(result.couplings_mev)  # length = n_sites - 1
-```
-
-## Demos
-
-- [notebooks/04_l8_three_mode_workflow.ipynb](notebooks/04_l8_three_mode_workflow.ipynb) —
-  **start here.** One L=8 chain length run through all three interpretations
-  (bond-inhomogeneous, homogeneous XXZ, homogeneous XXZ+DMI), scored against known
-  ground truth, including sliding-window inference on a held-out chain. Runs in
-  seconds on the small datasets in [examples/l8_demo/](examples/l8_demo/).
-- [notebooks/01_supervised_workflows.ipynb](notebooks/01_supervised_workflows.ipynb) —
-  an executed end-to-end supervised workflow with saved plots and outputs.
-- [notebooks/02_full_potential_experimental_interface.ipynb](notebooks/02_full_potential_experimental_interface.ipynb) —
-  the diagnostics-first experimental workflow on a real experimental chain,
-  comparing several research models.
-- [notebooks/03_simulation_experiment_validation.ipynb](notebooks/03_simulation_experiment_validation.ipynb) —
-  the simulation-to-experiment validation study: spectral distribution
-  scoring, nearest synthetic windows, inference diagnostics, and DMRGPy
-  forward residuals.
-
-## Advanced: label-free augmentation calibration
+The same workflow can be scripted with YAML configurations:
 
 ```bash
-hamlet-calibrate-augmentation \
-  --reference-npz dataset_30_40.npz dataset_35_45.npz \
-  --experiment ChainIH_L6_SYM.csv \
-  --cutoffs 50 \
-  --output calibration-cut50.json
-
-hamlet-train-cutoff-bank \
-  --reference-npz dataset_30_40.npz dataset_35_45.npz \
-  --cutoffs 50 --comparison-cutoff 50 --candidates keras_mlp \
-  --preset standard --augmentation-calibration calibration-cut50.json \
-  --output-dir models/heisenberg-cut50
+hamlet modes
+hamlet inspect-experiment path/to/measurement.csv
+hamlet run examples/quickstart_l8.yaml --dry-run
+hamlet run examples/quickstart_l8.yaml
 ```
 
-This optional command compares measured spectral compatibility only; it never
-uses experimental Hamiltonian labels or inverse-model predictions. It's a
-research utility, not required for ordinary model reuse or inference.
+See the [user guide](docs/user-guide.md) for raw-file import, cutoff selection,
+dataset generation, model tuning, cluster execution, inference, and reports.
+The small [L=8 notebook](notebooks/04_l8_three_mode_workflow.ipynb) is the
+reproducible Python example; notebooks are tutorials, not the test suite.
 
-## Contributing
+## Scientific scope
 
-Setup, the conventions that protect scientific results, and the versioning
-policy are in [CONTRIBUTING.md](CONTRIBUTING.md). Notable changes are recorded
-in [CHANGELOG.md](CHANGELOG.md).
+Reference-model scores describe held-out simulated data unless a model card
+explicitly says otherwise. Ensemble spread measures disagreement between
+trained members; it is not a calibrated confidence interval. A measurement
+must satisfy the artifact contract before its predictions are physically
+interpretable.
 
-## License
+Uniform z-directed DMI cannot be identified from the supported on-site
+autocorrelator in a symmetry-preserving chain. HamLeT therefore exposes the
+impurity-assisted design route instead of offering a misleading ordinary DMI
+model. See the [DMI experiment specification](docs/dmi-experiment-spec.md).
 
-MIT — see [LICENSE](LICENSE).
+## Project information
+
+- Changes: [CHANGELOG.md](CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Releasing: [RELEASING.md](RELEASING.md)
+- Security reports: [SECURITY.md](SECURITY.md)
+- Citation metadata: [CITATION.cff](CITATION.cff)
+
+HamLeT is distributed under the [MIT License](LICENSE).

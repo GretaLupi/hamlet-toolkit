@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "HamLeT: Hamiltonian Learning Toolkit for simulated and experimental data"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{name = "Greta Lupi"}]
 keywords = [
   "hamiltonian-learning",
@@ -22,7 +23,6 @@ keywords = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",
@@ -31,7 +31,9 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Physics",
 ]
 dependencies = [
+  "matplotlib>=3.7",
   "numpy>=1.24",
+  "pandas>=2.0",
   "pyyaml>=6.0",
   "scipy>=1.10",
   # scikit-learn is a core requirement, not an optional extra. The ridge and
@@ -47,20 +49,34 @@ dependencies = [
 [project.urls]
 Repository = "https://github.com/GretaLupi/hamlet-toolkit"
 Issues = "https://github.com/GretaLupi/hamlet-toolkit/issues"
+Documentation = "https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/user-guide.md"
+Changelog = "https://github.com/GretaLupi/hamlet-toolkit/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
-io = ["matplotlib>=3.7", "pandas>=2.0"]
-# Genuinely optional: without TensorFlow the suite is 135 passed, 2 skipped,
-# because only the Keras MLP and CNN need it.
+# Kept as a compatibility alias for early development installs. Experimental
+# I/O and plotting are now core because the browser workflow depends on them.
+io = []
+# Genuinely optional: only the Keras MLP and CNN need TensorFlow.
 ml = ["tensorflow>=2.13"]
-simulation = ["dmrgpy @ git+https://github.com/joselado/dmrgpy.git"]
+simulation = ["dmrgpy>=0.1.0"]
+# Optuna's TPE sampler spends later trials near the good region, which is worth
+# real accuracy at the trial counts a search here can afford. Optional because
+# the same search space is sampled at random without it, so hyperparameter
+# search works either way and only gets better with this installed.
+tune = ["optuna>=3.0"]
 all = [
   "matplotlib>=3.7",
   "pandas>=2.0",
   "tensorflow>=2.13",
-  "dmrgpy @ git+https://github.com/joselado/dmrgpy.git",
+  "optuna>=3.0",
+  "dmrgpy>=0.1.0",
 ]
-dev = ["pytest>=7.4"]
+dev = [
+  "build>=1.2",
+  "pytest>=7.4",
+  "ruff>=0.6",
+  "twine>=5.1",
+]
 
 [project.scripts]
 hamlet = "hamlet.project_cli:main"
@@ -76,7 +92,15 @@ where = ["src"]
 # is exactly the kind of install-only failure tests/test_packaging.py exists to
 # catch.
 [tool.setuptools.package-data]
-"hamlet.gui" = ["static/*.html", "static/*.css", "static/*.js"]
+"hamlet.gui" = [
+  "static/*.html",
+  "static/*.css",
+  "static/*.js",
+  "static/*.png",
+]
+"hamlet" = [
+  "resources/models/*/*",
+]
 
 [tool.ruff]
 line-length = 100

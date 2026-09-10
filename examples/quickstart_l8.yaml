@@ -1,0 +1,18 @@
+config_schema_version: 1
+name: Fast L8 supervised-training quickstart
+system_type: homogeneous_xxz_j1j2j3
+output_dir: ../results/quickstart_l8
+
+# A small DMRGPy/ED dataset is committed specifically for this demonstration,
+# so this run trains in seconds and does not require the simulation extra.
+dataset:
+  format: portable
+  path: l8_demo/homogeneous_xxz_l8_ed.npz
+
+training:
+  cutoffs_mev: [60]
+  manual_cutoff_mev: 60
+  output_points: 61
+  view: global
+  model: ridge
+  preset: quick

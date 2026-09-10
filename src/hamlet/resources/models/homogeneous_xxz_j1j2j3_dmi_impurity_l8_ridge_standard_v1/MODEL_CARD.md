@@ -134,7 +134,7 @@ benchmark—not ensemble disagreement—as the stability estimate for this model
 python scripts/publish_homogeneous_artifact.py \
   --dataset dmi_impurity_l8.npz \
   --model ridge --preset standard \
-  --output-dir models/published/homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1
+  --output-dir models/reproduced-xxz-dmi-impurity-l8
 ```
 
 Generated 2026-09-07 with hamlet 0.1.0 on Python 3.11.5.

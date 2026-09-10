@@ -10,6 +10,7 @@ import json
 import re
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -142,6 +143,49 @@ def test_inspect_thins_large_maps_for_transport(measurement_csv):
     result = api.inspect_experiment(measurement_csv, max_points=20)
     assert result["n_bias_points"] == 81, "the reported count must be the real one"
     assert len(result["plot"]["bias_mev"]) == 20, "the plotted series must be thinned"
+
+
+def test_inspect_imports_a_folder_of_per_site_nanonis_files(monkeypatch, tmp_path):
+    raw = tmp_path / "raw-chain"
+    raw.mkdir()
+    header = "Bias calc (V)\tLI Demod 1 X (A)\tLI Demod 2 X (A)"
+    for name, scale in (("Chain1_10.dat", 10), ("Chain1_2.dat", 2)):
+        (raw / name).write_text(
+            "Experiment\tchain\n[DATA]\n" + header + "\n"
+            + "\n".join(
+                f"{bias}\t{scale * (index + 1)}\t{scale * (index + 1) * 0.1}"
+                for index, bias in enumerate((0.01, 0.0, -0.01))
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(api, "_experiment_root", lambda: tmp_path / "imports")
+
+    result = api.inspect_experiment(raw)
+
+    assert result["input"]["input_kind"] == "sts_folder"
+    assert result["input"]["source_file_count"] == 2
+    assert result["input"]["source_files"] == ["Chain1_2.dat", "Chain1_10.dat"]
+    assert result["input"]["auxiliary_d2idv2"] is True
+    assert result["n_sites"] == 2
+    assert result["bias_min_mev"] == pytest.approx(-10.0)
+    assert result["bias_max_mev"] == pytest.approx(10.0)
+    assert set(result["plots"]) == {"didv", "d2idv2"}
+    assert result["plots"]["d2idv2"]["role"] == "plot/QC only"
+    assert Path(result["path"]).name == "measurement.npz"
+    assert Path(result["path"]).exists()
+    assert Path(result["input"]["import_report"]).exists()
+    # An unchanged folder reuses its canonical import.
+    assert api.inspect_experiment(raw)["path"] == result["path"]
+
+
+def test_folder_import_explains_when_the_export_is_not_recognised(monkeypatch, tmp_path):
+    raw = tmp_path / "another-lab"
+    raw.mkdir()
+    (raw / "site-1.txt").write_text("bias,signal\n0,1\n")
+    monkeypatch.setattr(api, "_experiment_root", lambda: tmp_path / "imports")
+    with pytest.raises(ValueError, match="Nanonis-style STS"):
+        api.inspect_experiment(raw)
 
 
 def test_advisor_refuses_the_impurity_model_without_declared_conditions(measurement_csv):
@@ -279,6 +323,15 @@ def test_index_mentions_every_panel_the_script_drives():
     # Every element the script fetches by id must exist in the page.
     for match in sorted(set(re.findall(r'el\("([a-z0-9-]+)"\)', script))):
         assert f'id="{match}"' in html, f"app.js drives #{match}, missing from the page"
+
+
+def test_local_couplings_are_drawn_as_a_spin_chain_not_generic_bars():
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    style = (STATIC_ROOT / "style.css").read_text(encoding="utf-8")
+    assert "function bondChainChart" in script
+    assert 'class="chain-site"' in script
+    assert 'class="chain-bond' in script
+    assert ".bond-value" in style and ".chain-site" in style
 
 
 # --- manifests from more than one pipeline ----------------------------------
@@ -532,7 +585,6 @@ def test_builder_options_describe_every_supported_system():
         "inhomogeneous_heisenberg",
         "homogeneous_heisenberg",
         "homogeneous_xxz_j1j2j3",
-        "homogeneous_xxz_j1j2j3_dmi",
         "homogeneous_xxz_j1j2j3_dmi_impurity",
     } == systems
     for spec in options["systems"]:
@@ -556,14 +608,33 @@ def test_builder_options_describe_every_supported_system():
     )
 
 
-def test_the_unidentifiable_dmi_system_carries_a_warning():
-    """Offering it without a warning would invite a wasted run."""
+def test_the_unlearnable_dmi_system_is_not_offered_at_all():
+    """A form whose purpose is to prevent wasted runs must not offer one.
+
+    An XXZ chain carrying DMI with nothing to break the symmetry trains to
+    about zero D_z skill by construction, at every dataset size tried. It was
+    offered with a warning; a warning is the wrong instrument for a choice that
+    is never right.
+    """
     options = api.describe_builder_options()
-    plain_dmi = next(
-        s for s in options["systems"] if s["system_type"] == "homogeneous_xxz_j1j2j3_dmi"
-    )
-    assert plain_dmi.get("warning")
-    assert "cannot be recovered" in plain_dmi["warning"]
+    offered = {spec["system_type"] for spec in options["systems"]}
+    assert "homogeneous_xxz_j1j2j3_dmi" not in offered
+    # The impurity system, which is the one that works, is still there.
+    assert "homogeneous_xxz_j1j2j3_dmi_impurity" in offered
+    with pytest.raises(ValueError, match="unknown system_type"):
+        api.build_project_config(
+            _builder_form(system_type="homogeneous_xxz_j1j2j3_dmi")
+        )
+
+
+def test_the_unlearnable_dmi_family_is_still_in_the_library():
+    """Removing it from the form must not remove the evidence for removing it.
+
+    Reproducing the measurement that D_z is unlearnable there needs the family.
+    """
+    from hamlet import HomogeneousXXZDMILongRangeFamily
+
+    assert HomogeneousXXZDMILongRangeFamily is not None
 
 
 def test_models_declare_whether_they_need_tensorflow():
@@ -574,7 +645,15 @@ def test_models_declare_whether_they_need_tensorflow():
     assert models["keras_mlp"]["needs_tensorflow"] is True
     for spec in models.values():
         for option in spec["options"]:
-            assert option["default"] is not None, spec["name"]
+            # A None default is meaningful -- it is how "whatever the library
+            # does" is expressed for a setting like unlimited tree depth -- but
+            # a field the form cannot render is not.
+            assert option["type"] in {
+                "number", "integer", "layers", "boolean", "choice"
+            }, spec["name"]
+            assert option["label"], spec["name"]
+            if option["type"] == "choice":
+                assert option["default"] in option["choices"], option["name"]
 
 
 def _builder_form(**overrides):
@@ -690,13 +769,21 @@ def test_builder_routes_are_reachable_over_http(server):
 
 @pytest.mark.integration
 def test_sample_preview_returns_plottable_spectra():
-    """The check-before-you-commit step, against the real simulator."""
-    result = api.preview_samples(_builder_form(bias_points=21), n_samples=1)
+    """The check-before-you-commit step, against the real simulator.
+
+    A preview evaluates representative sites rather than all of them, because
+    cost scales with the number of correlators computed; the returned trace
+    count is that subset, and the page says which sites they were.
+    """
+    form = _builder_form(bias_points=21)
+    result = api.preview_samples(form, n_samples=1)
     assert len(result["bias_mev"]) == 21
     assert result["target_names"][-1] == "D_z_magnitude"
     assert len(result["samples"]) == 1
     sample = result["samples"][0]
-    assert len(sample["sites"]) == 8, "one trace per site"
+    assert result["n_sites"] == 8
+    assert result["evaluated_sites"] == list(api.preview_sites(form))
+    assert len(sample["sites"]) == len(result["evaluated_sites"]), "one trace per site shown"
     assert len(sample["sites"][0]) == 21
     assert len(sample["couplings_mev"]) == 5
     assert all(np.isfinite(sample["sites"][0]))
@@ -858,3 +945,1239 @@ def test_training_without_an_experiment_needs_a_manual_cutoff(tmp_path):
     project = HamiltonianLearningProject.from_config(built["config_path"])
     assert project.config.experiment_csv is None
     assert hasattr(project, "prepare_training_data_without_experiment")
+
+
+# --- choosing a file ---------------------------------------------------------
+# Typing an absolute path was the interface's last piece of command-line
+# thinking. Two mechanisms replace it, because the file can be in two different
+# places, and both have to be safe about what they touch.
+
+def test_a_dropped_file_is_stored_and_its_path_returned(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    stored = api.save_upload("chain.csv", b"site,bias_meV,didv_A\n1,0,0\n")
+    path = Path(stored["path"])
+    assert path.exists()
+    assert path.name.endswith("chain.csv")
+    assert stored["size_bytes"] == len(b"site,bias_meV,didv_A\n1,0,0\n")
+    # Kept rather than read and discarded: every later manifest records this
+    # path, and a path that stopped existing would make those records useless.
+    assert path.read_bytes().startswith(b"site,")
+
+
+@pytest.mark.parametrize(
+    "given, expected",
+    [
+        ("chain.csv", "chain.csv"),
+        ("../../../etc/passwd", "passwd"),
+        ("/absolute/path/data.npz", "data.npz"),
+        ("weird name (2).CSV", "weird_name_2.CSV"),
+        ("..", "measurement"),
+        ("", "measurement"),
+        ("...", "measurement"),
+        ("a/b/../c.dat", "c.dat"),
+        # The extension survives intact -- the loader dispatches on it, and an
+        # .npz turned into _npz would be read as a CSV and fail confusingly.
+        ("measurement.tar.gz", "measurement_tar.gz"),
+        (".hidden", "measurement"),
+    ],
+)
+def test_an_upload_name_cannot_carry_a_path(given, expected):
+    """The name comes from the browser, so it is not to be trusted as a path."""
+    assert api._safe_upload_name(given) == expected
+
+
+def test_an_upload_lands_inside_the_uploads_directory_whatever_it_is_called(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "uploads"
+    monkeypatch.setattr(api, "_uploads_root", lambda: root)
+    stored = api.save_upload("../../../etc/passwd", b"x")
+    written = Path(stored["path"])
+    assert written.parent.resolve() == root.resolve()
+    assert written.exists() and written.read_bytes() == b"x"
+    # Nothing outside the uploads directory was created.
+    assert sorted(p.name for p in tmp_path.rglob("*") if p.is_file()) == [written.name]
+
+
+def test_two_uploads_of_the_same_name_do_not_overwrite(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    first = api.save_upload("chain.csv", b"one")
+    second = api.save_upload("chain.csv", b"two")
+    assert first["path"] != second["path"]
+    assert Path(first["path"]).read_bytes() == b"one"
+
+
+def test_browser_folder_upload_keeps_site_files_together(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    first = api.save_folder_upload("session-1", "my chain", "site_2.dat", b"two")
+    second = api.save_folder_upload("session-1", "my chain", "site_10.dat", b"ten")
+    assert first["folder_path"] == second["folder_path"]
+    folder = Path(first["folder_path"])
+    assert {item.name for item in folder.iterdir()} == {"site_2.dat", "site_10.dat"}
+    assert Path(first["path"]).read_bytes() == b"two"
+
+
+def test_folder_upload_names_cannot_escape_the_session_directory(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    stored = api.save_folder_upload("../../session", "../chain", "../../site.dat", b"x")
+    written = Path(stored["path"])
+    assert (tmp_path / "uploads" / "folders") in written.parents
+    assert written.name == "site.dat"
+
+
+@pytest.mark.parametrize(
+    "data, expected",
+    [(b"", "empty"), (b"x" * (api.MAX_UPLOAD_BYTES + 1), "accepts up to")],
+)
+def test_useless_uploads_are_refused(monkeypatch, tmp_path, data, expected):
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    with pytest.raises(ValueError, match=expected):
+        api.save_upload("chain.csv", data)
+
+
+def test_browsing_lists_directories_and_readable_files_only(tmp_path):
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "chain.csv").write_text("a")
+    (tmp_path / "measurement.npz").write_text("a")
+    (tmp_path / "notes.docx").write_text("a")
+    (tmp_path / ".hidden").write_text("a")
+    listing = api.browse_directory(tmp_path)
+    names = {entry["name"] for entry in listing["entries"]}
+    assert names == {"sub", "chain.csv", "measurement.npz"}
+    # Counted rather than silently dropped, so an apparently empty directory is
+    # distinguishable from one full of the wrong kind of file.
+    assert listing["n_hidden_other_files"] == 1
+    assert listing["parent"] == str(tmp_path.parent)
+    assert {entry["kind"] for entry in listing["entries"]} == {"directory", "file"}
+
+
+def test_browsing_a_file_shows_the_directory_it_lives_in(tmp_path):
+    target = tmp_path / "chain.csv"
+    target.write_text("a")
+    assert api.browse_directory(target)["path"] == str(tmp_path.resolve())
+
+
+def test_browser_marks_a_folder_that_contains_raw_sts_files(tmp_path):
+    (tmp_path / "site-1.dat").write_text("raw")
+    (tmp_path / "site-2.txt").write_text("raw")
+    listing = api.browse_directory(tmp_path)
+    assert listing["selectable_as_measurement"] is True
+    assert listing["raw_sts_file_count"] == 2
+
+
+def test_browsing_somewhere_that_does_not_exist_says_so(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        api.browse_directory(tmp_path / "nope")
+
+
+def test_only_files_the_interface_produced_can_be_served_back(monkeypatch, tmp_path):
+    """Serving a file to the browser is a different act from reading one."""
+    workspace = tmp_path / "gui-projects"
+    (workspace / "run").mkdir(parents=True)
+    report = workspace / "run" / "report.html"
+    report.write_text("<b>hi</b>")
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    monkeypatch.setattr(api, "_uploads_root", lambda: tmp_path / "uploads")
+    monkeypatch.setattr(api, "_screening_root", lambda: tmp_path / "screenings")
+    monkeypatch.setattr(api, "_analysis_root", lambda: tmp_path / "analyses")
+    monkeypatch.setattr(api, "_published_root", lambda: tmp_path / "published")
+    assert api.resolve_readable_file(report) == report.resolve()
+
+    outside = tmp_path / "secret.csv"
+    outside.write_text("nope")
+    with pytest.raises(PermissionError):
+        api.resolve_readable_file(outside)
+    with pytest.raises(PermissionError):
+        api.resolve_readable_file("/etc/passwd")
+
+
+def test_upload_and_browse_are_reachable_over_http(server, tmp_path):
+    request = urllib.request.Request(
+        server + "/api/upload?name=chain.csv",
+        data=b"site,bias_meV,didv_A\n1,0,0\n",
+        headers={"Content-Type": "application/octet-stream"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request) as response:
+        stored = json.loads(response.read())
+    assert Path(stored["path"]).exists()
+    Path(stored["path"]).unlink()
+
+    folder_request = urllib.request.Request(
+        server + "/api/upload-folder?session=test-session&folder=chain&name=site-1.dat",
+        data=b"[DATA]\nBias calc (V)\tLI Demod 1 X (A)\n0\t1\n",
+        headers={"Content-Type": "application/octet-stream"},
+        method="POST",
+    )
+    with urllib.request.urlopen(folder_request) as response:
+        folder_stored = json.loads(response.read())
+    uploaded = Path(folder_stored["path"])
+    assert uploaded.exists()
+    assert uploaded.parent == Path(folder_stored["folder_path"])
+    uploaded.unlink()
+    uploaded.parent.rmdir()
+
+    status, payload = get(server, "/api/browse")
+    assert status == 200
+    assert "entries" in json.loads(payload)
+
+
+def test_serving_a_file_outside_the_workspace_is_refused(server):
+    status, _ = get(server, "/api/file?path=/etc/passwd")
+    assert status == 403
+
+
+def test_the_page_offers_a_file_chooser_rather_than_a_path_box():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "dragover" in script and "/api/upload" in script
+    assert "/api/upload-folder" in script
+    assert "/api/browse" in script
+    for prefix in ("data", "reuse", "an"):
+        assert f'id="{prefix}-choose-folder"' in html
+        assert re.search(
+            rf'id="{prefix}-folder-upload"[^>]*webkitdirectory[^>]*multiple', html
+        )
+    # The remaining text inputs holding paths are hidden plumbing, not asks.
+    for field in ("data-path", "reuse-path", "an-path"):
+        assert re.search(rf'id="{field}"[^>]*hidden', html), field
+
+
+def test_every_file_field_has_the_elements_its_helper_drives():
+    """The helper builds ids from a prefix, which the id sweep cannot see."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    prefixes = re.findall(r'attachFileField\(\{\s*prefix:\s*"([a-z0-9-]+)"', script)
+    assert prefixes, "no file fields are attached"
+    suffixes = sorted(set(re.findall(r'el\(`\$\{prefix\}-([a-z0-9-]+)`\)', script)))
+    assert suffixes, "the helper does not build any ids from its prefix"
+    for prefix in prefixes:
+        for suffix in suffixes:
+            assert f'id="{prefix}-{suffix}"' in html, f"missing #{prefix}-{suffix}"
+
+
+# --- designing a DMI sample without writing YAML -----------------------------
+
+def _screening_form(**overrides):
+    form = json.loads(json.dumps(api.describe_screening_options()["defaults"]))
+    form.update(overrides)
+    return form
+
+
+def test_the_design_form_produces_a_runnable_screening(tmp_path):
+    built = api.build_screening_config(_screening_form(), workspace=tmp_path)
+    config = Path(built["config_path"])
+    assert config.exists()
+    # It has to be the same file the command line reads, or the design decision
+    # is not reproducible outside the browser.
+    from hamlet.dmi_design import load_screening_config
+
+    designs, protocol = load_screening_config(config)
+    assert len(designs) == built["n_candidates"]
+    assert protocol.observable == "total_spin"
+
+
+def test_the_form_reports_the_free_symmetry_verdict_immediately(tmp_path):
+    """The single most useful thing a screen can say, and it costs nothing."""
+    built = api.build_screening_config(_screening_form(), workspace=tmp_path)
+    verdicts = {c["label"]: c["breaks_symmetry"] for c in built["candidates"]}
+    assert verdicts["one impurity"] is False, "one impurity cannot break the symmetry"
+    assert verdicts["two impurities"] is True
+    assert verdicts["three impurities"] is True
+    assert built["n_can_break_symmetry"] == 3
+
+
+def test_the_form_carries_the_calibration_that_makes_an_imprint_mean_anything():
+    options = api.describe_screening_options()
+    assert options["calibration"], "an imprint without its calibration is a bare number"
+    assert any("0.54" in entry["note"] for entry in options["calibration"])
+    assert {v["name"] for v in options["verdicts"]} == {
+        "hidden", "too weak", "marginal", "promising", "strong"
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides, expected",
+    [
+        ({"candidates": []}, "at least one arrangement"),
+        (
+            {"candidates": [{"sites": [99], "transverse_mev": 2.0}]},
+            "outside a 8-site chain",
+        ),
+        (
+            {"candidates": [{"sites": [1, 1], "transverse_mev": 2.0}]},
+            "listed twice",
+        ),
+        (
+            {"candidates": [{"sites": [], "transverse_mev": 0.0}]},
+            "nothing in it can break the symmetry",
+        ),
+    ],
+)
+def test_impossible_designs_are_refused_with_the_reason(tmp_path, overrides, expected):
+    with pytest.raises(ValueError, match=expected):
+        api.build_screening_config(_screening_form(**overrides), workspace=tmp_path)
+
+
+def test_dmi_larger_than_the_exchange_scale_is_refused(tmp_path):
+    """The pair trades D_z against exchange at fixed hypotenuse, so it cannot."""
+    form = _screening_form()
+    form["chain"] = {**form["chain"], "j_eff_mev": 2.0, "d_z_mev": 5.0}
+    with pytest.raises(ValueError, match="no larger than the exchange scale"):
+        api.build_screening_config(form, workspace=tmp_path)
+
+
+def test_the_dmi_page_asks_for_a_design_not_a_configuration_path():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "/api/build-screening" in script
+    assert "screening YAML" not in html, "the page still asks for a YAML path"
+    for field in ("d-n-sites", "d-jeff", "d-dz", "d-candidates"):
+        assert f'id="{field}"' in html, field
+
+
+def test_screening_routes_are_reachable_over_http(server):
+    status, payload = get(server, "/api/screening-options")
+    assert status == 200 and "defaults" in json.loads(payload)
+    status, payload = post(server, "/api/build-screening", {"form": _screening_form()})
+    assert status == 200, payload
+    assert payload["n_can_break_symmetry"] == 3
+
+
+# --- designing the network ---------------------------------------------------
+
+def test_the_mlp_architecture_is_editable_and_reaches_the_run(tmp_path):
+    import yaml
+
+    built = api.build_project_config(
+        _builder_form(
+            model="keras_mlp",
+            model_options={
+                "hidden_units": [256, 128],
+                "dropout": 0.1,
+                "activation": "gelu",
+                "batch_normalization": False,
+            },
+        ),
+        workspace=tmp_path,
+    )
+    options = yaml.safe_load(Path(built["config_path"]).read_text())["training"]["model_options"]
+    assert options["hidden_units"] == [256, 128]
+    assert options["activation"] == "gelu"
+    assert options["batch_normalization"] is False
+    from hamlet.project import ProjectConfig
+
+    assert ProjectConfig.from_file(built["config_path"]).model_options["dropout"] == 0.1
+
+
+def test_layer_widths_are_accepted_as_a_list_or_as_typed_text():
+    assert api.coerce_model_options("keras_mlp", {"hidden_units": "512, 256, 128"})[
+        "hidden_units"
+    ] == [512, 256, 128]
+    assert api.coerce_model_options("keras_mlp", {"hidden_units": [64]})[
+        "hidden_units"
+    ] == [64]
+
+
+@pytest.mark.parametrize(
+    "model, options, expected",
+    [
+        ("keras_mlp", {"hidden_units": []}, "at least one layer"),
+        ("keras_mlp", {"hidden_units": [0]}, "at least one unit"),
+        ("keras_mlp", {"hidden_units": [999999]}, "beyond anything"),
+        ("keras_mlp", {"hidden_units": [16] * 30}, "beyond the 12"),
+        ("keras_mlp", {"hidden_units": ["wide"]}, "not a whole number"),
+        ("keras_mlp", {"dropout": 1.0}, "above the maximum"),
+        ("keras_mlp", {"activation": "sigmoidish"}, "is not one of"),
+        ("keras_mlp", {"learning_rate": -1}, "below the minimum"),
+        ("ridge", {"n_estimators": 10}, "no hyperparameter called"),
+    ],
+)
+def test_unusable_hyperparameters_are_refused_before_any_compute(model, options, expected):
+    """Each of these would otherwise fail after generation, hours in."""
+    with pytest.raises(ValueError, match=expected):
+        api.coerce_model_options(model, options)
+
+
+def test_a_blank_hyperparameter_means_the_library_default():
+    """Clearing one field must not send an empty value down the stack."""
+    assert api.coerce_model_options(
+        "random_forest", {"max_depth": "", "n_estimators": 200}
+    ) == {"n_estimators": 200}
+
+
+def test_the_library_gets_the_last_word_on_a_hyperparameter_set():
+    """Per-field limits cannot catch a rule that spans fields.
+
+    The library states those rules once, in the configuration dataclass, and
+    constructing it is free -- unlike building the network, which happens hours
+    into a run.
+    """
+    with pytest.raises(ValueError, match="not usable"):
+        api._validate_with_the_library("keras_mlp", {"hidden_units": []})
+    with pytest.raises(ValueError, match="not usable"):
+        api._validate_with_the_library("keras_cnn", {"kernel_size": 0})
+    # A set the library accepts passes straight through.
+    api._validate_with_the_library("keras_mlp", {"hidden_units": [32], "dropout": 0.1})
+
+
+def test_the_page_offers_a_layer_editor():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "renderLayers" in script and "layer-add" in script
+    assert 'id="f-model-options"' in html
+
+
+# --- searching for hyperparameters -------------------------------------------
+
+def test_a_search_can_be_asked_for_and_reaches_the_configuration(tmp_path):
+    import yaml
+
+    from hamlet.project import ProjectConfig
+
+    built = api.build_project_config(
+        _builder_form(tuning={"enabled": True, "n_trials": 8, "timeout_minutes": 30}),
+        workspace=tmp_path,
+    )
+    tuning = yaml.safe_load(Path(built["config_path"]).read_text())["training"]["tuning"]
+    assert tuning["n_trials"] == 8
+    assert tuning["timeout_seconds"] == 1800.0
+    # A trial is a short run, not a full one: a search that cost as much as the
+    # training it precedes would never be worth starting.
+    assert tuning["preset"] == "quick"
+    config = ProjectConfig.from_file(built["config_path"])
+    assert config.tuning.n_trials == 8
+
+
+def test_no_search_is_configured_unless_it_was_asked_for(tmp_path):
+    import yaml
+
+    built = api.build_project_config(_builder_form(), workspace=tmp_path)
+    training = yaml.safe_load(Path(built["config_path"]).read_text())["training"]
+    assert "tuning" not in training
+
+
+@pytest.mark.parametrize("n_trials", [0, 10_000])
+def test_an_impossible_number_of_trials_is_refused(tmp_path, n_trials):
+    with pytest.raises(ValueError, match="between 1 and"):
+        api.build_project_config(
+            _builder_form(tuning={"enabled": True, "n_trials": n_trials}),
+            workspace=tmp_path,
+        )
+
+
+def test_the_form_says_which_backend_a_search_would_use():
+    """"Optuna or not" changes how good the search is, so it must be visible."""
+    tuning = api.describe_builder_options()["tuning"]
+    assert tuning["backend"] in {"optuna", "random search"}
+    assert tuning["optuna_available"] in {True, False}
+    assert set(tuning["tunable_models"]) >= {"keras_mlp", "ridge", "random_forest"}
+    assert tuning["searched"]["keras_mlp"], "nothing is said about what varies"
+    assert "validation" in tuning["notes"]
+
+
+def test_the_plan_announces_a_search_and_the_file_it_writes(tmp_path):
+    built = api.build_project_config(
+        _builder_form(tuning={"enabled": True, "n_trials": 5}), workspace=tmp_path
+    )
+    plan = api.plan_project(built["config_path"])
+    assert any("search" in stage for stage in plan["stages"])
+    assert any(item["path"].endswith("tuning.json") for item in plan["outputs"])
+    assert any("validation split only" in note for note in plan["notes"])
+
+
+# --- applying a model to a measurement ---------------------------------------
+# The step the interface could not do: you could train a model and then had to
+# leave for the command line to use it.
+
+def test_an_analysis_copies_every_contract_term_from_the_model(tmp_path):
+    import yaml
+
+    name = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    built = api.build_analysis_config(measurement, name, workspace=tmp_path / "out")
+    payload = yaml.safe_load(Path(built["config_path"]).read_text())
+
+    manifest = json.loads((api._published_root() / name / "manifest.json").read_text())
+    assert payload["system_type"] == manifest["system_type"]
+    assert payload["training"]["view"] == manifest["view"]
+    # The cutoff is the model's, not a field the user could disagree with: the
+    # weights are specific to it and are never substituted.
+    assert payload["training"]["manual_cutoff_mev"] == manifest["preprocessing"][
+        "bias_cutoff_mev"
+    ]
+    assert built["cutoff_mev"] == manifest["preprocessing"]["bias_cutoff_mev"]
+    assert payload["artifact"].endswith(name)
+
+
+def test_two_analyses_of_the_same_name_do_not_collide(tmp_path):
+    """A run refuses to overwrite its own outputs, so each gets its own place."""
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    name = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+    first = api.build_analysis_config(
+        measurement, name, name="same", workspace=tmp_path / "out"
+    )
+    second = api.build_analysis_config(
+        measurement, name, name="same", workspace=tmp_path / "out"
+    )
+    assert first["run_dir"] != second["run_dir"] or first["config_path"] != second[
+        "config_path"
+    ]
+
+
+def test_analysing_with_a_model_that_does_not_exist_says_which_do(tmp_path):
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    with pytest.raises(FileNotFoundError, match="known models are"):
+        api.build_analysis_config(measurement, "not-a-model", workspace=tmp_path)
+
+
+def test_analysing_a_measurement_that_does_not_exist_says_so(tmp_path):
+    with pytest.raises(FileNotFoundError, match="no such measurement"):
+        api.build_analysis_config(
+            tmp_path / "nope.csv",
+            "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1",
+            workspace=tmp_path,
+        )
+
+
+def test_the_interface_covers_the_whole_pipeline():
+    """Every stage of the workflow has to be reachable without a terminal."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    for panel in ("start", "data", "reuse", "models", "analyse", "train", "dmi", "jobs"):
+        assert f'data-panel="{panel}"' in html, f"no tab for {panel}"
+        assert f'id="panel-{panel}"' in html, f"no panel for {panel}"
+    for route in ("/api/inspect", "/api/advise", "/api/build-config",
+                  "/api/run-project", "/api/build-analysis", "/api/run-analysis",
+                  "/api/build-screening", "/api/run-screening"):
+        assert route in script, f"the page never calls {route}"
+    # The outputs of a run are opened from the page, not hunted for on disk.
+    assert "/api/file?path=" in script
+    assert "report.html" in script
+
+
+def test_a_model_missing_a_contract_term_cannot_be_applied(tmp_path):
+    """Guessing the system or the cutoff is the mistake the contract prevents."""
+    artifact = tmp_path / "artifact"
+    artifact.mkdir()
+    (artifact / "manifest.json").write_text(
+        json.dumps({"artifact_schema_version": 1, "view": "global",
+                    "preprocessing": {"bias_cutoff_mev": 20.0}})
+    )
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    with pytest.raises(ValueError, match="system_type"):
+        api.build_analysis_config(measurement, str(artifact), workspace=tmp_path / "out")
+
+
+def test_a_directory_that_is_not_a_model_is_refused(tmp_path):
+    """A path is accepted on its own terms, so it has to be checked on them."""
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    empty = tmp_path / "not-a-model"
+    empty.mkdir()
+    with pytest.raises(FileNotFoundError, match="no manifest.json"):
+        api.build_analysis_config(measurement, str(empty), workspace=tmp_path / "out")
+
+    recipe = tmp_path / "recipe"
+    recipe.mkdir()
+    (recipe / "manifest.json").write_text(json.dumps({"generation_recipe": {}}))
+    with pytest.raises(FileNotFoundError, match="artifact_schema_version"):
+        api.build_analysis_config(measurement, str(recipe), workspace=tmp_path / "out")
+
+
+def test_a_model_outside_the_workspace_can_still_be_applied(tmp_path):
+    """A model trained on a cluster should not have to be moved to be used."""
+    source = api._published_root() / (
+        "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+    )
+    elsewhere = tmp_path / "from-the-cluster"
+    elsewhere.mkdir()
+    (elsewhere / "manifest.json").write_text((source / "manifest.json").read_text())
+    measurement = tmp_path / "chain.csv"
+    measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
+    built = api.build_analysis_config(
+        measurement, str(elsewhere), workspace=tmp_path / "out"
+    )
+    assert built["artifact_path"] == str(elsewhere)
+
+
+# --- running the analysis, end to end ----------------------------------------
+# The stage the interface exists to complete. Everything above builds the
+# configuration; these check that running it actually produces the answers, and
+# that the job plumbing carries them back to the page.
+
+@pytest.fixture(scope="module")
+def trained_artifact(tmp_path_factory):
+    """A real ridge artifact and a measurement it fits, trained in about a second.
+
+    Built rather than borrowed from the shipped model bank: those are large, and a
+    published model that stopped matching this fixture's measurement would make
+    an unrelated test fail for the wrong reason.
+    """
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_guided_training import make_training_dataset
+
+    from hamlet.project import HamiltonianLearningProject, ProjectConfig
+
+    root = tmp_path_factory.mktemp("artifact")
+    raw = make_training_dataset(n_samples=40)
+    dataset = root / "dataset.npz"
+    raw.save(dataset)
+    config = ProjectConfig(
+        name="fixture model",
+        experiment_csv=None,
+        output_dir=root / "run",
+        dataset_path=dataset,
+        cutoffs_mev=(50.0,),
+        manual_cutoff_mev=50.0,
+        output_points=30,
+        view="local_bonds",
+        model="ridge",
+        preset="quick",
+        verbose=0,
+    )
+    outcome = HamiltonianLearningProject(config).run()
+
+    measurement = root / "measurement.csv"
+    rows = []
+    for site, spectrum in enumerate(raw.spectra[3], start=1):
+        rows.extend(
+            {"site": site, "bias_meV": float(b), "didv_A": float(v)}
+            for b, v in zip(raw.bias_mev, spectrum)
+        )
+    pd.DataFrame(rows).to_csv(measurement, index=False)
+    return {"artifact": outcome.artifact_path, "measurement": measurement, "root": root}
+
+
+def test_running_an_analysis_writes_every_answer_file(trained_artifact, tmp_path):
+    built = api.build_analysis_config(
+        trained_artifact["measurement"],
+        str(trained_artifact["artifact"]),
+        name="end to end",
+        allow_development_artifacts=True,
+        workspace=tmp_path,
+    )
+    result = api.run_analysis(built["config_path"])
+
+    assert result["kind"] == "analysis"
+    assert result["status"]
+    for key in ("report_html", "summary_png", "couplings_csv", "report_json"):
+        assert Path(result[key]).exists(), key
+    # The report is self-contained, which is what makes it shareable.
+    html = Path(result["report_html"]).read_text(encoding="utf-8")
+    assert "end to end" in html
+    assert "Generated by HamLeT" in html
+    # The couplings come back small enough to render on the page.
+    table = result["couplings"]
+    assert table["columns"][0] == "bond"
+    assert len(table["rows"]) == table["n_rows"]
+    assert float(table["rows"][0][3]) > 0, "no coupling was inferred"
+
+
+def test_a_development_model_is_refused_unless_that_is_asked_for(
+    trained_artifact, tmp_path
+):
+    """The quick preset marks an artifact development-only, and it stays so."""
+    built = api.build_analysis_config(
+        trained_artifact["measurement"],
+        str(trained_artifact["artifact"]),
+        name="refused",
+        workspace=tmp_path,
+    )
+    with pytest.raises(RuntimeError, match="preflight decision"):
+        api.run_analysis(built["config_path"])
+    # And the refusal is written down rather than only raised.
+    decision = list(Path(built["run_dir"]).rglob("workflow_decision.json"))
+    assert decision, "the preflight decision was not saved"
+    reasons = json.loads(decision[0].read_text())["artifact_assessments"]
+    assert any("development-only" in r for item in reasons for r in item["reasons"])
+
+
+def test_the_analysis_job_carries_its_output_back_to_the_page(
+    trained_artifact, tmp_path
+):
+    """Analysis is a job, so the page must be able to poll it to completion."""
+    registry = api.JobRegistry()
+    built = api.build_analysis_config(
+        trained_artifact["measurement"],
+        str(trained_artifact["artifact"]),
+        name="as a job",
+        allow_development_artifacts=True,
+        workspace=tmp_path,
+    )
+    job = registry.submit(
+        "analysis", "analyse", lambda: api.run_analysis(built["config_path"])
+    )
+    finished = wait_for_job(registry, job.job_id, timeout=120.0)
+    assert finished["status"] == "finished", finished["error"]
+    assert finished["result"]["kind"] == "analysis"
+    assert any("checking the model" in line for line in finished["lines"])
+
+
+def test_the_whole_pipeline_runs_over_http(server, trained_artifact):
+    """Build the analysis and run it exactly as the page does, over the wire."""
+    status, built = post(server, "/api/build-analysis", {
+        "path": str(trained_artifact["measurement"]),
+        "model": str(trained_artifact["artifact"]),
+        "name": "over http",
+        "allow_development_artifacts": True,
+    })
+    assert status == 200, built
+    assert built["cutoff_mev"] == 50.0
+
+    status, job = post(server, "/api/run-analysis", {"config_path": built["config_path"]})
+    assert status == 200, job
+    assert job["kind"] == "analysis"
+
+    for _ in range(600):
+        status, polled = get(server, f"/api/job?id={job['job_id']}")
+        polled = json.loads(polled)
+        if polled["status"] != "running":
+            break
+        threading.Event().wait(0.2)
+    assert polled["status"] == "finished", polled.get("error")
+
+    # And the files it wrote are reachable from the page, which is the point of
+    # running it there rather than in a terminal.
+    status, body = get(server, "/api/file?path=" + polled["result"]["report_html"])
+    assert status == 200
+    assert b"Generated by HamLeT" in body
+
+
+def test_a_training_run_started_from_the_page_reports_its_model(server, tmp_path):
+    """The train page's Run button, followed to completion on a tiny project."""
+    import sys
+
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_guided_training import make_training_dataset
+
+    import yaml
+
+    make_training_dataset(n_samples=40).save(tmp_path / "dataset.npz")
+    config = tmp_path / "project.yaml"
+    config.write_text(yaml.safe_dump({
+        "config_schema_version": 1,
+        "name": "page run",
+        "output_dir": str(tmp_path / "run"),
+        "dataset": {"format": "portable", "path": str(tmp_path / "dataset.npz")},
+        "training": {"cutoffs_mev": [50.0], "manual_cutoff_mev": 50.0,
+                     "output_points": 30, "view": "local_bonds",
+                     "model": "ridge", "preset": "quick",
+                     "tuning": {"n_trials": 2}},
+    }, sort_keys=False))
+
+    status, job = post(server, "/api/run-project", {"config_path": str(config)})
+    assert status == 200, job
+    for _ in range(900):
+        polled = json.loads(get(server, f"/api/job?id={job['job_id']}")[1])
+        if polled["status"] != "running":
+            break
+        threading.Event().wait(0.2)
+    assert polled["status"] == "finished", polled.get("error")
+
+    result = polled["result"]
+    assert result["kind"] == "training"
+    assert result["validation_mae_mev"] >= 0
+    assert result["test_mae_mev"] >= 0
+    # A search was configured, so its outcome has to reach the page too --
+    # otherwise the user cannot tell a tuned run from an untuned one.
+    assert result["tuning"]["backend"] in {"optuna", "random"}
+    assert "kept_defaults" in result["tuning"]
+    assert Path(result["tuning"]["report_path"]).exists()
+
+
+def test_the_coupling_table_is_trimmed_for_the_page(tmp_path):
+    """A long chain must not send hundreds of rows into the browser."""
+    path = tmp_path / "couplings.csv"
+    rows = ["bond,coupling"] + [f"{i},{30 + i}" for i in range(200)]
+    path.write_text("\n".join(rows) + "\n")
+    table = api._read_couplings(path, max_rows=5)
+    assert table["columns"] == ["bond", "coupling"]
+    assert len(table["rows"]) == 5
+    assert table["n_rows"] == 200
+    assert table["truncated"] is True
+
+
+def test_a_missing_coupling_table_is_empty_not_an_error(tmp_path):
+    assert api._read_couplings(tmp_path / "nope.csv") == {"columns": [], "rows": []}
+    empty = tmp_path / "empty.csv"
+    empty.write_text("")
+    assert api._read_couplings(empty) == {"columns": [], "rows": []}
+
+
+# --- where the interface writes ----------------------------------------------
+
+def test_an_installed_package_does_not_write_into_site_packages(monkeypatch, tmp_path):
+    """REPO_ROOT is inside site-packages for a wheel install, where pip can
+    delete it. A user's measurements do not belong there."""
+    monkeypatch.delenv("HAMLET_WORKSPACE", raising=False)
+    monkeypatch.setattr(api, "_is_source_checkout", lambda: False)
+    monkeypatch.setattr(api.Path, "home", staticmethod(lambda: tmp_path))
+    assert api._workspace_base() == tmp_path / ".hamlet" / "workspace"
+
+
+def test_a_source_checkout_keeps_its_output_beside_the_project(monkeypatch):
+    monkeypatch.delenv("HAMLET_WORKSPACE", raising=False)
+    monkeypatch.setattr(api, "_is_source_checkout", lambda: True)
+    assert api._workspace_base() == api.REPO_ROOT / "results"
+
+
+def test_the_workspace_can_be_pointed_somewhere_else(monkeypatch, tmp_path):
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path / "elsewhere"))
+    assert api._workspace_base() == (tmp_path / "elsewhere").resolve()
+    assert api._uploads_root() == (tmp_path / "elsewhere").resolve() / "gui-uploads"
+    assert api._workspace_root() == (tmp_path / "elsewhere").resolve() / "gui-projects"
+
+
+def test_every_directory_the_interface_writes_to_is_readable_back(monkeypatch, tmp_path):
+    """A file it produced but refuses to serve would be a dead link on the page."""
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    roots = {str(root) for root in api._readable_roots()}
+    for produced in (api._workspace_root(), api._uploads_root(),
+                     api._screening_root(), api._analysis_root()):
+        assert str(produced) in roots, produced
+
+
+def test_figures_are_drawn_without_a_gui_backend(trained_artifact, tmp_path):
+    """Jobs run on worker threads, where an interactive backend is documented
+    as likely to fail. The interface never shows a figure, only saves one."""
+    import warnings
+
+    import matplotlib
+
+    api.use_headless_plotting()
+    assert matplotlib.get_backend().lower() == "agg"
+
+    built = api.build_analysis_config(
+        trained_artifact["measurement"],
+        str(trained_artifact["artifact"]),
+        name="headless",
+        allow_development_artifacts=True,
+        workspace=tmp_path,
+    )
+    registry = api.JobRegistry()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        job = registry.submit(
+            "analysis", "analyse", lambda: api.run_analysis(built["config_path"])
+        )
+        finished = wait_for_job(registry, job.job_id, timeout=120.0)
+    assert finished["status"] == "finished", finished["error"]
+    assert not [
+        str(w.message) for w in caught if "GUI outside of the main thread" in str(w.message)
+    ]
+    assert Path(finished["result"]["summary_png"]).exists()
+
+
+def test_selecting_the_headless_backend_is_safe_to_repeat():
+    import matplotlib
+
+    api.use_headless_plotting()
+    api.use_headless_plotting()
+    assert matplotlib.get_backend().lower() == "agg"
+
+
+# --- the chain, drawn --------------------------------------------------------
+# Impurity positions are zero-based, must be distinct, and whether an
+# arrangement can expose DMI depends on where they sit. A row of numbers hides
+# all of that, so both pages that choose sites draw the chain instead.
+
+def test_both_pages_that_choose_sites_draw_a_chain():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    # One shared component, so the two pages cannot drift apart.
+    assert "function chainSvg(" in script
+    assert "function renderChain(" in script
+    assert 'id="f-chain"' in html, "the training page has nowhere to draw a chain"
+    assert 'class="chain cand-chain"' in script, "candidates have no chain"
+    # Clicking a site is the point; typing an index is the fallback.
+    assert "onToggle" in script
+    assert "click a site" in html.lower()
+
+
+def test_the_chain_is_clickable_and_reachable_by_keyboard():
+    """It is the primary control on the DMI page, not decoration over one."""
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert 'role="button"' in script and 'tabindex="0"' in script
+    assert '"keydown"' in script
+    assert 'event.key === "Enter"' in script
+
+
+def test_a_site_off_the_end_of_the_chain_is_reported_not_dropped():
+    """Shortening a chain must not silently change the design."""
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "function offChainWarning(" in script
+    assert "lie" in script and "outside a" in script
+    # Both chains use it, so neither can quietly discard a site.
+    assert script.count("offChainWarning(") >= 3
+
+
+def test_the_chain_follows_the_chain_length():
+    """A diagram of a chain that is no longer configured is worse than none."""
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert 'el("f-n-sites").addEventListener("input", drawImpurityChain)' in script
+    assert 'el("d-n-sites").addEventListener("input"' in script
+
+
+def test_a_new_impurity_copies_the_systems_own_default():
+    """Clicking a site must produce one that can actually expose DMI.
+
+    An invented S=1 with no transverse anisotropy is inert: it would look
+    placed and change nothing.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "function defaultImpurity(" in script
+    assert "default_impurities" in script
+    spec = next(
+        s for s in api.describe_builder_options()["systems"]
+        if s["system_type"] == "homogeneous_xxz_j1j2j3_dmi_impurity"
+    )
+    assert spec["default_impurities"][0]["transverse_mev"] > 0, (
+        "the template the diagram copies cannot break the symmetry"
+    )
+
+
+def test_the_design_page_states_the_symmetry_rule_as_sites_are_chosen():
+    """The free verdict, restated while the design is being drawn."""
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "function candidateVerdict(" in script
+    assert "One impurity cannot break the symmetry" in script
+    assert "distinct >= 2" in script
+
+
+def test_the_chain_geometry_keeps_long_chains_legible():
+    """A 20-site chain has to fit without the balls growing into each other."""
+    import re
+
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    geometry = re.search(
+        r"const CHAIN_GEOMETRY = \{ radius: (\d+), padX: (\d+), padY: (\d+), "
+        r"longChain: (\d+) \}",
+        script,
+    )
+    assert geometry, "the geometry is not stated in one place"
+    radius, pad_x, pad_y, long_chain = (int(g) for g in geometry.groups())
+    long_radius = int(re.search(r"const radius = long \? (\d+)", script).group(1))
+    long_gap = int(re.search(r"const gap = long \? (\d+) : (\d+)", script).group(1))
+    short_gap = int(re.search(r"const gap = long \? (\d+) : (\d+)", script).group(2))
+    # Both shrink together, so the sticks stay visible rather than vanishing
+    # between balls that have grown to meet.
+    assert long_gap - 2 * long_radius > 0, "long chains have no visible bonds"
+    assert short_gap - 2 * radius > 0, "short chains have no visible bonds"
+    assert long_radius >= 10, "the circles must stay large enough to click"
+    # The site index sits below the ball, inside the padding.
+    assert pad_y > radius, "the index label falls outside the drawing"
+    assert pad_x > 0
+    assert long_chain >= 12, "chains this short do not need the tighter spacing"
+
+
+# --- the logo ----------------------------------------------------------------
+
+@pytest.mark.parametrize("name", ["hamlet-logo.png", "hamlet-icon.png"])
+def test_the_logo_ships_inside_the_package(name):
+    """Served from disk, so it has to live where the server can reach it.
+
+    `assets/` is outside the package and absent from a wheel, so the copy under
+    `static/` is the one that matters.
+    """
+    packaged = STATIC_ROOT / name
+    assert packaged.is_file(), f"{name} is missing from the interface's assets"
+    original = REPO_ROOT / "assets" / "logos" / name
+    assert packaged.read_bytes() == original.read_bytes(), (
+        f"{name} has drifted from assets/logos/{name}"
+    )
+
+
+def test_the_page_shows_the_logo_and_sets_a_tab_icon():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    assert '<link rel="icon" type="image/png" href="/hamlet-icon.png">' in html
+    assert 'src="/hamlet-logo.png"' in html
+    # A logo is not a caption: a reader who cannot see it still needs the name.
+    assert 'alt="HamLeT' in html
+    assert "<title>HamLeT</title>" in html
+
+
+def test_the_logo_survives_a_dark_background():
+    """It is black line art on transparency, invisible on a dark ground."""
+    css = (STATIC_ROOT / "style.css").read_text(encoding="utf-8")
+    dark = css[css.index("@media (prefers-color-scheme: dark)"):]
+    assert "#brand-logo { filter: invert(1); }" in dark
+
+
+@pytest.mark.parametrize(
+    "route, content_type, magic",
+    [
+        ("/hamlet-icon.png", "image/png", b"\x89PNG"),
+        ("/hamlet-logo.png", "image/png", b"\x89PNG"),
+    ],
+)
+def test_the_logo_is_served_as_an_image(server, route, content_type, magic):
+    """Handed over as an octet-stream, a browser quietly declines the favicon."""
+    request = urllib.request.Request(server + route)
+    with urllib.request.urlopen(request) as response:
+        assert response.status == 200
+        assert response.headers["Content-Type"] == content_type
+        assert response.read().startswith(magic)
+
+
+# --- the rest of the wire ----------------------------------------------------
+# Every route the page calls, exercised over HTTP rather than only in-process,
+# because the failures these catch live in the routing, not the operations.
+
+def test_an_oversized_upload_is_refused_without_reading_it(server):
+    """The point of a size limit is not to spend the memory finding out."""
+    request = urllib.request.Request(
+        server + "/api/upload?name=huge.csv",
+        data=b"x" * 32,
+        headers={
+            "Content-Type": "application/octet-stream",
+            # Declared, not sent: the server must decide from the header.
+            "Content-Length": str(api.MAX_UPLOAD_BYTES + 1),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            status, payload = response.status, json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        status, payload = exc.code, json.loads(exc.read())
+    except OSError:
+        # Some clients abort once the server answers early, which is itself
+        # evidence the body was never consumed.
+        return
+    assert status == 413
+    assert "accepts up to" in payload["error"]
+
+
+def test_an_empty_upload_is_a_client_error(server):
+    request = urllib.request.Request(
+        server + "/api/upload?name=nothing.csv",
+        data=b"",
+        headers={"Content-Type": "application/octet-stream"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request) as response:
+            status = response.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    assert status == 400
+
+
+@pytest.mark.parametrize(
+    "suffix, content_type",
+    [
+        (".html", "text/html; charset=utf-8"),
+        (".csv", "text/csv; charset=utf-8"),
+        (".json", "application/json"),
+        (".png", "image/png"),
+    ],
+)
+def test_produced_files_are_served_with_a_usable_type(
+    server, monkeypatch, tmp_path, suffix, content_type
+):
+    """A report handed over as an octet-stream downloads instead of opening."""
+    workspace = tmp_path / "gui-projects"
+    workspace.mkdir(parents=True)
+    produced = workspace / f"result{suffix}"
+    produced.write_bytes(b"x")
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    request = urllib.request.Request(
+        server + "/api/file?path=" + urllib.parse.quote(str(produced))
+    )
+    with urllib.request.urlopen(request) as response:
+        assert response.status == 200
+        assert response.headers["Content-Type"] == content_type
+
+
+def test_serving_a_file_that_does_not_exist_is_a_404(server, monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "_workspace_root", lambda: tmp_path)
+    status, _ = get(server, "/api/file?path=" + str(tmp_path / "gone.html"))
+    assert status == 404
+
+
+def test_the_symmetry_check_is_reachable_over_http(server):
+    config = REPO_ROOT / "examples" / "dmi_screening.yaml"
+    status, payload = post(server, "/api/screening-preview", {"config_path": str(config)})
+    assert status == 200
+    assert payload["n_can_break_symmetry"] == 4
+
+
+def test_the_model_card_route_answers_and_refuses(server):
+    name = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+    status, body = get(server, f"/api/model-card?name={name}")
+    assert status == 200
+    assert "Model card" in json.loads(body)["markdown"]
+    status, _ = get(server, "/api/model-card?name=../../pyproject.toml")
+    assert status == 404
+
+
+def test_reading_and_saving_a_configuration_round_trips(server, tmp_path):
+    """The escape hatch for a configuration the form did not write."""
+    import yaml
+
+    path = tmp_path / "project.yaml"
+    path.write_text(yaml.safe_dump({
+        "config_schema_version": 1,
+        "name": "hand written",
+        "output_dir": str(tmp_path / "run"),
+        "artifact": str(tmp_path / "artifact"),
+        "training": {"manual_cutoff_mev": 50.0, "cutoffs_mev": [50.0]},
+    }, sort_keys=False))
+    status, body = get(server, "/api/config?path=" + str(path))
+    assert status == 200
+    text = json.loads(body)["text"]
+    assert "hand written" in text
+
+    status, payload = post(server, "/api/save-config", {
+        "path": str(path), "text": text.replace("hand written", "renamed")})
+    assert status == 200 and payload["saved"]
+    assert "renamed" in path.read_text()
+
+
+def test_a_preview_is_submitted_as_a_job_not_held_open(server):
+    """One chain is about a minute, far too long to hold a request open."""
+    status, payload = post(server, "/api/preview-samples", {
+        "form": _builder_form(bias_points=5), "n_samples": 1})
+    assert status == 200
+    assert payload["kind"] == "preview"
+    assert payload["status"] == "running"
+    assert payload["job_id"]
+
+
+def test_the_examples_route_lists_the_shipped_configurations(server):
+    status, body = get(server, "/api/examples")
+    assert status == 200
+    names = {entry["name"] for entry in json.loads(body)["configs"]}
+    assert "dmi_screening.yaml" in names
+    for entry in json.loads(body)["configs"]:
+        assert Path(entry["path"]).exists()
+
+
+def test_a_long_directory_listing_is_truncated_and_says_so(tmp_path):
+    for index in range(30):
+        (tmp_path / f"chain-{index:03d}.csv").write_text("x")
+    listing = api.browse_directory(tmp_path, max_entries=10)
+    assert len(listing["entries"]) == 10
+    assert listing["truncated"] is True
+    assert api.browse_directory(tmp_path)["truncated"] is False
+
+
+def test_browsing_offers_shortcuts_that_exist(monkeypatch, tmp_path):
+    """A shortcut to a directory that is not there is a dead button."""
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    (tmp_path / "gui-uploads").mkdir(parents=True)
+    listing = api.browse_directory(tmp_path)
+    labels = {item["label"] for item in listing["shortcuts"]}
+    assert "Uploads" in labels
+    assert "Your runs" not in labels, "a directory that does not exist was offered"
+    for item in listing["shortcuts"]:
+        assert Path(item["path"]).exists()
+
+
+def test_a_model_is_resolved_by_the_name_the_page_shows(monkeypatch, tmp_path):
+    """The page sends back the label it displayed, not a path."""
+    workspace = tmp_path / "gui-projects"
+    artifact = workspace / "my chain" / "run" / "artifact"
+    artifact.mkdir(parents=True)
+    (artifact / "manifest.json").write_text(json.dumps({"artifact_schema_version": 1}))
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    monkeypatch.setattr(api, "_published_root", lambda: tmp_path / "none")
+    assert api._artifact_for("my chain") == artifact
+    assert api._artifact_for(str(artifact)) == artifact
+
+
+@pytest.mark.parametrize(
+    "settings, expected",
+    [
+        ({"enabled": True, "n_trials": "twelve"}, "whole number"),
+        ({"enabled": True, "n_trials": 5, "timeout_minutes": 0}, "must be positive"),
+        ({"enabled": True, "n_trials": 5, "timeout_minutes": -3}, "must be positive"),
+    ],
+)
+def test_impossible_search_settings_are_refused(settings, expected):
+    with pytest.raises(ValueError, match=expected):
+        api._tuning_payload({"tuning": settings}, "ridge")
+
+
+def test_a_search_is_only_configured_when_it_was_asked_for():
+    assert api._tuning_payload({}, "ridge") is None
+    assert api._tuning_payload({"tuning": {"enabled": False, "n_trials": 9}}, "ridge") is None
+    assert api._tuning_payload({"tuning": {"enabled": True}}, "ridge")["n_trials"] == 20
+
+
+def test_a_search_with_no_time_limit_records_none():
+    payload = api._tuning_payload(
+        {"tuning": {"enabled": True, "n_trials": 3, "timeout_minutes": None}}, "ridge"
+    )
+    assert "timeout_seconds" not in payload
+
+
+# --- job plumbing ------------------------------------------------------------
+
+def test_a_chatty_job_cannot_grow_without_bound():
+    """A multi-hour generation prints per chain; holding all of it is a leak."""
+    registry = api.JobRegistry()
+
+    def noisy():
+        for index in range(3000):
+            print(f"line {index}")
+        return "done"
+
+    job = registry.submit("test", "noisy", noisy)
+    finished = wait_for_job(registry, job.job_id, timeout=60.0)
+    assert finished["status"] == "finished"
+    assert len(finished["lines"]) <= 2000, "the output buffer is unbounded"
+    # The newest output is what a user is watching, so that is what survives.
+    assert finished["lines"][-1] == "line 2999"
+
+
+def test_partial_output_is_visible_while_a_job_runs():
+    """A progress line only helps if it arrives before the job ends."""
+    import threading as _threading
+
+    registry = api.JobRegistry()
+    release = _threading.Event()
+
+    def slow():
+        print("first step")
+        release.wait(10)
+        return "done"
+
+    job = registry.submit("test", "slow", slow)
+    for _ in range(200):
+        if registry.get(job.job_id).lines:
+            break
+        _threading.Event().wait(0.02)
+    assert registry.get(job.job_id).lines == ["first step"]
+    assert registry.get(job.job_id).status == "running"
+    release.set()
+    assert wait_for_job(registry, job.job_id)["status"] == "finished"
+
+
+def test_a_job_reports_how_long_it_has_been_going():
+    registry = api.JobRegistry()
+    job = registry.submit("test", "instant", lambda: None)
+    finished = wait_for_job(registry, job.job_id)
+    assert finished["elapsed_seconds"] >= 0
+    assert finished["finished_at"] >= finished["started_at"]
+
+
+def test_a_model_you_trained_is_labelled_by_the_name_you_gave_it(
+    monkeypatch, tmp_path
+):
+    """The artifact directory is called "artifact"; the project above it carries
+    the name the user typed, which is the one worth showing."""
+    workspace = tmp_path / "gui-projects"
+    artifact = workspace / "my first chain" / "run" / "artifact"
+    artifact.mkdir(parents=True)
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+    assert api._workspace_label(artifact) == "my first chain"
+    # A directory outside the workspace keeps its own name rather than raising.
+    assert api._workspace_label(tmp_path / "elsewhere") == "elsewhere"

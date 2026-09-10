@@ -195,6 +195,55 @@ def build_parser() -> argparse.ArgumentParser:
     gui.add_argument("--host", default="127.0.0.1", help="localhost by default; it runs local compute")
     gui.add_argument("--no-browser", action="store_true", help="print the URL instead of opening it")
 
+    commands.add_parser(
+        "compute", help="report the CPU and GPU this machine can use"
+    )
+
+    cluster = commands.add_parser(
+        "cluster",
+        help="run heavy stages on a cluster, through your own ssh",
+    )
+    cluster_actions = cluster.add_subparsers(dest="cluster_command", required=True)
+    cluster_actions.add_parser(
+        "profiles", help="list the built-in scheduler profiles"
+    )
+    cluster_init = cluster_actions.add_parser(
+        "init", help="write a cluster configuration to fill in"
+    )
+    cluster_init.add_argument("path", help="where to write it")
+    cluster_init.add_argument("--overwrite", action="store_true")
+    for name, help_text in (
+        ("check", "confirm the cluster answers and has its scheduler"),
+        ("script", "print the batch script that would be submitted"),
+        ("submit", "stage the project and submit it"),
+        ("fetch", "bring results back from the cluster"),
+    ):
+        action = cluster_actions.add_parser(name, help=help_text)
+        action.add_argument("cluster", help="cluster configuration (YAML or JSON)")
+        if name in ("script", "submit", "fetch"):
+            action.add_argument(
+                "--project",
+                help="project directory to run there; its configuration is made "
+                "portable so the copy works wherever it lands",
+            )
+        if name == "submit":
+            action.add_argument(
+                "--no-stage",
+                action="store_true",
+                help="submit without copying the project over first",
+            )
+            action.add_argument(
+                "--dry-run",
+                action="store_true",
+                help="submit a job that only plans the run, to test the setup",
+            )
+    for name in ("status", "cancel"):
+        action = cluster_actions.add_parser(
+            name, help=f"{name} a job already submitted"
+        )
+        action.add_argument("cluster")
+        action.add_argument("job_id")
+
     screen = commands.add_parser(
         "screen-dmi",
         help="rank candidate impurity designs by how well each exposes DMI",
@@ -301,8 +350,154 @@ def _run_screen_dmi(args) -> int:
     return 0
 
 
+def _run_compute(args) -> int:
+    """Say what this machine can use, and which stage each part affects."""
+    from .compute import GPU_CAPABLE_MODELS, advise_device, describe_compute
+
+    report = describe_compute()
+    print(f"CPU cores        : {report.cpu_count}")
+    print(f"TensorFlow       : {'yes' if report.tensorflow_available else 'no'}")
+    if report.accelerators:
+        for index, device in enumerate(report.accelerators):
+            detail = f" ({device.detail})" if device.detail else ""
+            print(f"GPU {index}            : {device.name}{detail}")
+    else:
+        print("GPU              : none visible")
+    print()
+    for model in sorted(GPU_CAPABLE_MODELS | {"ridge", "random_forest"}):
+        advice = advise_device(model, report)
+        print(f"  {model:<15s} -> {advice['will_use']:<12s} {advice['why']}")
+    print()
+    for note in report.notes:
+        print(f"note: {note}")
+    return 0
+
+
+def _cluster_session(args):
+    from .cluster import ClusterConfig, ClusterSession
+
+    return ClusterSession(ClusterConfig.from_file(args.cluster))
+
+
+def _prepared_project(args) -> tuple[Path, str]:
+    """The project directory to stage, and the config name inside it."""
+    from .cluster import make_portable
+
+    if not getattr(args, "project", None):
+        raise SystemExit(
+            "this needs --project pointing at a project directory, so there is "
+            "something to run on the cluster"
+        )
+    directory = Path(args.project).expanduser().resolve()
+    if directory.is_file():
+        config = directory
+        directory = directory.parent
+    else:
+        candidates = sorted(directory.glob("*.yaml")) + sorted(directory.glob("*.yml"))
+        if not candidates:
+            raise SystemExit(f"no project configuration found in {directory}")
+        config = candidates[0]
+    result = make_portable(config)
+    if not result["portable"]:
+        print(
+            "warning: these paths point outside the project directory and will "
+            "not be copied:\n  "
+            + "\n  ".join(result["outside_project_dir"])
+        )
+    return directory, config.name
+
+
+def _run_cluster(args) -> int:
+    from .cluster import (
+        EXAMPLE_CLUSTER_CONFIG,
+        available_profiles,
+        project_command,
+        render_job_script,
+    )
+
+    if args.cluster_command == "profiles":
+        for name, profile in available_profiles().items():
+            print(f"{name:<6s} submit with `{' '.join(profile['submit_command'])}`")
+            print(f"       {profile['notes']}")
+        print()
+        print(
+            "If yours is not here, describe it in the configuration's "
+            "`scheduler:` block; `hamlet cluster init` writes an example."
+        )
+        return 0
+
+    if args.cluster_command == "init":
+        destination = Path(args.path).expanduser()
+        if destination.exists() and not args.overwrite:
+            raise SystemExit(f"{destination} exists; pass --overwrite to replace it")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(EXAMPLE_CLUSTER_CONFIG, encoding="utf-8")
+        print(f"wrote {destination}")
+        print("Fill in the host, remote_dir and scheduler, then:")
+        print(f"    hamlet cluster check {destination}")
+        return 0
+
+    session = _cluster_session(args)
+
+    if args.cluster_command == "check":
+        status = session.check_connection()
+        print(f"host      : {status['host']}")
+        print(f"reachable : {'yes' if status['reachable'] else 'no'}")
+        print(f"scheduler : {status['scheduler']} "
+              f"({'found' if status['scheduler_found'] else 'NOT FOUND'})")
+        if status["detail"]:
+            print(f"detail    : {status['detail']}")
+        if status["hint"]:
+            print(status["hint"])
+        return 0 if status["reachable"] and status["scheduler_found"] else 1
+
+    if args.cluster_command == "status":
+        answer = session.status(args.job_id)
+        print(answer["detail"] or "(no output)")
+        print(f"still queued or running: {'yes' if answer['known'] else 'no'}")
+        print(answer["note"])
+        return 0
+
+    if args.cluster_command == "cancel":
+        answer = session.cancel(args.job_id)
+        print(answer["detail"] or f"cancelled {args.job_id}")
+        return 0 if answer["cancelled"] else 1
+
+    if args.cluster_command == "fetch":
+        directory, _ = _prepared_project(args)
+        result = session.fetch(directory)
+        print(result.stdout or "(nothing new)")
+        return 0 if result.ok else 1
+
+    directory, config_name = _prepared_project(args)
+    command = project_command(
+        session.cluster, config_name, dry_run=getattr(args, "dry_run", False)
+    )
+    script = render_job_script(
+        session.cluster, command, job_name=directory.name
+    )
+    if args.cluster_command == "script":
+        print(script)
+        return 0
+
+    if not args.no_stage:
+        print(f"copying {directory} to {session.cluster.remote_dir}")
+        session.stage(directory).raise_for_status("copying the project")
+    submitted = session.submit(script)
+    print(f"submitted job {submitted['job_id']} with {submitted['scheduler']}")
+    print(f"script  : {submitted['script']}")
+    print(f"watch it: hamlet cluster status {args.cluster} {submitted['job_id']}")
+    print(f"stop it : hamlet cluster cancel {args.cluster} {submitted['job_id']}")
+    print(f"collect : hamlet cluster fetch {args.cluster} --project {directory}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "compute":
+        return _run_compute(args)
+    if args.command == "cluster":
+        return _run_cluster(args)
     if args.command == "gui":
         from .gui import serve
 
@@ -456,7 +651,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"selected cutoff: {outcome.selected_cutoff_mev:g} meV")
     print(f"analysis status: {outcome.status}")
     print(f"artifact: {outcome.artifact_path}")
-    print(f"HTML report: {outcome.report_path}")
+    if outcome.report_path is None:
+        # A project with no experiment stops after training. Saying what to do
+        # next matters here: the artifact is the input to the analysis command,
+        # and nothing else in the output says so.
+        print(
+            "no experiment configured, so nothing was inferred. To analyse a "
+            "measurement with this model:\n"
+            f"    hamlet advise MEASUREMENT --cutoff "
+            f"{outcome.selected_cutoff_mev:g} --artifact-root {outcome.artifact_path}"
+        )
+    else:
+        print(f"HTML report: {outcome.report_path}")
     return 0
 
 

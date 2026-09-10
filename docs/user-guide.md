@@ -18,25 +18,75 @@ before doing it. Everything below is available through it, and the interface
 calls the same library functions, so nothing is available in one and not the
 other.
 
+### Giving it your data
+
+Nowhere in the interface do you type a path. Every page that needs a
+measurement takes it three ways:
+
+- **drag it onto the page**, or **Choose a file…** — sends one prepared file to the
+  local server, which keeps a copy under `results/gui-uploads/` and uses that
+  path from then on. Use this when the browser and the data are on the same
+  machine;
+- **Choose a folder…** — sends all `.dat`/`.txt` site spectra in a local folder,
+  with upload progress shown on the page. The files are kept together as one
+  experiment under `results/gui-uploads/folders/`;
+- **Browse this machine…** — a chooser over the machine running the server. It
+  can select either one prepared measurement or a directory containing one
+  Nanonis `.dat`/`.txt` STS export per chain site. Use this over an SSH tunnel,
+  where the data is on the far end and never needs to travel.
+
+For a raw folder, **Use this folder** appears when HamLeT finds STS files in
+the current directory. Files are placed at sites 1...N in natural filename
+order (`site_2` comes before `site_10`). The automatic importer reads
+`Bias calc (V)` (or `Bias (V)`) and `LI Demod 1 X (A)`, converts volts to meV,
+and writes the canonical NPZ and CSV under `results/gui-experiments/`. If
+`LI Demod 2 X (A)` is present in every file, it is retained for plotting and
+quality control only; inference continues to use dI/dV. A folder should hold
+one measurement/chain. Other laboratory text formats remain supported through
+a text-import recipe, where their column names and delimiter are explicit.
+
+Inspection plots all sites with labelled axes and a site legend. When the
+second-derivative channel is available, buttons above the plot switch between
+dI/dV and d²I/dV². Moving the cutoff control updates the shaded analysis window
+on the plot before model matching.
+
+Once a file is chosen on one page, the others pick it up, so inspecting a
+measurement and then asking whether a model fits it does not mean answering the
+same question twice.
+
 ### Generating a dataset and training, without writing a configuration
 
 The **Train a model** page is a form, not a file to edit. It asks, in order:
 
 1. **Which system** you are measuring — each option says what it recovers and
-   when to pick it. The DMI-without-impurities entry carries a warning, because
-   `D_z` is not recoverable there.
+   when to pick it. An XXZ chain carrying DMI with nothing to break the
+   symmetry is not offered at all: `D_z` is exactly unidentifiable there, so
+   every model trained on it scores about zero `D_z` skill by construction.
+   Measuring DMI means the impurity system, screened first on the **DMI sample
+   design** page.
 2. **The chain and its couplings** — number of sites, how many chains to
-   simulate, and the range each coupling is drawn from. Impurity rows appear
-   only for the system that supports them, with their spin and anisotropies.
+   simulate, and the range each coupling is drawn from. For a system that takes
+   impurities the chain is drawn as balls and sticks: click a site to put one
+   there, click it again to take it off. A new impurity copies the system's own
+   default properties, so it can actually expose DMI rather than sitting there
+   inert; the table below carries each one's measured spin and anisotropies.
 3. **The measurement to simulate** — bias window, points, broadening,
    observable, and the analysis cutoff.
 4. **A sample check** — simulates two or three chains with exactly those
    settings and plots them, so you can see whether the bias window contains the
    excitations and the broadening is not washing them out. About a minute per
    chain, against hours for a full run.
-5. **The model** — ridge, random forest, or a neural network, with
-   hyperparameters behind a toggle and sensible defaults. Models needing
-   TensorFlow are disabled when it is not installed.
+5. **The model, and how big** — ridge, random forest, or a neural network.
+   **Design the network** opens the full hyperparameter set: for the MLP, one
+   row per hidden layer with its width, added and removed like any other list,
+   plus activation, dropout, weight decay, learning rate, batch normalisation
+   and the Huber delta; for the CNN, the convolution blocks, kernel width and
+   dense layers. Every field starts at the library default, and clearing one
+   returns that single setting to it. Values the library would reject are
+   refused here rather than after generation. Models needing TensorFlow are
+   disabled when it is not installed.
+   Instead of choosing by hand you can tick **search before training** (see
+   below).
 6. **Review and run** — the plan lists every file it would write and a compute
    estimate before anything happens.
 
@@ -49,9 +99,71 @@ Your answers are saved as a configuration file, so the same run can be repeated
 or submitted to a cluster with `hamlet run <path>`. The page shows that path;
 you never have to open the file.
 
+### Letting a search choose the hyperparameters
+
+Ticking **search before training** adds a search stage between generation and
+training. Each trial is one short training run at the `quick` preset, so twenty
+trials cost roughly twenty quick runs — affordable next to generation, which
+has already happened by then.
+
+Two rules make it safe to leave on:
+
+- the **library defaults are trial zero**, and are kept if nothing beats them,
+  so a search can never produce a worse model than not searching;
+- selection reads the **validation split only**. The test split is never
+  touched during the search, so the artifact's held-out MAE stays an estimate
+  of a model whose hyperparameters it did not choose.
+
+Anything you set by hand that the search does not vary is held fixed. Every
+trial, its settings and its score are written to `tuning.json` beside the
+artifact, along with why the winner won.
+
+With [Optuna](https://optuna.org) installed (`pip install
+"hamlet-toolkit[tune]"`) the search uses its TPE sampler, which spends later
+trials near the good region. Without it the same space is sampled at random,
+which is worse but still works — the page says which is in use.
+
+From a configuration, the same thing is `training.tuning`:
+
+```yaml
+training:
+  model: keras_mlp
+  preset: standard
+  tuning:
+    n_trials: 20
+    preset: quick          # the budget of one trial, not of the final model
+    timeout_seconds: 3600  # optional
+```
+
+### Getting the couplings out
+
+**Get my couplings** applies a trained model — published or your own — to a
+measurement and writes the answers. You choose the measurement and the model;
+you are not asked for a cutoff, because the cutoff is part of the model's
+contract and is never substituted. The model is re-checked against your data
+before it runs, so a mismatch is refused rather than answered.
+
+It writes, into a timestamped directory under `results/gui-analyses/`:
+
+| File | What |
+| --- | --- |
+| `analysis/report.html` | the full report, self-contained |
+| `analysis/summary.png` | quality-control figure |
+| `analysis/couplings.csv` | the coupling table |
+| `analysis/report.json` | the same numbers, machine-readable |
+| `analysis.yaml` | the configuration, so `hamlet run` repeats it |
+
+The report, the figure and the table open straight from the page.
+
+For local-bond inference, the browser presents the answer as the physical spin
+chain: numbered site circles joined by bonds labelled with the inferred
+coupling and model spread. Bond thickness compares absolute coupling strength
+within that chain, while colour/dashing distinguishes the sign. The exact
+machine-readable values remain directly below it in the table.
+
 When the run finishes, the model appears on the **Existing models** page marked
-*you trained this*, and the reuse advisor considers it alongside the published
-ones.
+*you trained this*, on **Get my couplings**, and in the reuse advisor alongside
+the published ones.
 
 A note on the sample check: simulation cost is set by how many correlators are
 evaluated, which is one per site per observable component, and *not* by the bias
@@ -59,6 +171,28 @@ resolution -- 81 bias points cost the same as 21. The preview therefore
 simulates a few representative sites rather than the whole chain, and switches
 from exact diagonalisation to DMRG once the basis grows past a few thousand
 states. It says which sites and which method it used.
+
+### Designing a DMI sample
+
+The **DMI sample design** page is a form as well: the chain you can build (its
+length, `J_z`, `J_2`, `J_3`, the exchange scale `sqrt(J1_xy^2 + D_z^2)` and the
+`D_z` you are trying to resolve), the measurement you can take, and one row per
+candidate arrangement — impurity sites, spin, transverse and axial anisotropy,
+and any transverse field.
+
+Each candidate is a card with its own chain diagram — click the sites you would
+put impurities on — and its verdict updates underneath as you click, since the
+symmetry rule costs nothing to apply.
+
+**Check symmetry** is free and exact: it says which arrangements can break the
+symmetry that hides `D_z` at all, without simulating anything. One impurity
+never can. **Run the full screening** then simulates a gauge pair per surviving
+candidate, about a minute each, and ranks them by imprint against the
+calibration table shown on the page — each threshold anchored to the `D_z`
+skill a model trained on that design actually reached.
+
+The design is saved as a screening configuration, so
+`hamlet screen-dmi <path>` repeats it.
 
 ### Stopping it
 
@@ -275,9 +409,9 @@ recipe. The exact list is part of the dataset fingerprint and model contract;
 changing it requires a matching dataset and artifact. See
 [`examples/heisenberg_xxz_dmi_impurities_l8.yaml`](../examples/heisenberg_xxz_dmi_impurities_l8.yaml).
 
-More complete configurations: [`examples/heisenberg_generate_dataset.yaml`](../examples/heisenberg_generate_dataset.yaml),
-[`examples/heisenberg_generate_train_analyze.yaml`](../examples/heisenberg_generate_train_analyze.yaml),
-[`examples/heisenberg_train_and_analyze.yaml`](../examples/heisenberg_train_and_analyze.yaml),
+Ready-to-run configurations:
+[`examples/quickstart_l8.yaml`](../examples/quickstart_l8.yaml),
+[`examples/heisenberg_generate_dataset.yaml`](../examples/heisenberg_generate_dataset.yaml),
 and [`examples/heisenberg_xxz_dmi_impurities_l8.yaml`](../examples/heisenberg_xxz_dmi_impurities_l8.yaml).
 
 ### Retraining directly

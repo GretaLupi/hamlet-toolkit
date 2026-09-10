@@ -19,30 +19,30 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
-      # The core plus io and dev extras. TensorFlow lives in the ml extra and
-      # is exercised by the separate job below; the two neural tests skip
-      # themselves cleanly when it is absent. The simulation extra is left out
-      # entirely because DMRGPy compiles a C++ backend from a git checkout.
+      # The core plus development tools. TensorFlow lives in the ml extra and
+      # is exercised by the separate job below; neural tests skip themselves
+      # cleanly when it is absent. The simulation backend has its own physical
+      # integration checks and is not needed for the ordinary unit suite.
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,io]'
+      - run: python -m pip install -e '.[dev]'
       - run: python -m pytest -v
 
   tests-ml:
     name: tests (neural models)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install -e '.[dev,io,ml]'
+      - run: python -m pip install -e '.[dev,ml]'
       # Confirm the Keras paths actually run rather than silently skipping.
       - run: python -m pytest -v -k "keras or model" --no-header
       - run: python -m pytest -q
@@ -51,8 +51,8 @@ jobs:
     name: wheel contains the whole package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -105,9 +105,13 @@ jobs:
           from hamlet.training import train_supervised
           from hamlet.simulation import SpectroscopyProtocol
           from hamlet.systems import HomogeneousHeisenbergFamily
+          from hamlet.gui.api import describe_available_models
 
           missing = [name for name in hamlet.__all__ if not hasattr(hamlet, name)]
           assert not missing, f"hamlet.__all__ advertises missing objects: {missing}"
+          models = describe_available_models()["models"]
+          assert len(models) >= 3, f"installed GUI model catalog is incomplete: {models}"
+          assert all(model["origin"] == "published" for model in models)
           print("installed wheel imports cleanly, version", hamlet.__version__)
           PY
 
@@ -120,7 +124,7 @@ jobs:
           done
           echo "all console scripts present"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: distributions
           path: dist/*
@@ -133,8 +137,8 @@ jobs:
     # Style opinions are excluded in pyproject.toml precisely so that a red
     # lint job always means something is actually wrong.
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
