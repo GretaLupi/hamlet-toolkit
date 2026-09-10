@@ -46,35 +46,33 @@
 
 <!-- ---------------------------------------------------------------- start -->
 <section id="panel-start" class="panel active">
-  <p class="eyebrow">Your spectroscopy workspace</p>
+  <p class="eyebrow">STM/STS analysis</p>
   <h2>From spectra to Hamiltonians.</h2>
   <p class="lead">
-    Start with your measurement, explore an existing model, or train one for
-    your system. Choose where to begin.
+    Inspect a measurement, check it against an existing model, or train a model
+    for the system under study.
   </p>
   <div id="situations" class="cards"></div>
 
-  <h3>The idea in one paragraph</h3>
+  <h3>How it works</h3>
   <p>
-    A spin chain's excitation spectrum depends on its exchange couplings. HamLeT
-    simulates many chains with known couplings, trains a model to invert that
-    mapping, and applies it to your measured dI/dV. Because the model is trained
-    for one specific physical setup, every model carries a
-    <strong>contract</strong> — chain length, bias window, observable, parameter
-    ranges — and the package refuses to apply a model outside it rather than
-    returning a confident wrong answer.
+    A spin chain's excitation spectrum depends on its exchange couplings.
+    HamLeT simulates spectra for known couplings and trains a model to infer
+    those couplings from measured dI/dV. Each model is valid for a specified
+    chain length, bias window, observable, and parameter range. These conditions
+    are checked before inference.
   </p>
 
   <h3>The usual order</h3>
   <ol class="pipeline">
-    <li><b>My data</b> — check the measurement is readable and complete.</li>
-    <li><b>Can I reuse a model?</b> — if yes, skip straight to the last step.</li>
-    <li><b>Train a model</b> — build one for your system. Hours.</li>
-    <li><b>Get my couplings</b> — apply the model and get the report.</li>
+    <li><b>My data</b> — inspect the measurement and select a bias cutoff.</li>
+    <li><b>Can I reuse a model?</b> — check for a compatible trained model.</li>
+    <li><b>Train a model</b> — generate data and train if no model matches.</li>
+    <li><b>Get my couplings</b> — run inference and export the results.</li>
   </ol>
   <p class="hint">
-    Measuring DMI is the exception: it is a sample-design question that has to
-    be settled on the <b>DMI sample design</b> page before any data is taken.
+    For DMI studies, check the proposed geometry under <b>DMI sample design</b>
+    before taking data.
   </p>
 </section>
 
@@ -82,9 +80,8 @@
 <section id="panel-data" class="panel">
   <h2>Look at a measurement</h2>
   <p class="lead">
-    Reads a spectroscopy measurement — either one prepared file or a folder
-    containing one raw STS export per site — and reports what the workflow will
-    make of it. Nothing is trained or changed.
+    Open a prepared measurement or a folder containing one raw STS spectrum per
+    site. This step reads and plots the data; it does not run inference.
   </p>
   <div class="filefield" id="data-drop">
     <input type="file" id="data-upload" accept=".csv,.tsv,.dat,.txt,.npz,.json,.yaml,.yml" hidden>
@@ -96,10 +93,10 @@
       <button id="data-browse">Browse this machine…</button>
     </div>
     <p class="hint">
-      <b>Choose a file</b> sends one prepared measurement. <b>Choose a folder</b>
-      sends all its per-site <code>.dat</code>/<code>.txt</code> spectra with visible
-      progress. <b>Browse</b> selects data already on the machine running HamLeT —
-      the one to use over an SSH tunnel, where your data is on the far end.
+      Use <b>Choose a file</b> for a prepared measurement or <b>Choose a folder</b>
+      for per-site <code>.dat</code>/<code>.txt</code> spectra. <b>Browse this
+      machine</b> selects data stored on the computer running HamLeT, including
+      a remote computer reached through SSH.
     </p>
     <p class="chosen-file" id="data-chosen" hidden></p>
     <input type="text" id="data-path" hidden>
@@ -118,9 +115,8 @@
 <section id="panel-reuse" class="panel">
   <h2>Can I reuse an existing model?</h2>
   <p class="lead">
-    Compares your measurement against each model's contract and answers
-    reuse / retrain / regenerate — listing the reason a model was rejected, so
-    you can see exactly what does not match.
+    Check whether the measurement and selected cutoff match the conditions of
+    a trained model. Any mismatch is listed below the model.
   </p>
   <div class="filefield" id="reuse-drop">
     <input type="file" id="reuse-upload" accept=".csv,.tsv,.dat,.txt,.npz,.json,.yaml,.yml" hidden>
@@ -139,9 +135,8 @@
     <button id="reuse-go" class="primary">Ask</button>
   </div>
   <p class="hint">
-    The cutoff is the upper bias limit you choose to analyse. It is part of the
-    contract and is never substituted: a model trained to 20 meV is not applied
-    to a 60 meV window.
+    The cutoff is the upper bias used for analysis. It must equal the cutoff
+    used to train the model.
   </p>
   <div id="reuse-out"></div>
 </section>
@@ -161,10 +156,8 @@
 <section id="panel-analyse" class="panel">
   <h2>Get my couplings</h2>
   <p class="lead">
-    Applies a trained model to your measurement and writes the coupling table,
-    an HTML report and a quality-control figure. The model's contract is
-    re-checked against your data first, so a mismatch is refused rather than
-    answered.
+    Apply a compatible trained model and export the inferred couplings, an HTML
+    report, and a quality-control figure.
   </p>
   <ol class="steps">
     <li>
@@ -185,9 +178,8 @@
     <li>
       <h3>2 &middot; Which model?</h3>
       <p class="hint">
-        The cutoff, chain length, view and observable all come from the model
-        itself — they are its contract, not your choice. Run
-        <em>Can I reuse a model?</em> first if you are not sure which fits.
+        The model specifies the cutoff, chain length, view, and observable.
+        Use <em>Can I reuse a model?</em> to check compatibility first.
       </p>
       <div id="an-models" class="cards"></div>
       <div class="row">
@@ -211,8 +203,8 @@
 <section id="panel-train" class="panel">
   <h2>Train a model for your own system</h2>
   <p class="lead">
-    Answer the questions below and the run is assembled for you. Nothing is
-    written or computed until you ask for it.
+    Set the physical system, simulated measurement, and training method. Review
+    the configuration before starting the run.
   </p>
 
   <ol class="steps">
@@ -241,15 +233,14 @@
       <div id="f-impurity-block" hidden>
         <h4>Impurities</h4>
         <p class="hint">
-          These are known conditions, not things the model infers, so use your
-          measured values. Two carrying transverse anisotropy at distinct sites
-          is the minimum that makes DMI recoverable at all.
+          Impurity properties are fixed inputs, not inferred parameters. Enter
+          the measured values. Recovering DMI requires at least two impurities
+          with transverse anisotropy at different sites.
         </p>
         <div id="f-chain" class="chain"></div>
         <p class="hint">
-          Click a site to put an impurity on it, or to take one off. Sites are
-          numbered from 0. The table below carries each one's measured
-          properties.
+          Click a site to add or remove an impurity. Site numbering begins at
+          zero; enter the measured properties in the table.
         </p>
         <table id="f-impurities"><tbody></tbody></table>
         <div class="row">
@@ -280,13 +271,10 @@
     </li>
 
     <li>
-      <h3>4 &middot; Check a sample before committing</h3>
+      <h3>4 &middot; Preview a simulated sample</h3>
       <p class="hint">
-        Simulates one chain with exactly these settings, so you can see whether
-        the bias window contains the excitations and the broadening is not
-        washing them out. A few representative sites rather than all of them,
-        because cost scales with the number of sites evaluated — roughly a
-        minute, against hours for the full run.
+        Simulate one chain to check the bias window and broadening. The preview
+        uses a subset of sites and usually takes about one minute.
       </p>
       <div class="row">
         <button id="f-preview" class="primary">Plot samples</button>
@@ -303,7 +291,7 @@
       </div>
       <div id="f-model-options" hidden></div>
 
-      <h4>Or let a search choose the hyperparameters</h4>
+      <h4>Hyperparameter search</h4>
       <div class="row">
         <label><input type="checkbox" id="f-tune"> search before training</label>
         <label>trials <input type="number" id="f-tune-trials" value="20" min="1" max="200" step="1" style="width:6em"></label>
@@ -331,12 +319,9 @@
 <section id="panel-dmi" class="panel">
   <h2>DMI sample design</h2>
   <p class="lead">
-    DMI along <code>z</code> is <strong>exactly</strong> unmeasurable in a
-    conventional chain — a symmetry hides it, verified to one part in
-    10<sup>13</sup>. So measuring it is a question of sample design, answered
-    before any data is taken. Describe the chain you can build and the
-    arrangements you could put on it; this ranks them by whether they can expose
-    DMI at all.
+    In a conventional chain, symmetry prevents D<sub>z</sub> from being
+    determined from these spectra. Compare impurity arrangements and transverse
+    fields that may break this symmetry before preparing the sample.
   </p>
 
   <ol class="steps">
@@ -353,11 +338,10 @@
         <label>DMI to resolve <input type="number" id="d-dz" step="0.1" style="width:6em"> meV</label>
       </div>
       <p class="hint">
-        The exchange scale is the gauge-invariant
-        <code>sqrt(J1_xy² + D_z²)</code> — the number a zero-field measurement
-        already reports. The screen builds two chains that share it and differ
-        only in how much of it is DMI, then asks whether your measurement could
-        tell them apart. What matters is the ratio, not the DMI alone.
+        The exchange scale is the gauge-invariant quantity
+        <code>sqrt(J1_xy² + D_z²)</code>. Each screening pair has the same
+        exchange scale and a different DMI contribution. The comparison tests
+        whether the simulated spectra distinguish the pair.
       </p>
     </li>
 
@@ -375,11 +359,8 @@
     <li>
       <h3>3 &middot; The arrangements you could build</h3>
       <p class="hint">
-        One card per candidate sample. Click the sites you would put impurities
-        on — they are numbered from 0. Transverse anisotropy on the impurities
-        is the mechanism that breaks the symmetry hiding D<sub>z</sub>; a
-        transverse field does it too. Neither is monotonic, so screen the values
-        you can actually make rather than assuming bigger is better.
+        Add one card for each candidate sample. Select impurity sites and enter
+        their anisotropy or a transverse field. Site numbering begins at zero.
       </p>
       <div id="d-candidates"></div>
       <div class="row">
@@ -396,10 +377,9 @@
         <button id="d-run">Run the full screening</button>
       </div>
       <p class="hint">
-        The symmetry check is free and rules out hopeless designs immediately —
-        no simulation, exact. The full screening simulates a gauge pair per
-        surviving candidate, about a minute each, and reports how strongly each
-        design imprints DMI on the spectra.
+        The symmetry check does not run a simulation. Full screening simulates
+        one gauge pair for each remaining candidate and reports the spectral DMI
+        imprint. Allow about one minute per candidate.
       </p>
       <div id="dmi-out"></div>
       <div id="dmi-calibration"></div>
@@ -411,9 +391,8 @@
 <section id="panel-compute" class="panel">
   <h2>Where the heavy work runs</h2>
   <p class="lead">
-    Generating a dataset is hours and training a large network is not much
-    better. This page says what this machine can do, and lets you send a run to
-    a cluster instead.
+    Review the available CPU, GPU, and scheduler settings. Long runs can be
+    submitted to a remote cluster.
   </p>
 
   <h3>This machine</h3>
@@ -421,25 +400,20 @@
 
   <h3>Training device</h3>
   <p class="hint">
-    Applies to the next run you start from <em>Train a model</em>. It changes
-    training only — dataset generation is DMRG on the CPU and a GPU does nothing
-    for it, which matters because generation is the long stage.
+    This setting applies to model training. DMRG dataset generation runs on the
+    CPU.
   </p>
   <div id="device-cards" class="cards"></div>
 
   <h3>A cluster</h3>
   <p class="lead">
-    Everything goes through your own <code>ssh</code>, so whatever
-    <code>ssh &lt;host&gt;</code> already does — keys, agent, jump hosts —
-    keeps working, and HamLeT never handles a credential. Any cluster you can
-    reach that way, this can drive.
+    Cluster access uses the local <code>ssh</code> configuration, including keys,
+    agents, and jump hosts. HamLeT does not store SSH credentials.
   </p>
   <div id="scheduler-out"></div>
   <p class="hint">
-    Fill this in once. If your scheduler is not one of the built-in profiles,
-    describe it in the <code>scheduler:</code> block at the bottom of the file —
-    that is the point of the format, and it means an unfamiliar batch system is
-    a few lines rather than a feature request.
+    Select a built-in scheduler profile or define the submission commands in
+    the <code>scheduler:</code> block.
   </p>
   <textarea id="cluster-text" rows="22" spellcheck="false"></textarea>
   <div class="row">
@@ -451,9 +425,8 @@
 
   <h3>Send a run there</h3>
   <p class="hint">
-    Assemble the run on <em>Train a model</em> first; its configuration is what
-    gets sent. The project directory is copied over with its paths made
-    relative, so the copy runs wherever it lands.
+    Prepare the configuration under <em>Train a model</em> first. HamLeT copies
+    the project directory and converts project paths to relative paths.
   </p>
   <div class="row">
     <button id="cluster-script-btn">Show me the job script</button>
@@ -466,13 +439,11 @@
 <section id="panel-jobs" class="panel">
   <h2>Running and finished work</h2>
   <p class="lead">
-    Long runs happen in the background. Their output appears here as it is
-    produced; you can leave this page and come back.
+    Monitor local and cluster jobs and view their output.
   </p>
   <p class="hint">
-    A run can be stopped at any time. Stopping is cooperative: it finishes the
-    chain, trial or candidate it is on, so nothing is left half-written and
-    simulations already produced are kept for the next run to resume from.
+    When a run is stopped, the current chain, trial, or candidate finishes
+    before the job exits. Completed simulations are retained.
   </p>
   <p class="hint" id="jobs-note" hidden></p>
   <div id="jobs-out"></div>

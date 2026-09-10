@@ -235,13 +235,13 @@ def advise_experiment(
     if not experiment_valid:
         action = "fix_experiment_or_choose_lower_cutoff"
         summary = (
-            "The measurement does not satisfy the manually selected input window. "
-            "Training another model cannot repair missing experimental coverage."
+            "The measurement does not cover the selected analysis window. "
+            "Choose a lower cutoff or acquire the missing bias range."
         )
         next_steps = (
-            "Inspect the import report and physical site order.",
-            "Choose a lower cutoff that remains scientifically usable, or acquire/export the missing range.",
-            "Run the advisor again before training or inference.",
+            "Check the imported spectra and site order.",
+            "Select a suitable lower cutoff, or acquire and export the missing range.",
+            "Repeat the model check.",
         )
     elif eligible_artifacts:
         selected = min(
@@ -254,13 +254,12 @@ def advise_experiment(
         selected_artifact = selected.path
         action = "use_existing_model"
         summary = (
-            f"A saved artifact trained at exactly {manual_cutoff_mev:g} meV satisfies "
-            "the experiment and model contract."
+            f"A compatible model is available for the {manual_cutoff_mev:g} meV cutoff."
         )
         next_steps = (
             f"Use artifact: {selected.path}",
-            "Run inference and retain its ensemble and overlap-consistency warnings.",
-            "Do not interpret ensemble spread as a calibrated confidence interval.",
+            "Run inference and review any consistency warnings.",
+            "Treat ensemble spread as a model comparison, not a calibrated confidence interval.",
         )
     elif eligible_datasets:
         selected = max(
@@ -270,26 +269,26 @@ def advise_experiment(
         selected_dataset = selected.path
         action = "retrain_with_existing_dataset"
         summary = (
-            f"No distributable artifact passes the exact {manual_cutoff_mev:g} meV "
-            "contract, but an existing raw simulation dataset covers this cutoff."
+            f"No compatible trained model is available for {manual_cutoff_mev:g} meV, "
+            "but an existing simulation dataset covers this cutoff."
         )
         next_steps = (
             f"Use dataset: {selected.path}",
-            "Train fresh weights at the exact selected cutoff.",
-            "Validate the model on held-out simulated chains and register the accepted artifact.",
-            "Run the advisor again before inference.",
+            "Train a model for the selected cutoff.",
+            "Validate it on held-out simulated chains and save the accepted model.",
+            "Repeat the model check before inference.",
         )
     else:
         action = "generate_dataset_and_retrain"
         summary = (
-            f"No saved artifact or listed dataset satisfies the {manual_cutoff_mev:g} meV "
-            "experiment contract. New or expanded simulations are required."
+            f"No compatible model or dataset was found for the {manual_cutoff_mev:g} meV "
+            "cutoff. Generate a simulation dataset and train a model."
         )
         next_steps = (
-            "Define a simulation family whose bias range covers the selected cutoff and whose targets span the intended physics.",
-            "Generate a versioned, checkpointed dataset with the package recipe.",
-            "Run grouped training and held-out validation at the selected cutoff.",
-            "Register the accepted artifact in a cutoff bank and rerun this advisor.",
+            "Set simulation ranges that cover the selected cutoff and target parameters.",
+            "Generate the dataset and train at the selected cutoff.",
+            "Validate the model on held-out simulated chains.",
+            "Save the accepted model and repeat the model check.",
         )
     return WorkflowDecision(
         action=action,

@@ -172,10 +172,9 @@ def workflow_overview() -> dict[str, Any]:
                 "id": "inspect",
                 "have": "I have measured dI/dV data and want to look at it",
                 "does": (
-                    "Reads a prepared spectroscopy measurement or imports a "
-                    "folder of per-site STS files, reports the chain length, "
-                    "bias window and whether anything is missing, and plots "
-                    "every site. Nothing is trained or modified."
+                    "Opens a prepared measurement or imports per-site STS "
+                    "files. Reports the chain length, bias range, missing "
+                    "values, and spectra for every site."
                 ),
                 "needs": "a measurement file, or a folder with one .dat/.txt spectrum per site",
                 "cost": "seconds",
@@ -184,10 +183,9 @@ def workflow_overview() -> dict[str, Any]:
                 "id": "advise",
                 "have": "I have data and want to know if an existing model fits it",
                 "does": (
-                    "Compares your measurement against every published model's "
-                    "contract -- physical system, chain length, bias cutoff, "
-                    "observable, parameter ranges -- and says reuse, retrain or "
-                    "regenerate, with the reason for each rejection."
+                    "Checks the physical system, chain length, bias cutoff, "
+                    "observable, and parameter ranges against each available "
+                    "model."
                 ),
                 "needs": "a measurement, and the bias cutoff you have chosen",
                 "cost": "seconds",
@@ -196,9 +194,8 @@ def workflow_overview() -> dict[str, Any]:
                 "id": "models",
                 "have": "I want to see which models already exist",
                 "does": (
-                    "Lists the published models with what each was trained on, "
-                    "how accurate it is per coupling, and the conditions under "
-                    "which it must not be reused."
+                    "Lists the training data, test accuracy, and validity "
+                    "conditions for each model."
                 ),
                 "needs": "nothing",
                 "cost": "instant",
@@ -207,10 +204,8 @@ def workflow_overview() -> dict[str, Any]:
                 "id": "analyse",
                 "have": "I have data and a model that fits it — give me the couplings",
                 "does": (
-                    "Applies a trained model to your measurement and writes the "
-                    "coupling table, an HTML report and a quality-control "
-                    "figure. The model's contract is re-checked first, so a "
-                    "mismatch is refused rather than answered."
+                    "Applies a compatible model and exports the coupling table, "
+                    "an HTML report, and a quality-control figure."
                 ),
                 "needs": "a measurement, and a model the reuse check accepted",
                 "cost": "under a minute",
@@ -219,21 +214,18 @@ def workflow_overview() -> dict[str, Any]:
                 "id": "train",
                 "have": "I need a model for my own system",
                 "does": (
-                    "Plans a generate-and-train run from a configuration file "
-                    "and shows every output it would write plus a compute "
-                    "estimate, before running anything."
+                    "Creates a simulation and training configuration, estimates "
+                    "the compute time, and lists the output files."
                 ),
-                "needs": "a project configuration; start from an example",
-                "cost": "planning is instant; running is hours",
+                "needs": "the physical system and measurement settings",
+                "cost": "configuration takes seconds; training may take hours",
             },
             {
                 "id": "dmi",
                 "have": "I want to measure DMI",
                 "does": (
-                    "Ranks candidate impurity arrangements by whether they can "
-                    "expose DMI at all. DMI is exactly unmeasurable in a "
-                    "conventional chain, so this is a sample-design question "
-                    "and has to be answered before any data is taken."
+                    "Tests whether candidate impurity arrangements or transverse "
+                    "fields break the symmetry that hides DMI."
                 ),
                 "needs": "your chain parameters and the arrangements you could build",
                 "cost": "about a minute per candidate",
@@ -1225,15 +1217,12 @@ def describe_compute_options() -> dict[str, Any]:
     return {
         **report.to_dict(),
         "devices": [
-            {"name": "auto", "title": "Whatever is fastest here",
-             "notes": "A GPU if one is visible, the CPU otherwise."},
+            {"name": "auto", "title": "Automatic",
+             "notes": "Use an available GPU; otherwise use the CPU."},
             {"name": "cpu", "title": "Force the CPU",
-             "notes": "Worth choosing on a shared machine, or for a small model "
-                      "where a busy GPU is slower than the cores you have."},
+             "notes": "Use CPU training, including on systems with an available GPU."},
             {"name": "gpu", "title": "Require a GPU",
-             "notes": "Warns and falls back to the CPU if none is visible, "
-                      "rather than abandoning a run that already generated its "
-                      "dataset."},
+             "notes": "Use a GPU when available; fall back to the CPU otherwise."},
         ],
         "cluster": {
             "schedulers": available_profiles(),
@@ -1763,9 +1752,8 @@ _SYSTEM_SPECS: tuple[dict[str, Any], ...] = (
         "title": "Bond-inhomogeneous Heisenberg",
         "recovers": "one exchange coupling per bond, varying along the chain",
         "when": (
-            "The chain is not uniform and you want the coupling profile. This "
-            "is the validated workflow, with a published model from "
-            "peer-reviewed work."
+            "For non-uniform chains where the coupling of each bond is inferred "
+            "separately. A pretrained model from the associated study is included."
         ),
         "view": "local_bonds",
         "coupling_mode": "single_range",
@@ -1788,8 +1776,7 @@ _SYSTEM_SPECS: tuple[dict[str, Any], ...] = (
         "title": "Homogeneous Heisenberg (J1, J2, ...)",
         "recovers": "uniform couplings shared by the whole chain",
         "when": (
-            "The chain is uniform and you want its exchange constants. One "
-            "range per interaction distance."
+            "For uniform chains with one exchange constant per interaction distance."
         ),
         "view": "global",
         "coupling_mode": "per_parameter",
@@ -1848,10 +1835,8 @@ _SYSTEM_SPECS: tuple[dict[str, Any], ...] = (
         "title": "XXZ + J2 + J3 + DMI with impurities",
         "recovers": "J1_xy, J2, J3, Jz and a D_z magnitude",
         "when": (
-            "You want DMI. Impurities carrying transverse anisotropy break the "
-            "symmetry that hides it. Screen your arrangement first on the DMI "
-            "page: two impurities at distinct sites is the minimum, and three "
-            "worked best in testing."
+            "For DMI inference when transverse anisotropy or a transverse field "
+            "breaks the relevant symmetry. Check the geometry under DMI sample design."
         ),
         "view": "global",
         "coupling_mode": "per_parameter",
@@ -1890,7 +1875,7 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
     {
         "name": "ridge",
         "title": "Ridge regression",
-        "notes": "Fast and deterministic. A strong baseline; it won on the DMI dataset.",
+        "notes": "Fast and deterministic. This model gave the best DMI validation result.",
         "needs_tensorflow": False,
         "options": [
             {
@@ -1916,7 +1901,7 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "type": "integer",
                 "min": 1,
                 "max": 5000,
-                "hint": "more trees is steadily better and steadily larger on disk",
+                "hint": "more trees usually reduce variance but increase training time and file size",
             },
             {
                 "name": "min_samples_leaf",
@@ -1941,8 +1926,8 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
         "name": "keras_mlp",
         "title": "Neural network (MLP)",
         "notes": (
-            "Used by the published inhomogeneous model. Build the layers "
-            "yourself below, or let a search find them. Needs the ml extra "
+            "Used by the published inhomogeneous model. Set the layers below "
+            "or enable hyperparameter search. Requires the ml extra "
             "(pip install \"hamlet-toolkit[ml]\")."
         ),
         "needs_tensorflow": True,
@@ -1953,8 +1938,8 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": [512, 256, 128],
                 "type": "layers",
                 "hint": (
-                    "one width per layer, in order. A funnel -- each layer "
-                    "narrower than the last -- is the shape that works here."
+                    "one width per layer, in order; decreasing widths are a "
+                    "useful starting point"
                 ),
             },
             {
@@ -2001,8 +1986,7 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "min": 1e-8,
                 "hint": (
                     "the scaled-target residual above which the loss stops "
-                    "being quadratic; it is what keeps a few bad chains from "
-                    "dominating the fit"
+                    "being quadratic"
                 ),
             },
         ],
@@ -2011,8 +1995,8 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
         "name": "keras_cnn",
         "title": "Neural network (CNN)",
         "notes": (
-            "Convolutional along the bias axis, so it looks for peak shapes "
-            "rather than fixed bin positions. Needs the ml extra."
+            "Applies convolutions along the bias axis to learn local spectral "
+            "features. Requires the ml extra."
         ),
         "needs_tensorflow": True,
         "options": [
@@ -2072,22 +2056,22 @@ _PRESET_SPECS: tuple[dict[str, Any], ...] = (
     {
         "name": "standard",
         "title": "Standard",
-        "notes": "Three seeds, full training. Use this for anything you will rely on.",
+        "notes": "Three seeds and full training. Recommended for routine analysis.",
     },
     {
         "name": "research",
         "title": "Research",
         "notes": (
-            "Five seeds and longer training, for a model that will be "
-            "published. Costs roughly twice a standard run."
+            "Five seeds and longer training. Intended for final model comparison "
+            "and publication; costs roughly twice a standard run."
         ),
     },
     {
         "name": "quick",
         "title": "Quick",
         "notes": (
-            "One seed, few epochs. For checking a pipeline runs; artifacts are "
-            "marked development-only and the advisor refuses them by default."
+            "One seed and few epochs. Intended for workflow tests; artifacts are "
+            "marked as development-only and excluded from normal inference."
         ),
     },
 )

@@ -80,7 +80,7 @@ const esc = (text) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function showError(node, error) {
-  node.innerHTML = `<div class="error"><b>Could not do that.</b><br>${esc(error.message)}</div>`;
+  node.innerHTML = `<div class="error"><b>Error</b><br>${esc(error.message)}</div>`;
 }
 
 function busy(node, message) {
@@ -172,16 +172,16 @@ function attachFileField({ prefix, onPicked }) {
     path.value = value;
     field.autofilled = autofilled;
     chosen.hidden = false;
-    chosen.innerHTML = `<b>Using:</b> <code>${esc(value)}</code>${detail ? ` <span class="hint">${esc(detail)}</span>` : ""}`;
+    chosen.innerHTML = `<b>Selected:</b> <code>${esc(value)}</code>${detail ? ` <span class="hint">${esc(detail)}</span>` : ""}`;
     if (onPicked) onPicked(value);
   }
 
   async function send(file) {
     chosen.hidden = false;
-    chosen.textContent = `Sending ${file.name}…`;
+    chosen.textContent = `Uploading ${file.name}…`;
     try {
       const stored = await upload(file);
-      announce(stored.path, `${humanSize(stored.size_bytes)}, copied into the workspace`);
+      announce(stored.path, `${humanSize(stored.size_bytes)}; copied to the workspace`);
     } catch (e) {
       chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
     }
@@ -189,14 +189,14 @@ function attachFileField({ prefix, onPicked }) {
 
   async function sendFolder(files) {
     chosen.hidden = false;
-    chosen.textContent = "Preparing folder upload…";
+    chosen.textContent = "Preparing the folder…";
     try {
       const stored = await uploadFolder(files, (done, total, name) => {
         chosen.textContent = `Uploading spectrum ${done} of ${total}: ${name}`;
       });
       announce(
         stored.path,
-        `${stored.count} per-site STS files copied into the workspace`,
+        `${stored.count} per-site STS files copied to the workspace`,
       );
     } catch (e) {
       chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
@@ -239,7 +239,7 @@ function shareChosenFile(value, except) {
   fileFields.forEach((field) => {
     if (field.prefix === except) return;
     if (el(`${field.prefix}-path`).value && !field.autofilled) return;
-    field.announce(value, "carried over from the previous step", { autofilled: true });
+    field.announce(value, "selected in the previous step", { autofilled: true });
   });
 }
 
@@ -286,7 +286,7 @@ async function loadBrowser(path) {
         if (b.dataset.kind === "directory") {
           loadBrowser(b.dataset.path);
         } else if (browserTarget) {
-          browserTarget(b.dataset.path, "on this machine; not copied");
+          browserTarget(b.dataset.path, "stored on this machine");
           closeBrowser();
         }
       }));
@@ -296,7 +296,7 @@ async function loadBrowser(path) {
       (d.truncated ? " The listing was truncated." : "");
     el("browser-select-folder").disabled = !d.selectable_as_measurement;
     el("browser-folder-summary").textContent = d.selectable_as_measurement
-      ? `${d.raw_sts_file_count} raw STS file(s) found here. HamLeT will combine them in natural filename order.`
+      ? `${d.raw_sts_file_count} raw STS file(s) found. Files will be combined in natural filename order.`
       : "Open a folder containing one .dat or .txt STS file per site to select it.";
   } catch (e) {
     browserFolderInfo = null;
@@ -315,7 +315,7 @@ el("browser-select-folder").addEventListener("click", () => {
   if (!browserTarget || !browserFolderInfo?.selectable_as_measurement) return;
   browserTarget(
     browserFolderInfo.path,
-    `${browserFolderInfo.raw_sts_file_count} per-site STS files; imported automatically`,
+    `${browserFolderInfo.raw_sts_file_count} per-site STS files`,
   );
   closeBrowser();
 });
@@ -398,11 +398,11 @@ el("data-go").addEventListener("click", async () => {
   const out = el("data-out");
   const path = el("data-path").value.trim();
   if (!path) { showError(out, new Error("choose a measurement first")); return; }
-  busy(out, "Reading the measurement… folders are combined into one site map the first time.");
+  busy(out, "Reading the measurement…");
   try {
     const d = await api("/api/inspect", { path });
     const problems = [];
-    if (!d.is_complete) problems.push(`${d.missing_points} missing data point(s) — the workflow refuses incomplete maps`);
+    if (!d.is_complete) problems.push(`${d.missing_points} data point(s) are missing; incomplete maps cannot be analysed`);
     if (!d.covers_zero) problems.push(`the bias window ${num(d.bias_min_mev, 2)} to ${num(d.bias_max_mev, 2)} meV does not include zero`);
     if (d.bias_units !== "meV") problems.push(`bias axis is in ${d.bias_units}, not meV`);
     const maximumCutoff = Math.max(1, Math.floor(d.bias_max_mev));
@@ -417,7 +417,7 @@ el("data-go").addEventListener("click", async () => {
       : "";
     const imported = d.input?.input_kind === "sts_folder";
     out.innerHTML = `
-      ${imported ? `<div class="import-banner"><b>Folder imported</b><span>${d.input.source_file_count} per-site spectra → one canonical measurement</span><span>${d.input.auxiliary_d2idv2 ? "d²I/dV² kept for plotting/QC" : "dI/dV channel imported"}</span></div>` : ""}
+      ${imported ? `<div class="import-banner"><b>Folder imported</b><span>${d.input.source_file_count} per-site spectra combined</span><span>${d.input.auxiliary_d2idv2 ? "d²I/dV² available for plotting" : "dI/dV imported"}</span></div>` : ""}
       <div class="box">
         <table>
           <tr><th>Sites in the chain</th><td class="num"><b>${d.n_sites}</b></td></tr>
@@ -429,7 +429,7 @@ el("data-go").addEventListener("click", async () => {
         </table>
         ${problems.length
           ? `<ul class="checks">${problems.map((p) => `<li class="fail">${esc(p)}</li>`).join("")}</ul>`
-          : `<ul class="checks"><li class="pass">Structurally usable: complete, in meV, and covering zero bias.</li></ul>`}
+          : `<ul class="checks"><li class="pass">Complete data in meV, including zero bias.</li></ul>`}
       </div>
       <div class="box plot-box">
         <div class="plot-heading"><div><span class="eyebrow">Measured signal</span><h3>Site-resolved dI/dV</h3></div>
@@ -441,7 +441,7 @@ el("data-go").addEventListener("click", async () => {
       </div>
       <div class="cutoff-control">
         <div><span class="eyebrow">Your analysis choice</span><h3>Choose the positive-bias cutoff</h3>
-          <p class="hint">Move the marker while looking at the spectra. HamLeT will require a model trained for this exact window.</p></div>
+          <p class="hint">Adjust the marker on the plot. A compatible model must use the same cutoff.</p></div>
         <div class="cutoff-inputs">
           <input type="range" id="data-cutoff-range" min="1" max="${maximumCutoff}" step="0.5" value="${initialCutoff}">
           <label><input type="number" id="data-cutoff-number" min="1" max="${maximumCutoff}" step="0.5" value="${initialCutoff}"> meV</label>
@@ -486,7 +486,7 @@ el("reuse-go").addEventListener("click", async () => {
   const out = el("reuse-out");
   const path = el("reuse-path").value.trim();
   if (!path) { showError(out, new Error("choose a measurement first")); return; }
-  busy(out, "Comparing against every model's contract…");
+  busy(out, "Checking model compatibility…");
   try {
     const d = await api("/api/advise", { path, cutoff_mev: el("reuse-cutoff").value });
     shareChosenFile(d.path, "reuse");
@@ -508,7 +508,7 @@ el("reuse-go").addEventListener("click", async () => {
         }).join("")}</ul>
       </div>
       <div class="box">
-        <h3>Why each model was or was not usable</h3>
+        <h3>Model compatibility</h3>
         ${d.artifacts.length ? `<table>
           <tr><th>Model</th><th>Usable</th><th>Reason</th></tr>
           ${d.artifacts.map((a) => `<tr>
@@ -518,8 +518,8 @@ el("reuse-go").addEventListener("click", async () => {
           </tr>`).join("")}
         </table>` : "<p class='hint'>No models were found to compare against.</p>"}
       </div>
-      ${usable.length ? `<div class="box"><b>Next:</b> go to <em>Get my couplings</em> to run
-        the analysis — it is already pointed at this measurement.</div>` : ""}
+      ${usable.length ? `<div class="box"><b>Next:</b> open <em>Get my couplings</em>.
+        The measurement is already selected.</div>` : ""}
       ${d.next_steps.length ? `<div class="box"><h3>What to do next</h3>
         <ul class="checks">${d.next_steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ul></div>` : ""}`;
   } catch (e) { showError(out, e); }
@@ -706,7 +706,7 @@ function bondChainChart(rows) {
         <line x1="150" x2="182" y1="0" y2="0" class="negative"/><text x="192" y="4">negative J</text>
       </g>
     </svg></div>
-    <p class="chart-explanation">Each circle is a measured site. The number above each bond is the inferred coupling; <b>±</b> is model spread, and line thickness compares |J| within this chain.</p>
+    <p class="chart-explanation">Circles mark measured sites. Labels give the inferred coupling and model spread; line thickness scales with |J|.</p>
   </div>`;
 }
 
@@ -765,12 +765,12 @@ function analysisResult(result) {
   const table = result.couplings || { columns: [], rows: [] };
   const diagnostics = result.diagnostics || {};
   const warnings = diagnostics.warnings || [];
-  const statusLabel = result.status === "ok" ? "Ready to inspect" : "Review suggested";
+  const statusLabel = result.status === "ok" ? "Complete" : "Check warnings";
   const hasBondRows = table.columns.includes("left_site") && table.columns.includes("right_site");
   return `<div class="result-dashboard">
     <div class="result-hero">
-      <div><span class="eyebrow">Inference complete</span><h3>Your coupling estimate</h3>
-        <p class="hint">Generated with ${esc(result.model_label || "the selected model")}.</p></div>
+      <div><span class="eyebrow">Inference results</span><h3>Estimated couplings</h3>
+        <p class="hint">Model: ${esc(result.model_label || "selected model")}</p></div>
       <span class="result-status ${result.status === "ok" ? "good" : "warn"}">${esc(statusLabel)}</span>
     </div>
     <div class="result-facts">
@@ -781,16 +781,16 @@ function analysisResult(result) {
     </div>
     ${table.rows.length ? `<div class="result-section"><div class="plot-heading"><div><span class="eyebrow">Estimated Hamiltonian</span><h3>Couplings</h3></div>
       <span class="hint">${hasBondRows
-        ? "The diagram follows the physical chain; exact values remain in the table below."
-        : "Bars show the estimates; whiskers show model spread where available."}</span></div>
+        ? "Bond positions follow the measured chain. Values are also listed below."
+        : "Bars show estimates; whiskers show model spread where available."}</span></div>
       ${couplingChart(table)}${prettyTable(table)}
       ${table.truncated ? `<p class="hint">Showing the first ${table.rows.length} of
       ${table.n_rows} rows; the CSV has all of them.</p>` : ""}` : ""}
     </div>
     <div class="result-section diagnostics-panel">
-      <span class="eyebrow">Quality checks</span><h3>${warnings.length ? "What deserves attention" : "Checks passed"}</h3>
+      <span class="eyebrow">Quality checks</span><h3>${warnings.length ? "Warnings" : "Checks passed"}</h3>
       ${warnings.length ? `<ul class="checks">${warnings.map((warning) => `<li class="fail">${esc(warning)}</li>`).join("")}</ul>`
-        : `<ul class="checks"><li class="pass">No automatic warnings were raised.</li></ul>`}
+        : `<ul class="checks"><li class="pass">No warnings.</li></ul>`}
       ${diagnostics.ensemble_size ? `<p class="hint">Ensemble: ${diagnostics.ensemble_size} model${diagnostics.ensemble_size === 1 ? "" : "s"}
         ${Number.isFinite(diagnostics.max_ensemble_std) ? ` · largest spread ${num(diagnostics.max_ensemble_std)} meV` : ""}</p>` : ""}
     </div>
@@ -798,7 +798,7 @@ function analysisResult(result) {
       <a href="/api/file?path=${encodeURIComponent(result.summary_png)}" target="_blank" rel="noopener">
         <img class="result-figure" src="/api/file?path=${encodeURIComponent(result.summary_png)}" alt="Quality-control summary of the inferred couplings">
       </a></div>` : ""}
-    <div class="result-section"><span class="eyebrow">Files</span><h3>Open or share the result</h3>
+    <div class="result-section"><span class="eyebrow">Files</span><h3>Exported results</h3>
     <div class="result-files">${[
       ["report_html", "report.html", "the full report, self-contained"],
       ["summary_png", "summary.png", "quality-control figure"],
@@ -1051,13 +1051,12 @@ function renderModelOptions() {
   const spec = modelSpec();
   const box = el("f-model-options");
   if (!spec.options.length) {
-    box.innerHTML = `<div class="box hint">${esc(spec.title)} has no
-      hyperparameters exposed here; the defaults are used.</div>`;
+    box.innerHTML = `<div class="box hint">No adjustable hyperparameters are
+      available for ${esc(spec.title)}. Library defaults will be used.</div>`;
     return;
   }
-  box.innerHTML = `<div class="box"><p class="hint">Every value here starts at the
-    library default, which is what the published models used. Clear a field to
-    return that one setting to its default.</p>` +
+  box.innerHTML = `<div class="box"><p class="hint">Fields initially show the
+    library defaults. Clear a field to restore its default value.</p>` +
     spec.options.map((o) => `<div class="option">
       <label class="option-label">${esc(o.label)}</label>
       <div class="option-input">${optionField(o)}</div>
@@ -1096,8 +1095,7 @@ function renderTuningNote() {
   }
   el("f-tune").disabled = false;
   if (!enabled) {
-    box.innerHTML = `<p class="hint">Off: the settings above are used exactly as
-      they stand.</p>`;
+    box.innerHTML = `<p class="hint">Search disabled. The settings above will be used.</p>`;
     return;
   }
   const trials = Number(el("f-tune-trials").value) || 0;
@@ -1108,9 +1106,9 @@ function renderTuningNote() {
       <code>${esc(tuning.trial_preset)}</code> preset, after generation and
       before the real training. Using <b>${esc(tuning.backend)}</b>${
         tuning.optuna_available ? "" : " — install the <code>tune</code> extra for Optuna's TPE sampler, which spends later trials near the good region"}.
-      The library defaults are trial zero and are kept if nothing beats them, and
-      only the validation split is read, so the held-out score stays honest.
-      Anything you set above that the search does not vary is held fixed.
+      The first trial uses the library defaults. Model selection uses the
+      validation split; the test split remains held out. Other settings remain
+      fixed.
     </p>
   </div>`;
 }
@@ -1206,7 +1204,7 @@ async function pollJob(jobId, onDone, onTick) {
 
 el("f-preview").addEventListener("click", async () => {
   const out = el("f-preview-out");
-  busy(out, "Simulating sample chains… this takes about a minute each.");
+  busy(out, "Simulating a sample chain…");
   try {
     const job = await api("/api/preview-samples", { form: readForm(), n_samples: 1 });
     pollJob(job.job_id,
@@ -1227,15 +1225,13 @@ el("f-preview").addEventListener("click", async () => {
              ${r.showing_all_sites
                ? `One line per site, all ${r.n_sites} of them.`
                : `One line per site, showing sites ${r.evaluated_sites.join(", ")}
-                  of ${r.n_sites} — a subset, because cost scales with the
-                  number of sites evaluated, not with the bias resolution.`}
+                  of ${r.n_sites}.`}
              Simulated with ${esc(r.dynamics_mode)}${
                r.dynamics_mode === "DMRG"
                  ? " (approximate; the full run uses the same setting)"
                  : " (exact)"} at a basis size of ${r.hilbert_dimension}.
-             If the features sit at the very edge of the window, or look like
-             smooth bumps with no structure, adjust the bias range or the
-             broadening before running.</p></div>`;
+             Adjust the bias range or broadening if spectral features are cut
+             off or poorly resolved.</p></div>`;
       },
       (job) => { if (job.lines.length) busy(out, job.lines[job.lines.length - 1]); });
   } catch (e) { showError(out, e); }
@@ -1272,8 +1268,8 @@ el("f-plan").addEventListener("click", async () => {
           ? `<ul class="checks">${plan.blocking_issues.map((r) =>
               `<li class="fail">${esc(r)}</li>`).join("")}</ul>`
           : ""}
-        <p class="hint">Your answers were saved as a configuration, so this run
-          can be repeated or sent to a cluster with:<br>
+        <p class="hint">Configuration saved. Repeat this run or submit it to a
+          cluster with:<br>
           <code>hamlet run ${esc(builtConfig.config_path)}</code></p>
       </div>`;
     el("f-run-zone").hidden = (plan.blocking_issues || []).length > 0;
@@ -1485,13 +1481,13 @@ function readScreeningForm() {
 }
 
 function symmetryTable(d) {
-  const hopeless = d.n_candidates - d.n_can_break_symmetry;
+  const incompatible = d.n_candidates - d.n_can_break_symmetry;
   return `<div class="box">
     <div class="verdict ${d.n_can_break_symmetry ? "good" : "bad"}">
       ${d.n_can_break_symmetry} of ${d.n_candidates} arrangement(s) can break the symmetry
     </div>
-    ${hopeless ? `<p class="hint">${hopeless} cannot, and will be skipped without
-      simulating — they cannot constrain D_z however good the data is.</p>` : ""}
+    ${incompatible ? `<p class="hint">${incompatible} will be skipped because
+      the symmetry prevents them from constraining D_z.</p>` : ""}
     <table><tr><th>Design</th><th>Impurities</th><th>Field</th><th>Can expose DMI?</th></tr>
     ${d.candidates.map((c) => `<tr>
       <td>${esc(c.label)}</td>
@@ -1509,9 +1505,9 @@ function symmetryTable(d) {
 function calibrationBox() {
   return `<div class="box">
     <h3>What an imprint means</h3>
-    <p class="hint">The imprint is how far apart the two chains of a gauge pair
-      look. The thresholds are not chosen — each is anchored to the D_z skill a
-      model trained on that design actually reached.</p>
+    <p class="hint">The imprint measures the spectral difference between the
+      two chains in a gauge pair. Thresholds are based on the D_z prediction
+      obtained for the corresponding design.</p>
     <table><tr><th class="num">Imprint</th><th>Measured outcome</th></tr>
       ${screening.calibration.map((c) => `<tr>
         <td class="num">${c.imprint.toExponential(2)}</td>
@@ -1543,10 +1539,9 @@ el("d-run").addEventListener("click", async () => {
     builtScreening = await api("/api/build-screening", { form: readScreeningForm() });
     if (!builtScreening.n_can_break_symmetry) {
       out.innerHTML = symmetryTable(builtScreening) +
-        `<div class="error">Nothing here can break the symmetry that hides D_z, so
-          there is nothing worth simulating. Two impurities carrying transverse
-          anisotropy at distinct sites, or a transverse field, are the mechanisms
-          that work.</div>`;
+        `<div class="error">None of these arrangements breaks the symmetry that
+          hides D_z. Add transverse anisotropy at two distinct impurity sites or
+          apply a transverse field before screening.</div>`;
       return;
     }
     await api("/api/run-screening", { config_path: builtScreening.config_path });
@@ -1658,20 +1653,20 @@ el("cluster-save").addEventListener("click", async () => {
         <tr><th>Asking for</th><td>${Object.entries(saved.summary.resources)
           .map(([k, v]) => `${esc(k)} = ${esc(v)}`).join(" · ") || "the queue default"}</td></tr>
       </table>
-      <p class="hint">Now test the connection before sending a real run.</p>
+      <p class="hint">Test the connection before submitting a run.</p>
     </div>`;
   } catch (e) { showError(out, e); }
 });
 
 el("cluster-check").addEventListener("click", async () => {
   const out = el("cluster-out");
-  busy(out, "Connecting… this uses your own ssh, so it may prompt in the terminal.");
+  busy(out, "Connecting through SSH… Check the terminal for any prompt.");
   try {
     const d = await api("/api/check-cluster", {});
     const ok = d.reachable && d.scheduler_found;
     out.innerHTML = `<div class="box">
       <div class="verdict ${ok ? "good" : "bad"}">
-        ${ok ? "Reachable, and the scheduler is there"
+        ${ok ? "Connection and scheduler available"
              : d.reachable ? "Reachable, but the scheduler was not found"
                            : "Could not reach it"}</div>
       <table>
@@ -1681,10 +1676,9 @@ el("cluster-check").addEventListener("click", async () => {
       </table>
       ${d.detail ? `<pre class="log">${esc(d.detail)}</pre>` : ""}
       ${d.hint ? `<p class="hint">${esc(d.hint)}</p>` : ""}
-      ${d.reachable && !d.scheduler_found ? `<p class="hint">A login node often
-        needs a module loaded before the scheduler is on the PATH. Add that to
-        <code>setup:</code> above, or pick the profile your site actually
-        uses.</p>` : ""}
+      ${d.reachable && !d.scheduler_found ? `<p class="hint">If the scheduler
+        requires a module, add the module command under <code>setup:</code> or
+        select the appropriate scheduler profile.</p>` : ""}
     </div>`;
   } catch (e) { showError(out, e); }
 });
@@ -1692,8 +1686,7 @@ el("cluster-check").addEventListener("click", async () => {
 function requireBuiltConfig(out) {
   if (!builtConfig) {
     showError(out, new Error(
-      "assemble the run on the Train a model page first — its configuration is "
-      + "what gets sent"));
+      "prepare a configuration on the Train a model page before submitting to a cluster"));
     return null;
   }
   return builtConfig.config_path;
@@ -1715,8 +1708,8 @@ el("cluster-script-btn").addEventListener("click", async () => {
         project directory and will not be copied:</b><br>${
         d.outside_project_dir.map(esc).join("<br>")}</div>`}
       <pre class="log">${esc(d.script)}</pre>
-      <p class="hint">Nothing has been sent. If your site needs another
-        directive, copy this, add it, and submit by hand.</p>
+      <p class="hint">Preview only; nothing has been submitted. Add any required
+        site-specific directives before manual submission.</p>
     </div>`;
   } catch (e) { showError(out, e); }
 });
@@ -1751,12 +1744,12 @@ function trainingResult(result) {
   </table>
   ${tuning ? `<p class="hint">Hyperparameter search (${esc(tuning.backend)}):
     ${tuning.kept_defaults
-      ? "nothing beat the library defaults, so they were kept."
-      : `best was ${num(tuning.improvement_mev, 4)} meV better on validation —
+      ? "the library defaults gave the lowest validation error."
+      : `validation MAE improved by ${num(tuning.improvement_mev, 4)} meV —
          <code>${esc(JSON.stringify(tuning.best_options))}</code>.`}
     Full trial table in <code>${esc(tuning.report_path)}</code>.</p>` : ""}
-  <p class="hint">It is now offered on <em>Get my couplings</em> and
-    <em>Existing models</em>.</p>`;
+  <p class="hint">This model is now available under <em>Get my couplings</em>
+    and <em>Existing models</em>.</p>`;
 }
 
 function clusterResult(result) {
@@ -1767,12 +1760,12 @@ function clusterResult(result) {
       <tr><th>Script</th><td><code>${esc(result.script)}</code></td></tr>
     </table>
     <div class="row">
-      <button data-cluster-status="${esc(result.job_id)}">Check on it</button>
-      <button data-cluster-cancel="${esc(result.job_id)}">Stop it there</button>
-      <button data-cluster-fetch="${esc(result.project_dir)}">Bring results back</button>
+      <button data-cluster-status="${esc(result.job_id)}">Check status</button>
+      <button data-cluster-cancel="${esc(result.job_id)}">Cancel job</button>
+      <button data-cluster-fetch="${esc(result.project_dir)}">Fetch results</button>
     </div>
-    <p class="hint">It is queued on the cluster now, not here — this page can be
-      closed and the run carries on.</p>`;
+    <p class="hint">The job is running on the cluster and is independent of this
+      browser session.</p>`;
 }
 
 function jobResult(job) {
@@ -1796,12 +1789,11 @@ function jobBlock(job) {
       <span>
         ${running ? `<button data-stop="${esc(job.job_id)}"${
           job.stopping ? " disabled" : ""}>${
-          job.stopping ? "stopping…" : "Stop this"}</button>` : ""}
+          job.stopping ? "stopping…" : "Stop"}</button>` : ""}
         <span class="pill ${esc(job.status)}">${esc(job.status)}</span>
         <span class="hint">${job.elapsed_seconds}s</span></span>
     </div>
-    ${job.stopping ? `<p class="hint">Asked to stop; it finishes the step it is
-      on first, so nothing is left half-written.</p>` : ""}
+    ${job.stopping ? `<p class="hint">Stopping after the current step finishes.</p>` : ""}
     ${job.error ? `<div class="${job.status === "cancelled" ? "box" : "error"}">${
       esc(job.error)}</div>` : ""}
     ${jobResult(job)}
@@ -1843,7 +1835,7 @@ async function refreshJobs() {
       b.addEventListener("click", async () => {
         const note = el("jobs-note");
         note.hidden = false;
-        note.textContent = "asking the cluster…";
+        note.textContent = "Checking cluster status…";
         try {
           const d = await api("/api/cluster-status", { job_id: b.dataset.clusterStatus });
           note.textContent = (d.known ? "still queued or running. " : "not listed. ")
