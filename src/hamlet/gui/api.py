@@ -2773,7 +2773,7 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
         "config_schema_version": 1,
         "name": name,
         "system_type": spec["system_type"],
-        "output_dir": str(project_dir / "run"),
+        "output_dir": None,  # filled in below, from the settings themselves
         "dataset": {"format": "generated", "generate": generate},
         "training": {
             "cutoffs_mev": [float(form["cutoff_mev"])],
@@ -2793,7 +2793,28 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
     if tuning is not None:
         payload["training"]["tuning"] = tuning
 
-    config_path = project_dir / "project.yaml"
+    # One directory per distinct set of settings, named by their fingerprint.
+    #
+    # A run refuses to write into a directory that holds a different resolved
+    # configuration, which is the right rule -- it is what stops two runs
+    # quietly sharing an artifact. But the interface used to send every run of
+    # a given name to the same `run/`, so the ordinary act of stopping a job,
+    # changing one number and starting it again hit that refusal and asked the
+    # user to invent a new name.
+    #
+    # Keying the directory on the settings makes both cases behave the way
+    # they read: a tweak is a different run and gets a clean directory, while
+    # starting the same settings again returns to the directory that already
+    # has the checkpoints, and generation resumes instead of starting over.
+    fingerprint = _settings_fingerprint(payload)
+    run_dir = project_dir / f"run-{fingerprint}"
+    # Existing, but empty, is not resuming: the directory is created by
+    # building the configuration a moment before anything runs, so its mere
+    # presence would report "continuing" on a run that has produced nothing.
+    resuming = run_dir.is_dir() and any(run_dir.iterdir())
+    payload["output_dir"] = str(run_dir)
+
+    config_path = project_dir / f"project-{fingerprint}.yaml"
     try:
         import yaml
     except ImportError as exc:  # pragma: no cover
@@ -2807,7 +2828,28 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
     except Exception as exc:
         raise ValueError(f"those settings are not a valid project: {exc}") from exc
 
-    return {"config_path": str(config_path), "project_dir": str(project_dir), "name": name}
+    return {
+        "config_path": str(config_path),
+        "project_dir": str(project_dir),
+        "run_dir": str(run_dir),
+        "name": name,
+        "resuming": resuming,
+        "fingerprint": fingerprint,
+    }
+
+
+def _settings_fingerprint(payload: Mapping[str, Any]) -> str:
+    """A short stable name for one set of settings.
+
+    ``output_dir`` is excluded because it is what this computes. Sorted keys
+    so that a form filled in a different order is still the same run, and
+    eight hex characters because this names a directory a person will read --
+    a collision would need two different configurations out of four billion
+    under the same project name.
+    """
+    material = {key: value for key, value in payload.items() if key != "output_dir"}
+    encoded = json.dumps(material, sort_keys=True, separators=(",", ":"), default=str)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:8]
 
 
 def _build_family(form: dict[str, Any]):

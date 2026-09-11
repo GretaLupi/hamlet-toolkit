@@ -531,6 +531,80 @@ def test_every_network_setting_explains_itself():
             )
 
 
+# --- stopping a run, changing a number, running it again --------------------
+
+def test_the_same_settings_return_to_the_same_run_directory(tmp_path):
+    """So a stopped run resumes instead of starting its generation over."""
+    from hamlet.gui import api
+
+    first = api.build_project_config(_builder_form(), workspace=tmp_path)
+    second = api.build_project_config(_builder_form(), workspace=tmp_path)
+    assert first["run_dir"] == second["run_dir"]
+    assert first["fingerprint"] == second["fingerprint"]
+
+
+def test_tweaked_settings_get_their_own_run_directory(tmp_path):
+    """A run refuses a directory holding a different configuration.
+
+    Sending every run of a project to one `run/` meant that stopping a job,
+    changing a number and starting again hit that refusal and asked the user
+    to invent a new name -- for the most ordinary action there is.
+    """
+    from hamlet.gui import api
+
+    base = api.build_project_config(_builder_form(), workspace=tmp_path)
+    tweaks = [
+        {"n_samples": 40},
+        {"cutoff_mev": 18.0},
+        {"n_sites": 10},
+        {"broadening_mev": 0.4},
+        # A different model, with hyperparameters that belong to it.
+        {"model": "random_forest", "model_options": {"n_estimators": 200}},
+    ]
+    for tweak in tweaks:
+        field = ", ".join(tweak)
+        tweaked = api.build_project_config(_builder_form(**tweak), workspace=tmp_path)
+        assert tweaked["run_dir"] != base["run_dir"], f"{field} reused the directory"
+        assert tweaked["config_path"] != base["config_path"]
+
+
+def test_a_run_directory_with_work_in_it_is_reported_as_continuing(tmp_path):
+    """Existing-but-empty is not resuming: the directory is made before the run."""
+    from hamlet.gui import api
+
+    built = api.build_project_config(_builder_form(), workspace=tmp_path)
+    assert built["resuming"] is False
+
+    run_dir = Path(built["run_dir"])
+    run_dir.mkdir(parents=True, exist_ok=True)
+    assert api.build_project_config(_builder_form(), workspace=tmp_path)["resuming"] is False
+
+    (run_dir / "resolved_project_config.json").write_text("{}", encoding="utf-8")
+    again = api.build_project_config(_builder_form(), workspace=tmp_path)
+    assert again["resuming"] is True
+
+
+def test_the_field_order_of_a_form_does_not_change_the_run(tmp_path):
+    """The fingerprint names the settings, not the order they arrived in."""
+    from hamlet.gui import api
+
+    form = _builder_form()
+    shuffled = {key: form[key] for key in reversed(list(form))}
+    assert (
+        api.build_project_config(form, workspace=tmp_path)["fingerprint"]
+        == api.build_project_config(shuffled, workspace=tmp_path)["fingerprint"]
+    )
+
+
+def test_the_page_says_whether_a_run_is_new_or_continuing():
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "builtConfig.resuming" in script
+    assert "Continuing the run" in script
+    assert "A new run, in its own folder" in script
+    # And starting one while another is going says what that costs.
+    assert "share the same cores" in script
+
+
 # --- the cluster, reduced to the two facts a user has ------------------------
 
 def test_the_cluster_form_needs_only_an_address_and_a_batch_system(tmp_path, monkeypatch):
@@ -2300,11 +2374,44 @@ def test_the_logo_ships_inside_the_package(name):
 
 def test_the_page_shows_the_logo_and_sets_a_tab_icon():
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
-    assert '<link rel="icon" type="image/png" href="/hamlet-icon.png">' in html
+    assert 'rel="icon"' in html and 'href="/hamlet-icon.png"' in html
     assert 'src="/hamlet-logo.png"' in html
     # A logo is not a caption: a reader who cannot see it still needs the name.
     assert 'alt="HamLeT' in html
     assert "<title>HamLeT</title>" in html
+
+    # Exactly one icon is offered. When several match, browsers take the last
+    # usable one, and `media` on a favicon is honoured by some and ignored by
+    # others -- so any ordering that is right in one browser puts the wrong
+    # art in another's tab strip.
+    import re as _re
+
+    icons = _re.findall(r'<link rel="icon"[^>]*>', html)
+    assert len(icons) == 1, f"more than one icon link: {icons}"
+
+
+def test_the_tab_icon_fills_the_tab():
+    """A framed, non-square mark is letterboxed and then mostly frame.
+
+    The tab gives it 16 pixels. Whatever is spent on a border is taken from
+    the letter and the hand, which are the mark.
+    """
+    from PIL import Image
+    import numpy as np
+
+    icon = Image.open(STATIC_ROOT / "hamlet-icon.png").convert("RGBA")
+    width, height = icon.size
+    assert width == height, f"a non-square icon is letterboxed into the tab: {icon.size}"
+    assert width >= 128, "too small to downscale cleanly to a tab icon"
+
+    opaque = np.array(icon)[..., 3] > 8
+    rows, cols = np.nonzero(opaque)
+    covered = (cols.max() - cols.min() + 1) * (rows.max() - rows.min() + 1)
+    fraction = covered / (width * height)
+    assert fraction > 0.6, (
+        f"the mark covers only {fraction:.0%} of the tile; at 16 pixels that "
+        f"is mostly empty space"
+    )
 
 
 def test_the_logo_survives_a_dark_background():

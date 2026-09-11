@@ -66,6 +66,19 @@ and reports.
 
 ### Changed
 
+- Stopping a run, changing a setting and starting it again now works. Each
+  distinct set of settings gets its own run directory, named by a fingerprint
+  of the settings themselves, so a tweak is a separate run in a clean folder
+  and returning to settings you stopped goes back to the folder that already
+  holds their checkpoints -- generation resumes rather than starting over. The
+  interface used to send every run of a project to one `run/`, which collided
+  with the rule that a run will not write into a directory holding a different
+  resolved configuration, and asked the user to invent a new name for the most
+  ordinary action there is. The plan says which of the two is about to happen.
+- Starting a run while another is going now says so. Stopping is cooperative,
+  so a run finishes the chunk it is on -- up to a minute of simulation -- and
+  starting the next one inside that window leaves two heavy jobs sharing the
+  cores, which reads as the interface having gone slow.
 - Long explanations are folded behind an (i) beside the field they describe.
   Every hyperparameter now carries one, which is the point -- but shown
   unconditionally they buried the fields they explain, and someone who already
@@ -74,6 +87,11 @@ and reports.
   cluster page's key setup, whose requirement stays visible while the commands
   fold away. A test fails on any block over 340 visible characters that is not
   behind a toggle.
+- The tab icon fills the tab. The mark carried a 3px frame on a 138x132
+  canvas, so a browser letterboxed it into a square and then spent most of the
+  remaining 16 pixels drawing the frame. The frame is removed by connected
+  component -- exact, where a crop would leave the rounded corners behind --
+  and the mark now covers 82% of a square 256px tile.
 - The README states the Python requirement instead of leaving it blank. The
   badge read the supported versions from PyPI, where the package is not
   published, so the one place a reader looks for it showed nothing. It is now

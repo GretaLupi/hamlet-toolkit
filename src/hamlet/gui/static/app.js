@@ -1355,6 +1355,16 @@ el("f-plan").addEventListener("click", async () => {
     out.innerHTML = `
       <div class="box">
         <div class="verdict">${esc(plan.name || builtConfig.name)}</div>
+        ${builtConfig.resuming
+          // Stopping a run, changing a number and starting again is ordinary,
+          // and the two cases want different words: one picks up where it
+          // left off, the other is a new run that leaves the old one alone.
+          ? `<p><b>Continuing the run with these exact settings.</b> Chains it
+             already simulated are kept and generation resumes from them.
+             Change any setting and it becomes a separate run instead.</p>`
+          : `<p class="hint">A new run, in its own folder. Earlier runs of this
+             project are untouched, and coming back to these settings later
+             will resume this one.</p>`}
         <table>
           <tr><th>System</th><td>${esc(plan.system_type)} · ${esc(plan.view)} view</td></tr>
           <tr><th>Stages</th><td>${(plan.stages || []).map(esc).join(" → ")}</td></tr>
@@ -1374,8 +1384,9 @@ el("f-plan").addEventListener("click", async () => {
           ? `<ul class="checks">${plan.blocking_issues.map((r) =>
               `<li class="fail">${esc(r)}</li>`).join("")}</ul>`
           : ""}
-        <p class="hint">Configuration saved. Repeat this run or submit it to a
-          cluster with:<br>
+        <p class="hint">Saved as <code>${esc(builtConfig.config_path)}</code>,
+          writing into <code>${esc(builtConfig.run_dir)}</code>. Repeat this run
+          or submit it to a cluster with:<br>
           <code>hamlet run ${esc(builtConfig.config_path)}</code></p>
       </div>`;
     el("f-run-zone").hidden = (plan.blocking_issues || []).length > 0;
@@ -1384,7 +1395,22 @@ el("f-plan").addEventListener("click", async () => {
 
 el("f-run").addEventListener("click", async () => {
   if (!builtConfig) return;
-  if (!confirm("Generation and training can take hours. Start it now?")) return;
+  // Stopping is cooperative: the run finishes the chunk it is on, which can
+  // be a minute of simulation. Starting the next one during that window is
+  // the usual way to end up with two heavy jobs sharing the cores and both
+  // crawling, which reads as the interface having gone slow.
+  let warning = "Generation and training can take hours. Start it now?";
+  try {
+    const { jobs } = await api("/api/jobs");
+    const busy = jobs.filter((j) => j.status === "running" && j.kind === "project");
+    if (busy.length) {
+      warning = `${busy.length} run(s) still going:\n`
+        + busy.map((j) => `  ${j.label}${j.stopping ? " (stopping)" : ""}`).join("\n")
+        + "\n\nThey share the same cores, so starting another makes all of them"
+        + " slower. Start it anyway?";
+    }
+  } catch (e) { /* the confirmation below is still worth asking */ }
+  if (!confirm(warning)) return;
   try {
     await api("/api/run-project", { config_path: builtConfig.config_path });
     activate("jobs"); refreshJobs();
