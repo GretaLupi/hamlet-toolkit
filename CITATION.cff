@@ -7,7 +7,7 @@ authors:
   - family-names: Lupi
     given-names: Greta
 version: 0.1.0
-license: MIT
+license: GPL-3.0-or-later
 repository-code: "https://github.com/GretaLupi/hamlet-toolkit"
 url: "https://github.com/GretaLupi/hamlet-toolkit"
 keywords:

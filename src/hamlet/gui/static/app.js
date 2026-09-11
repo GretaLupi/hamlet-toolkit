@@ -685,11 +685,22 @@ function bondChainChart(rows) {
     const mid = (x1 + x2) / 2;
     const width = 5 + 5 * Math.abs(row.value) / maxMagnitude;
     const colourClass = row.value < 0 ? "negative" : "positive";
+    // Strength is shown twice: by thickness, and by how strongly the bond is
+    // inked. The second is what makes a chain readable at a glance -- the
+    // weak bonds recede and the strong ones carry the eye -- and stroke
+    // opacity is the one way to do it that survives both themes, since the
+    // hue still has to come from CSS to mean "antiferromagnetic" or
+    // "ferromagnetic". The floor keeps the weakest bond legible rather than
+    // letting it fade into an apparently broken chain.
+    const strength = Math.abs(row.value) / maxMagnitude;
+    const ink = (0.34 + 0.66 * strength).toFixed(2);
     const uncertainty = Number.isFinite(row.uncertainty) && row.uncertainty > 0
       ? `± ${row.uncertainty.toFixed(2)}` : "";
     return `<g class="chain-bond ${colourClass}">
-      <title>sites ${esc(row.label)}: ${row.value.toFixed(3)} meV${uncertainty ? ` ${uncertainty} meV` : ""}</title>
-      <line x1="${x1 + 23}" x2="${x2 - 23}" y1="${y}" y2="${y}" style="stroke-width:${width.toFixed(1)}"/>
+      <title>sites ${esc(row.label)}: ${row.value.toFixed(3)} meV${uncertainty ? ` ${uncertainty} meV` : ""} — ${
+        (100 * strength).toFixed(0)}% of the strongest bond</title>
+      <line x1="${x1 + 23}" x2="${x2 - 23}" y1="${y}" y2="${y}"
+        style="stroke-width:${width.toFixed(1)};stroke-opacity:${ink}"/>
       <rect class="bond-value-bg" x="${mid - 43}" y="35" width="86" height="52" rx="8"/>
       <text class="bond-symbol" x="${mid}" y="53" text-anchor="middle">J${esc(row.left)},${esc(row.right)}</text>
       <text class="bond-value" x="${mid}" y="70" text-anchor="middle">${row.value.toFixed(2)} meV</text>
@@ -707,9 +718,16 @@ function bondChainChart(rows) {
       <text class="chain-axis-title" x="${edge}" y="18">INFERRED BOND COUPLINGS</text>
       ${bonds}${atoms}
       <text class="chain-caption" x="${w / 2}" y="181" text-anchor="middle">chain site</text>
-      <g class="chain-key" transform="translate(${Math.max(edge, w / 2 - 190)} 204)">
+      <g class="chain-key" transform="translate(${Math.max(edge, w / 2 - 265)} 204)">
         <line x1="0" x2="32" y1="0" y2="0" class="positive"/><text x="42" y="4">positive J</text>
-        <line x1="150" x2="182" y1="0" y2="0" class="negative"/><text x="192" y="4">negative J</text>
+        <line x1="132" x2="164" y1="0" y2="0" class="negative"/><text x="174" y="4">negative J</text>
+        <line x1="272" x2="292" y1="0" y2="0" class="positive"
+          style="stroke-width:5;stroke-opacity:.34"/>
+        <line x1="296" x2="316" y1="0" y2="0" class="positive"
+          style="stroke-width:8;stroke-opacity:.67"/>
+        <line x1="320" x2="340" y1="0" y2="0" class="positive"
+          style="stroke-width:10;stroke-opacity:1"/>
+        <text x="350" y="4">weaker to stronger |J|</text>
       </g>
     </svg></div>
     <p class="chart-explanation">Circles mark measured sites. Labels give the inferred coupling and model spread; line thickness scales with |J|.</p>
@@ -806,6 +824,8 @@ function analysisResult(result) {
       </a></div>` : ""}
     <div class="result-section"><span class="eyebrow">Files</span><h3>Exported results</h3>
     <div class="result-files">${[
+      ["report_pdf", "report.pdf", "a paper-shaped summary to send to a colleague"],
+      ["report_tex", "report.tex", "its LaTeX source — compiles on Overleaf as-is"],
       ["report_html", "report.html", "the full report, self-contained"],
       ["summary_png", "summary.png", "quality-control figure"],
       ["couplings_csv", "couplings.csv", "the coupling table"],

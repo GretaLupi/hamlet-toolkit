@@ -403,21 +403,22 @@ def test_the_quote_tiers_stay_in_order():
     )
 
 
-def test_quotes_turned_off_can_be_turned_back_on():
-    """A preference that outlives the page needs a control that shows it.
+def test_a_running_job_always_gets_a_line():
+    """No opt-out, and no waiting period: if it is running, it is quoting.
 
-    Hiding them with no way back left clearing site data as the only route,
-    which is how they came to be off with no way to discover why.
+    The preference and its checkbox are gone. What remains has to have no way
+    to return an empty string for a running job, or "always" would depend on
+    browser storage that can come back empty anyway.
     """
     html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
     quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
 
-    assert 'id="quotes-on"' in html, "no control to switch them back on"
-    assert "function setQuotesHidden" in quotes
-    assert "removeItem(QUOTES_OFF_KEY)" in quotes, "off is a one-way door"
-    # The control must be able to display a preference it did not set.
-    assert "function syncQuoteToggle" in quotes
-    assert "DOMContentLoaded" in quotes
+    assert 'id="quotes-on"' not in html
+    assert "localStorage" not in quotes, "a stored preference can still hide them"
+    assert "data-quote-hide" not in quotes
+    assert "QUOTE_AFTER_SECONDS" not in quotes, "a threshold is a wait with no quote"
+    body = quotes[quotes.index("function waitingQuote") :]
+    assert 'return ""' not in body, "waitingQuote must always produce a line"
 
 
 def test_static_assets_are_served_uncached():
@@ -447,7 +448,7 @@ def test_the_gpu_device_card_says_when_this_machine_cannot_honour_it():
 def test_every_quote_carries_its_attribution():
     """An unattributed line is a misquotation waiting to happen."""
     quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
-    bank = quotes[quotes.index("const SHAKESPEARE_QUOTES") : quotes.index("QUOTES_OFF_KEY")]
+    bank = quotes[quotes.index("const SHAKESPEARE_QUOTES") : quotes.index("const showing")]
     lines = re.findall(r"line:\s", bank)
     sources = re.findall(r'source: "([^"]+)"', bank)
     assert len(lines) == len(sources), "a quote is missing its source"
@@ -460,15 +461,25 @@ def test_every_quote_carries_its_attribution():
         ), source
 
 
-def test_quotes_can_be_turned_off_and_stay_off():
-    """A decorative flourish nobody can silence stops being a flourish."""
-    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
-    assert "data-quote-hide" in quotes
-    assert "localStorage" in quotes
-    # The surfaces re-render on a timer, so the handler cannot be bound to the
-    # button itself, and the storage call has to survive a private window.
-    assert 'document.addEventListener("click"' in quotes
-    assert "catch" in quotes
+def test_every_network_setting_explains_itself():
+    """The audience measures spectra; they do not tune networks for a living.
+
+    A field labelled "Huber delta" with no explanation is a field nobody
+    touches, or worse, one somebody changes at random. Each says what it does
+    and which way to move it.
+    """
+    from hamlet.gui import api
+
+    for model in api.describe_builder_options()["models"]:
+        if not model["name"].startswith("keras"):
+            continue
+        for option in model["options"]:
+            hint = option.get("hint", "")
+            assert hint, f"{model['name']}.{option['name']} has no explanation"
+            assert len(hint) > 60, (
+                f"{model['name']}.{option['name']} restates its label rather "
+                f"than explaining it: {hint!r}"
+            )
 
 
 # --- the cluster, reduced to the two facts a user has ------------------------
@@ -648,6 +659,26 @@ def test_local_couplings_are_drawn_as_a_spin_chain_not_generic_bars():
     assert 'class="chain-site"' in script
     assert 'class="chain-bond' in script
     assert ".bond-value" in style and ".chain-site" in style
+
+
+def test_bond_strength_is_visible_without_reading_the_numbers():
+    """A chain of identical lines hides the result it is drawing.
+
+    Strength is inked as well as thickened, so the weak bonds recede and the
+    strong ones carry the eye. Opacity rather than a computed colour, because
+    the hue still has to come from CSS to keep meaning sign, and CSS is where
+    the light and dark palettes live.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    start = script.index("function bondChainChart")
+    chart = script[start : script.index("function ", start + 20)]
+
+    assert "stroke-opacity:${ink}" in chart
+    assert "Math.abs(row.value) / maxMagnitude" in chart
+    # A bond must never fade to invisible -- that reads as a broken chain.
+    assert "0.34 + 0.66 * strength" in chart
+    # And the key says what the shading means.
+    assert "weaker to stronger" in chart
 
 
 # --- manifests from more than one pipeline ----------------------------------

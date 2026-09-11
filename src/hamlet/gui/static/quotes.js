@@ -10,10 +10,6 @@
 // waiting, doubt, measurement, and the patience a long run asks for -- and a
 // few are held back until the wait has earned them.
 
-// Seconds a job must have been running before a quote appears. Short jobs
-// finish inside this, which is the point: a quote on a two-second call is
-// clutter, not company.
-const QUOTE_AFTER_SECONDS = 8;
 // How long one line stays put. The jobs list re-renders every three seconds,
 // so the quote has to be a function of the clock rather than of the render, or
 // it would flicker through the whole bank while you read it.
@@ -92,42 +88,6 @@ const SHAKESPEARE_QUOTES = [
 // rather than a side effect of when something happened to redraw.
 const showing = new Map();
 
-const QUOTES_OFF_KEY = "hamlet.quotes.off";
-
-function quotesAreHidden() {
-  // Private-mode browsers throw on the accessor itself, and a decorative
-  // preference is not worth a broken page.
-  try {
-    return window.localStorage.getItem(QUOTES_OFF_KEY) === "1";
-  } catch (_error) {
-    return false;
-  }
-}
-
-function setQuotesHidden(hidden) {
-  try {
-    if (hidden) window.localStorage.setItem(QUOTES_OFF_KEY, "1");
-    else window.localStorage.removeItem(QUOTES_OFF_KEY);
-  } catch (_error) { /* the DOM change below still applies to this session */ }
-  if (hidden) {
-    document.querySelectorAll(".wait-quote").forEach((node) => node.remove());
-  }
-  syncQuoteToggle();
-}
-
-/** Point the checkbox at the stored preference.
- *
- * The preference outlives the page, so the control has to be able to show a
- * state it did not set: someone who turned quotes off last week needs to find
- * the switch already off, and be able to move it back. Turning them off with
- * no way back was the original mistake here -- the only remaining route was
- * clearing site data.
- */
-function syncQuoteToggle() {
-  const box = document.getElementById("quotes-on");
-  if (box) box.checked = !quotesAreHidden();
-}
-
 // A small stable spread over the seed, so two jobs waiting at the same moment
 // are not handed the same line.
 function quoteSeed(seed) {
@@ -138,14 +98,14 @@ function quoteSeed(seed) {
   return hash;
 }
 
-/** One quote for a wait, or "" when the wait is too short to need company.
+/** One quote for a running job. There is always one.
  *
- * `seed` distinguishes concurrent waits; `elapsedSeconds` both gates the line
- * and advances it, so a long run reads several rather than staring at one.
+ * `seed` distinguishes concurrent waits; `elapsedSeconds` advances the line,
+ * so a long run reads several rather than staring at one, and unlocks the
+ * tiers reserved for a wait that has earned them.
  */
 function waitingQuote(seed, elapsedSeconds) {
   const elapsed = Number(elapsedSeconds) || 0;
-  if (elapsed < QUOTE_AFTER_SECONDS || quotesAreHidden()) return "";
   const pool = SHAKESPEARE_QUOTES.filter((q) => elapsed >= (q.after || 0));
   const key = String(seed);
   const now = Date.now();
@@ -171,31 +131,5 @@ function waitingQuote(seed, elapsedSeconds) {
   return `<p class="wait-quote">
     <span class="wait-quote-line">&ldquo;${quote.line}&rdquo;</span>
     <span class="wait-quote-source">&mdash; ${quote.source}</span>
-    <button type="button" class="wait-quote-off" data-quote-hide
-      title="Stop showing these. The Running page can turn them back on."
-      >hide</button>
   </p>`;
 }
-
-// Delegated, and registered once: every surface that shows a quote re-renders
-// on a timer, so a listener bound to the element itself would be thrown away
-// within seconds of being attached.
-document.addEventListener("click", (event) => {
-  const target = event.target;
-  // A click can land on something without `closest` -- the document itself --
-  // and this listener sees every click on the page, so it must never throw.
-  if (target instanceof Element && target.closest("[data-quote-hide]")) {
-    setQuotesHidden(true);
-  }
-});
-
-document.addEventListener("change", (event) => {
-  const target = event.target;
-  if (target instanceof Element && target.id === "quotes-on") {
-    setQuotesHidden(!target.checked);
-  }
-});
-
-// The stored preference is older than this page, so the control is pointed at
-// it as soon as there is a control to point.
-document.addEventListener("DOMContentLoaded", syncQuoteToggle);

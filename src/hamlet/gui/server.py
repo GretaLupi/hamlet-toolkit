@@ -287,6 +287,8 @@ class _Handler(BaseHTTPRequestHandler):
             ".json": "application/json",
             ".csv": "text/csv; charset=utf-8",
             ".png": "image/png",
+            ".pdf": "application/pdf",
+            ".tex": "text/plain; charset=utf-8",
             ".md": "text/plain; charset=utf-8",
             ".yaml": "text/plain; charset=utf-8",
             ".yml": "text/plain; charset=utf-8",

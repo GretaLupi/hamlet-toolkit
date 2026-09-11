@@ -1761,9 +1761,18 @@ def run_analysis(
         "report_json": str(report_path),
         "couplings_csv": str(analysis / "couplings.csv"),
         "summary_png": str(analysis / "summary.png"),
+        # Reported only when present: the .tex is always written, but the PDF
+        # needs a LaTeX toolchain, and offering a link to a file that is not
+        # there is worse than not offering one.
+        "report_tex": _existing(analysis / "report.tex"),
+        "report_pdf": _existing(analysis / "report.pdf"),
         "couplings": couplings,
         "cutoff_mev": outcome.selected_cutoff_mev,
     }
+
+
+def _existing(path: Path) -> str | None:
+    return str(path) if path.exists() else None
 
 
 def _read_couplings(path: Path, *, max_rows: int = 60) -> dict[str, Any]:
@@ -2150,6 +2159,21 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "max": 200,
                 "hint": "leave blank for unlimited, which is the default",
             },
+            {
+                "name": "n_jobs",
+                "label": "cores to use",
+                "default": -1,
+                "type": "integer",
+                "min": -1,
+                "max": 1024,
+                "hint": (
+                    "Trees are grown independently, so this scales almost "
+                    "linearly. -1 means every core on the machine, which is "
+                    "the fastest and also the least polite thing to do on a "
+                    "shared login node; set a number to leave some for "
+                    "everyone else."
+                ),
+            },
         ],
     },
     {
@@ -2168,8 +2192,12 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": [512, 256, 128],
                 "type": "layers",
                 "hint": (
-                    "one width per layer, in order; decreasing widths are a "
-                    "useful starting point"
+                    "How much the network can represent. One row per layer, "
+                    "its width being the number of neurons. Wider and deeper "
+                    "fits more complicated spectra but needs more training "
+                    "chains to pin down, and overfits sooner when it does "
+                    "not have them. Narrowing towards the output, as the "
+                    "default does, is a safe starting shape."
                 ),
             },
             {
@@ -2178,6 +2206,12 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": "relu",
                 "type": "choice",
                 "choices": ["relu", "gelu", "tanh", "elu", "selu"],
+                "hint": (
+                    "The bend that lets layers stack into something other "
+                    "than one big linear map. `relu` is the standard choice "
+                    "and rarely the thing worth changing; `gelu` and `elu` "
+                    "are smoother and occasionally help on small datasets."
+                ),
             },
             {
                 "name": "dropout",
@@ -2186,7 +2220,14 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "type": "number",
                 "min": 0.0,
                 "max": 0.95,
-                "hint": "applied between hidden layers, not after the last one",
+                "hint": (
+                    "Anti-memorisation. Each training step ignores this "
+                    "fraction of neurons at random, so the network cannot "
+                    "lean on any one of them. Raise it when the training "
+                    "error is far better than the held-out error; lower it "
+                    "towards 0 if the model never fits well in the first "
+                    "place. Applied between hidden layers, not after the last."
+                ),
             },
             {
                 "name": "l2",
@@ -2194,6 +2235,11 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": 0.0003,
                 "type": "number",
                 "min": 0.0,
+                "hint": (
+                    "The other anti-memorisation knob: a running penalty on "
+                    "large weights, which keeps the fitted function smooth. "
+                    "Same symptom to watch as dropout. 0 turns it off."
+                ),
             },
             {
                 "name": "learning_rate",
@@ -2201,12 +2247,24 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": 0.0003,
                 "type": "number",
                 "min": 1e-8,
+                "hint": (
+                    "How big a step each update takes. Too high and the "
+                    "training error jumps around or turns into NaN; too low "
+                    "and it crawls and stops early before it has arrived. "
+                    "Change it by factors of ten, not percentages."
+                ),
             },
             {
                 "name": "batch_normalization",
                 "label": "batch normalisation",
                 "default": True,
                 "type": "boolean",
+                "hint": (
+                    "Rescales the values flowing between layers so they stay "
+                    "in a comfortable range. Mostly it makes training faster "
+                    "and less sensitive to the learning rate. Leave it on "
+                    "unless you are chasing a specific problem."
+                ),
             },
             {
                 "name": "huber_delta",
@@ -2215,8 +2273,13 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "type": "number",
                 "min": 1e-8,
                 "hint": (
-                    "the scaled-target residual above which the loss stops "
-                    "being quadratic"
+                    "Where the loss stops punishing an error quadratically "
+                    "and starts punishing it only linearly. Its effect is on "
+                    "outliers: below this residual a chain is fitted "
+                    "normally, above it the chain stops dominating the "
+                    "gradient. Raise it to take unusual chains more "
+                    "seriously, lower it to let the bulk of the data win. "
+                    "Measured on the scaled target, not in meV."
                 ),
             },
         ],
@@ -2236,8 +2299,11 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": [32, 64],
                 "type": "layers",
                 "hint": (
-                    "channels per block. Each block halves the bias axis, so "
-                    "more blocks than log2(input points) is not usable."
+                    "How many spectral features each stage may look for, one "
+                    "row per stage. Early blocks pick up narrow structure -- "
+                    "a step, a peak edge -- and later ones combine those into "
+                    "broader shapes. Each block halves the bias axis, so you "
+                    "cannot have more blocks than log2(input points)."
                 ),
             },
             {
@@ -2247,13 +2313,26 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "type": "integer",
                 "min": 1,
                 "max": 129,
-                "hint": "in bias points; roughly the width of a feature to detect",
+                "hint": (
+                    "How wide a window the network sees at once, in bias "
+                    "points. Set it to roughly the width of the feature you "
+                    "care about: too narrow and a broad step looks like "
+                    "noise, too wide and sharp excitations get smeared "
+                    "together. Compare it against the bias spacing of your "
+                    "measurement rather than picking a number in the abstract."
+                ),
             },
             {
                 "name": "dense_units",
                 "label": "dense layers after the convolutions",
                 "default": [128],
                 "type": "layers",
+                "hint": (
+                    "The part that turns the detected features into actual "
+                    "coupling numbers. One row per layer. Usually one modest "
+                    "layer is enough -- the convolutions have already done "
+                    "the work of finding what matters."
+                ),
             },
             {
                 "name": "activation",
@@ -2261,17 +2340,49 @@ _MODEL_SPECS: tuple[dict[str, Any], ...] = (
                 "default": "relu",
                 "type": "choice",
                 "choices": ["relu", "gelu", "tanh", "elu", "selu"],
+                "hint": (
+                    "The bend that lets layers stack into something other "
+                    "than one big linear map. `relu` is the standard choice "
+                    "and rarely the thing worth changing."
+                ),
             },
             {"name": "dropout", "label": "dropout", "default": 0.2,
-             "type": "number", "min": 0.0, "max": 0.95},
+             "type": "number", "min": 0.0, "max": 0.95,
+             "hint": (
+                 "Anti-memorisation: each step ignores this fraction of "
+                 "neurons at random. Raise it when the training error is far "
+                 "better than the held-out error; lower it towards 0 if the "
+                 "model never fits well at all."
+             )},
             {"name": "l2", "label": "weight decay (L2)", "default": 0.0003,
-             "type": "number", "min": 0.0},
+             "type": "number", "min": 0.0,
+             "hint": (
+                 "A running penalty on large weights, which keeps the fitted "
+                 "function smooth. Same symptom to watch as dropout; 0 turns "
+                 "it off."
+             )},
             {"name": "learning_rate", "label": "learning rate", "default": 0.0003,
-             "type": "number", "min": 1e-8},
+             "type": "number", "min": 1e-8,
+             "hint": (
+                 "How big a step each update takes. Too high and the error "
+                 "jumps around or goes NaN; too low and it crawls. Change it "
+                 "by factors of ten."
+             )},
             {"name": "batch_normalization", "label": "batch normalisation",
-             "default": True, "type": "boolean"},
+             "default": True, "type": "boolean",
+             "hint": (
+                 "Rescales values flowing between layers so they stay in a "
+                 "comfortable range. Mostly makes training faster and less "
+                 "sensitive to the learning rate. Leave it on."
+             )},
             {"name": "huber_delta", "label": "Huber delta", "default": 0.02,
-             "type": "number", "min": 1e-8},
+             "type": "number", "min": 1e-8,
+             "hint": (
+                 "Where the loss stops punishing an error quadratically and "
+                 "starts punishing it linearly -- above this residual an odd "
+                 "chain stops dominating the gradient. On the scaled target, "
+                 "not in meV."
+             )},
         ],
     },
 )
@@ -2619,8 +2730,8 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
             "whenever one is present, including on a cluster node."
         )
 
-    # Parallel chains. Refused at the form rather than at generation time,
-    # which on this stage would mean failing after the first chunk of an
+    # Cores for generation. Refused at the form rather than at generation
+    # time, which on this stage would mean failing after the first chunk of an
     # hours-long run.
     workers = int(form.get("workers", 1) or 1)
     if workers < 0:

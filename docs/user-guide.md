@@ -268,6 +268,38 @@ Hamiltonian: import your experiment, choose a physically usable cutoff, let
 the package decide whether to reuse, retrain, or generate a model, then read
 the report. See the [README](../README.md) for install instructions.
 
+## The report you send to someone else
+
+Every analysis writes its results five ways into the analysis folder:
+
+| File | For |
+| --- | --- |
+| `report.pdf` | a paper-shaped summary: the Hamiltonian, the method, one table |
+| `report.tex` | its LaTeX source, to edit or paste into a draft |
+| `report.html` | the full report, with every diagnostic, self-contained |
+| `summary.png` | the quality-control figure on its own |
+| `couplings.csv`, `report.json` | the numbers, for a script |
+
+The PDF is the one to send to a collaborator. It writes out the Hamiltonian
+that was inferred — transcribed from what the simulator actually builds, not a
+textbook form that resembles it — states the method in a paragraph, gives the
+couplings as a table, and carries the caveat that belongs with every estimate:
+the ensemble spread measures disagreement between trained members and is not a
+calibrated confidence interval.
+
+`report.tex` is written whether or not you have LaTeX installed, because it is
+the durable thing: upload it and its `-summary.png` to Overleaf and it
+compiles with nothing installed locally. For a PDF here, any of `tectonic`,
+`latexmk`, or `pdflatex` will do — HamLeT uses whichever it finds, and says
+which in the result. It needs only `amsmath`, `graphicx`, and `geometry`, so a
+minimal TeX install is enough.
+
+From Python:
+
+```python
+result.save_latex_report("report.tex", title="Chain S1")
+```
+
 ## Sending a run to a cluster
 
 Two facts are needed: the address you `ssh` to, and which batch system the

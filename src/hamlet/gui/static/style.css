@@ -173,16 +173,6 @@ code { background: #eceff3; padding: 1px 5px; border-radius: 3px; font-size: 13p
 }
 .wait-quote-line { font-style: italic; }
 .wait-quote-source { font-size: 11.5px; letter-spacing: .02em; white-space: nowrap; }
-.wait-quote-off {
-  padding: 0 4px; border: 0; background: none; color: var(--muted);
-  font-size: 11.5px; text-decoration: underline; cursor: pointer;
-  margin-left: auto;
-}
-.wait-quote-off:hover { color: var(--ink); border-color: transparent; }
-.quote-toggle {
-  display: flex; align-items: center; gap: 8px; margin: 14px 0 0;
-  color: var(--muted); font-size: 13px; width: fit-content;
-}
 /* A choice this machine cannot honour: legible, still selectable, and clearly
    not the same as the options that would work here. */
 .card.unavailable .have { color: var(--muted); }

@@ -4,10 +4,9 @@
 
 # HamLeT
 
-[![CI](https://github.com/GretaLupi/hamlet-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/GretaLupi/hamlet-toolkit/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
 [![Python](https://img.shields.io/pypi/pyversions/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-087f8c.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-087f8c.svg)](LICENSE)
 
 HamLeT (Hamiltonian Learning Toolkit) is an experimental-facing framework for
 inferring Hamiltonians and physical parameters from scanning tunnelling
@@ -43,7 +42,8 @@ The local browser interface guides the full workflow:
    length, view, cutoff, and preprocessing contract;
 4. reuse it, or generate a dataset and train ridge, random-forest, MLP, or CNN
    models from the interface;
-5. infer the couplings and export an HTML report, plot, CSV, and JSON result.
+5. infer the couplings and export a LaTeX/PDF summary for a colleague,
+   an HTML report, a plot, a CSV, and a JSON result.
 
 It binds to localhost and does not upload measurements elsewhere. Long jobs run
 in the background. Close it with the **Stop server** button or `Ctrl+C`.
@@ -149,4 +149,5 @@ model. See the [DMI experiment specification](docs/dmi-experiment-spec.md).
 - Security reports: [SECURITY.md](SECURITY.md)
 - Citation metadata: [CITATION.cff](CITATION.cff)
 
-HamLeT is distributed under the [MIT License](LICENSE).
+HamLeT is distributed under the [GNU General Public License v3.0 or
+later](LICENSE).

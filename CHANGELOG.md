@@ -6,8 +6,45 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+### Added
+
+- A LaTeX summary of every analysis, and a PDF beside it when a TeX toolchain
+  is installed: `report.tex`, `report.pdf`, and the figure they reference,
+  written into the analysis folder alongside the HTML report. It is the
+  artifact that leaves the machine -- the Hamiltonian written out, the method
+  in a paragraph, one table of couplings, and the caveat that ensemble spread
+  is not a calibrated confidence interval. Every formula is transcribed from
+  what `DmrgpySimulator` actually assembles, so the document describes the
+  model the numbers came from rather than a textbook form that resembles it.
+  The `.tex` is written whether or not LaTeX is present, because it compiles
+  on Overleaf with nothing installed locally; `tectonic`, `latexmk` and
+  `pdflatex` are each used if found, and only `amsmath`, `graphicx` and
+  `geometry` are required. Build files are cleaned up on success, and a figure
+  that cannot be drawn costs a paragraph rather than the report.
+  `save_latex_report()` on both result types backs it.
+- Every neural-network setting on the training page now explains what it does
+  and which way to move it. The audience measures spectra; a field labelled
+  "Huber delta" with no explanation is one nobody touches, or worse, one
+  somebody changes at random.
+- The inferred chain now inks each bond by coupling strength as well as
+  thickening it, so the weak bonds recede and the strong ones carry the eye,
+  with a key showing the scale and a tooltip giving each bond as a percentage
+  of the strongest. Stroke opacity rather than a computed colour, because the
+  hue still has to come from CSS to keep meaning the sign of J.
+- The random forest exposes its core count. It ran on every core
+  unconditionally, which is the fastest and least polite thing to do on a
+  shared login node.
+
 ### Changed
 
+- A line of Shakespeare is now always shown while a job runs. The opt-out and
+  its stored preference are gone: a decoration that can be switched off
+  permanently by a stray click, in browser storage that this session cannot
+  see, is a decoration that silently stops existing.
+- The project is licensed under the GNU General Public License v3.0 or later,
+  replacing the MIT licence.
+- The continuous-integration workflow has been removed. The release workflow
+  that publishes to PyPI is kept.
 - **Require a GPU** is offered on Linux only. It is the only platform where
   TensorFlow can use one -- native Windows has had no GPU build since 2.11 and
   macOS has no CUDA path -- and offering a choice that can never be honoured,

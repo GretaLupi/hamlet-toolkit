@@ -5,6 +5,7 @@ from .analysis import (
     ExperimentalGlobalAnalyzer,
     ExperimentalGlobalResult,
 )
+from .latex_report import save_latex_report
 from .report import save_html_report
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "ExperimentalGlobalAnalyzer",
     "ExperimentalGlobalResult",
     "save_html_report",
+    "save_latex_report",
 ]

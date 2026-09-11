@@ -520,6 +520,7 @@ class HamiltonianLearningProject:
         self.training_run: TrainingRun | None = None
         self.tuning_report: TuningReport | None = None
         self.device_report: dict[str, Any] | None = None
+        self.latex_report: dict[str, Any] | None = None
         self.experimental_result: ExperimentalChainResult | ExperimentalGlobalResult | None = None
         self.generation_result: CheckpointedGenerationResult | None = None
         self.workflow_decision: Any | None = None
@@ -831,6 +832,8 @@ class HamiltonianLearningProject:
                 ("couplings.csv", "coupling table"),
                 ("report.json", "machine-readable report"),
                 ("report.html", "self-contained HTML report"),
+                ("report.tex", "LaTeX summary with the Hamiltonian and method"),
+                ("report.pdf", "the same, compiled (needs a LaTeX toolchain)"),
                 ("summary.png", "quality-control figure"),
             ):
                 add_output(analysis / name, description, blocks=True)
@@ -1204,12 +1207,22 @@ class HamiltonianLearningProject:
             plt.close(figure)
         except ImportError:  # pragma: no cover
             pass
+        manifest_path = (
+            self.config.artifact_path or self.config.output_dir / "artifact"
+        ) / "manifest.json"
         self.experimental_result.save_html_report(
             analysis_dir / "report.html",
             title=self.config.name,
-            artifact_manifest=(
-                self.config.artifact_path or self.config.output_dir / "artifact"
-            ) / "manifest.json",
+            artifact_manifest=manifest_path,
+        )
+        # The paper-shaped version of the same analysis: the Hamiltonian
+        # written out, the method in a paragraph, one table. It is what gets
+        # sent to a collaborator, and it is written even with no LaTeX
+        # installed, because the .tex compiles anywhere it lands.
+        self.latex_report = self.experimental_result.save_latex_report(
+            analysis_dir / "report.tex",
+            title=self.config.name,
+            artifact_manifest=manifest_path,
         )
         return self.experimental_result
 

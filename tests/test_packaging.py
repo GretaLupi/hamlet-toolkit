@@ -181,8 +181,32 @@ def test_release_metadata_is_consistent_and_index_installable():
     for values in project["project"]["optional-dependencies"].values():
         requirements.extend(values)
     assert not any(" @ git+" in requirement for requirement in requirements)
-    assert project["project"]["license"] == "MIT"
+    assert project["project"]["license"] == "GPL-3.0-or-later"
+    # PEP 639 supersedes "License ::" classifiers with the SPDX expression
+    # above, and setuptools refuses to build a project that carries both --
+    # a failure that would surface first in the release workflow.
+    assert not [
+        item
+        for item in project["project"]["classifiers"]
+        if item.startswith("License ::")
+    ], "a License classifier alongside the SPDX expression breaks the build"
     assert project["project"]["license-files"] == ["LICENSE"]
+
+
+def test_the_licence_text_matches_what_the_metadata_claims():
+    """A GPL declaration over an MIT file would be worse than either alone."""
+    text = (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
+    assert "GNU GENERAL PUBLIC LICENSE" in text
+    assert "Version 3" in text
+    assert "Permission is hereby granted, free of charge" not in text, (
+        "the LICENSE file is still the MIT text"
+    )
+
+    citation = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert "GPL-3.0-or-later" in citation
+
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "MIT" not in readme
 
 
 def test_source_distribution_manifest_contains_public_release_material():

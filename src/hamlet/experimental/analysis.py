@@ -84,6 +84,25 @@ class ExperimentalChainResult:
         }
         Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
 
+    def save_latex_report(
+        self,
+        path: str | Path,
+        *,
+        title: str = "HamLeT analysis",
+        artifact_manifest: str | Path | dict[str, Any] | None = None,
+        compile_pdf: bool = True,
+    ) -> dict[str, Any]:
+        """Save a LaTeX summary, and a PDF when a compiler is installed."""
+        from .latex_report import save_latex_report
+
+        return save_latex_report(
+            self,
+            path,
+            title=title,
+            artifact_manifest=artifact_manifest,
+            compile_pdf=compile_pdf,
+        )
+
     def save_html_report(
         self,
         path: str | Path,
@@ -219,6 +238,25 @@ class ExperimentalGlobalResult:
             "diagnostics": asdict(self.diagnostics),
         }
         Path(path).write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    def save_latex_report(
+        self,
+        path: str | Path,
+        *,
+        title: str = "HamLeT homogeneous analysis",
+        artifact_manifest: str | Path | dict[str, Any] | None = None,
+        compile_pdf: bool = True,
+    ) -> dict[str, Any]:
+        """Save a LaTeX summary, and a PDF when a compiler is installed."""
+        from .latex_report import save_latex_report
+
+        return save_latex_report(
+            self,
+            path,
+            title=title,
+            artifact_manifest=artifact_manifest,
+            compile_pdf=compile_pdf,
+        )
 
     def save_html_report(
         self,

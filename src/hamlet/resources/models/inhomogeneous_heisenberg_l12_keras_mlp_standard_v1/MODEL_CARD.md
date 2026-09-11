@@ -28,7 +28,7 @@ work was done with:
 
 Source datasets: `dataset_30_40.npz` and `dataset_35_45.npz` from
 [Inhomogeneous-Heisenberg-HL](https://github.com/GretaLupi/Inhomogeneous-Heisenberg-HL),
-MIT licensed. **Please cite the paper above if you use this model.**
+GPL-3.0-or-later, with the package. **Please cite the paper above if you use this model.**
 
 ## What it does
 
