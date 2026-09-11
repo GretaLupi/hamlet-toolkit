@@ -6,6 +6,15 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-09-11
+
+First public release: the spin-chain Hamiltonian-inference workflow end to
+end, from recipe-driven import of one text file per site through cutoff
+selection, the reuse/retrain/regenerate advisor, guided training, inference,
+and reports.
+
 ### Added
 
 - Chains of spin greater than one half. `dataset.generate.site_spin`, or
@@ -57,6 +66,14 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Changed
 
+- Long explanations are folded behind an (i) beside the field they describe.
+  Every hyperparameter now carries one, which is the point -- but shown
+  unconditionally they buried the fields they explain, and someone who already
+  knows what dropout does should not scroll past a paragraph saying so. The
+  same treatment covers the parallel-cores and spin-per-site notes, and the
+  cluster page's key setup, whose requirement stays visible while the commands
+  fold away. A test fails on any block over 340 visible characters that is not
+  behind a toggle.
 - The README states the Python requirement instead of leaving it blank. The
   badge read the supported versions from PyPI, where the package is not
   published, so the one place a reader looks for it showed nothing. It is now
@@ -492,10 +509,3 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
   removed. `hamlet` is the only import and command. No saved joblib or Keras
   artifact embeds the old module path, so the alias carried no compatibility
   value.
-
-## [0.1.0]
-
-First internal release: the bond-inhomogeneous Heisenberg workflow end to end,
-from recipe-driven import of one text file per site through manual cutoff
-selection, the reuse/retrain/regenerate advisor, guided training, and a
-self-contained HTML report.

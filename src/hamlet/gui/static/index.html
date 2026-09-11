@@ -4,8 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HamLeT</title>
-<link rel="icon" type="image/png" href="/hamlet-icon.png">
-<link rel="apple-touch-icon" href="/hamlet-icon.png">
+<!-- One icon, not a media-query pair. When several icon links match, browsers
+     take the last usable one, and `media` on a favicon is honoured by some
+     and ignored by others -- so any ordering that is right in Chrome is wrong
+     in a browser that ignores it, and the tab ends up with white art on a
+     white strip. A single mark is the only arrangement that cannot pick the
+     invisible one. -->
+<link rel="icon" type="image/png" sizes="256x256" href="/hamlet-icon.png">
+<link rel="apple-touch-icon" sizes="256x256" href="/hamlet-icon.png">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -229,12 +235,18 @@
         </label>
         <label>cores to use
           <input type="number" id="f-workers" min="0" step="1" style="width:6em">
+          <button type="button" class="info" data-info="f-workers-hint"
+            aria-expanded="false" aria-controls="f-workers-hint"
+            title="What does this do?">i</button>
         </label>
         <label>spin per site
           <select id="f-site-spin"></select>
+          <button type="button" class="info" data-info="f-spin-hint"
+            aria-expanded="false" aria-controls="f-spin-hint"
+            title="What does this do?">i</button>
         </label>
       </div>
-      <p class="hint" id="f-spin-hint">
+      <p class="hint info-body" id="f-spin-hint" hidden>
         <b>Spin per site</b> is the magnitude every site of the chain carries.
         The cost is the Hilbert space, not the site count: raising an
         eight-site chain from S=1/2 to S=1 takes it from 256 states to 6561, so
@@ -242,7 +254,7 @@
         diagonalisation to DMRG on its own. It changes the physics, so a
         dataset generated at one spin is not interchangeable with another.
       </p>
-      <p class="hint" id="f-workers-hint">
+      <p class="hint info-body" id="f-workers-hint" hidden>
         <b>Cores to use</b> is how many chains are simulated at the same time,
         one per core. Every chain is independent, so this is the setting that
         actually shortens generation &mdash; the long stage, measured at 2.7&times;
@@ -440,15 +452,20 @@
     credential.
   </p>
   <div class="box" id="cluster-key-note">
-    <b>Key-based access is required.</b> Runs are submitted from a background
-    thread with no terminal, so nothing can answer a password prompt. If
-    <code>ssh &lt;address&gt; true</code> asks you for anything, set up a key
-    first:
-    <pre class="log">ssh-keygen -t ed25519        # only if you have no key yet
+    <b>Key-based access is required.</b> <code>ssh &lt;address&gt; true</code>
+    has to succeed without asking you for anything.
+    <button type="button" class="info" data-info="cluster-key-detail"
+      aria-expanded="false" aria-controls="cluster-key-detail"
+      title="How do I set that up?">i</button>
+    <div class="info-body" id="cluster-key-detail" hidden>
+      Runs are submitted from a background thread with no terminal, so nothing
+      can answer a password prompt. To set a key up:
+      <pre class="log">ssh-keygen -t ed25519        # only if you have no key yet
 ssh-copy-id you@cluster.example.edu
 ssh you@cluster.example.edu true</pre>
-    The last line must succeed without asking. If your key has a passphrase,
-    load it into <code>ssh-agent</code>.
+      The last line must succeed without asking. If your key has a passphrase,
+      load it into <code>ssh-agent</code>.
+    </div>
   </div>
 
   <div class="row">

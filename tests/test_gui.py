@@ -461,6 +461,55 @@ def test_every_quote_carries_its_attribution():
         ), source
 
 
+def test_long_explanations_are_behind_an_info_toggle():
+    """Eight paragraphs open at once is a wall, not a form.
+
+    Every hyperparameter now carries an explanation, which is the point --
+    but shown unconditionally they bury the fields they describe, and someone
+    who already knows what dropout does should not scroll past a paragraph
+    saying so.
+    """
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    style = (STATIC_ROOT / "style.css").read_text(encoding="utf-8")
+
+    assert "function infoButton" in script
+    assert 'class="info-body"' in script or "info-body" in script
+    # The rows are rebuilt when the model changes, so the handler has to be
+    # delegated rather than bound per button.
+    assert 'target.closest("[data-info]")' in script
+    assert ".info-body[hidden]" in style
+
+    # The two longest form explanations start collapsed.
+    for target in ("f-workers-hint", "f-spin-hint"):
+        assert f'id="{target}" hidden' in html, f"{target} is shown unconditionally"
+        assert f'data-info="{target}"' in html, f"{target} has no way to open it"
+
+
+def test_no_unconditional_wall_of_text_is_left_in_the_page():
+    """A long block that is not behind a toggle has to earn its place."""
+    import re as _re
+
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    # Measure only what is actually on screen: a container whose detail is
+    # already folded away is not a wall of text, however long its source.
+    visible = _re.sub(
+        r'<div class="info-body"[^>]*hidden[^>]*>.*?</div>', "", html, flags=_re.S
+    )
+    offenders = []
+    for match in _re.finditer(r"<(p|div)\b([^>]*)>(.*?)</\1>", visible, _re.S):
+        attributes, body = match.group(2), match.group(3)
+        if "hidden" in attributes or "info-body" in attributes:
+            continue
+        plain = " ".join(_re.sub(r"<[^>]+>", "", body).split())
+        if len(plain) > 340:
+            offenders.append(plain[:70])
+    assert not offenders, (
+        f"long blocks shown unconditionally: {offenders}. Put the detail "
+        f"behind an (i) and leave the first sentence visible."
+    )
+
+
 def test_every_network_setting_explains_itself():
     """The audience measures spectra; they do not tune networks for a living.
 

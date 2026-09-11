@@ -395,6 +395,23 @@ button.linky:hover { color: var(--accent); text-decoration: underline; }
 .option:last-child { border-bottom: none; }
 .option-label { color: var(--ink); font-size: 13.5px; }
 .option-hint { grid-column: 2; margin: 0; font-size: 12.5px; }
+
+/* The (i) that reveals a long explanation. Small and quiet: it is an offer,
+   not a warning, and every field carries one. */
+.info {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1.25em; height: 1.25em; padding: 0; margin-left: 5px;
+  border: 1px solid var(--line); border-radius: 50%;
+  background: var(--card); color: var(--muted);
+  font: italic 600 11px/1 Georgia, serif; cursor: pointer; vertical-align: middle;
+}
+.info:hover { color: var(--accent); border-color: var(--accent); }
+.info.open { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.info-body {
+  border-left: 2px solid var(--accent-soft); padding: 4px 0 4px 10px;
+  margin-top: 4px; max-width: 70ch;
+}
+.info-body[hidden] { display: none; }
 .layers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .layer {
   display: inline-flex; align-items: center; gap: 2px;

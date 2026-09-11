@@ -1070,6 +1070,28 @@ function renderLayers(name, widths) {
     }));
 }
 
+/** A small (i) that reveals the explanation belonging to `id`. */
+function infoButton(id) {
+  return ` <button type="button" class="info" data-info="${esc(id)}"
+    aria-expanded="false" aria-controls="${esc(id)}"
+    title="What does this do?">i</button>`;
+}
+
+// Delegated and registered once: the hyperparameter rows are rebuilt whenever
+// the model changes, so a listener bound to each button would be discarded
+// with the row that carried it.
+document.addEventListener("click", (event) => {
+  const target = event.target;
+  const button = target instanceof Element ? target.closest("[data-info]") : null;
+  if (!button) return;
+  const body = document.getElementById(button.dataset.info);
+  if (!body) return;
+  const opening = body.hidden;
+  body.hidden = !opening;
+  button.setAttribute("aria-expanded", String(opening));
+  button.classList.toggle("open", opening);
+});
+
 function optionField(option) {
   const common = `data-option="${esc(option.name)}" data-type="${esc(option.type)}"`;
   if (option.type === "layers") {
@@ -1099,11 +1121,19 @@ function renderModelOptions() {
   }
   box.innerHTML = `<div class="box"><p class="hint">Fields initially show the
     library defaults. Clear a field to restore its default value.</p>` +
-    spec.options.map((o) => `<div class="option">
-      <label class="option-label">${esc(o.label)}</label>
+    spec.options.map((o) => {
+      // Explanations sit behind an (i) rather than under every field. Eight
+      // of them open at once turns a form you can scan into a wall of prose,
+      // and the person who already knows what dropout does should not have
+      // to scroll past a paragraph saying so.
+      const id = `info-${spec.name}-${o.name}`;
+      return `<div class="option">
+      <label class="option-label">${esc(o.label)}${o.hint ? infoButton(id) : ""}</label>
       <div class="option-input">${optionField(o)}</div>
-      <div class="hint option-hint">${esc(o.hint || "")}</div>
-    </div>`).join("") + "</div>";
+      ${o.hint ? `<div class="hint option-hint info-body" id="${id}" hidden>${
+        esc(o.hint)}</div>` : ""}
+    </div>`;
+    }).join("") + "</div>";
   spec.options.filter((o) => o.type === "layers").forEach((o) =>
     renderLayers(o.name, o.default || []));
 }
