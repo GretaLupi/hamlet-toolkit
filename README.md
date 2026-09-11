@@ -5,7 +5,7 @@
 # HamLeT
 
 [![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
-[![Python](https://img.shields.io/pypi/pyversions/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
+[![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-087f8c.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-087f8c.svg)](LICENSE)
 
 HamLeT (Hamiltonian Learning Toolkit) is an experimental-facing framework for
@@ -49,6 +49,9 @@ Every number in that figure is produced by this package; regenerate it with
 `python scripts/make_readme_figures.py`.
 
 ## Start with the interface
+
+HamLeT needs **Python 3.10 or newer**. Check what you have with
+`python --version`.
 
 ```bash
 python -m pip install hamlet-toolkit
@@ -126,8 +129,10 @@ training distribution, expected observable, accuracy, and limitations.
 
 The pretrained bond-inhomogeneous model is the model developed for:
 
-> G. Lupi, S. Ravuri, C. Zhao, et al., *Learning Inhomogeneous Heisenberg
-> Hamiltonians in Nanographene Spin Chains* (2026).
+> G. Lupi, S. Ravuri, C. Zhao, W. Zhang, C. Roncaglia, R. Liu, X. Feng,
+> D. Passerone, P. Ruffieux, R. Fasel, J. L. Lado and G. Catarina, *Learning
+> Inhomogeneous Heisenberg Hamiltonians in Nanographene Spin Chains*, (2026),
+> [arXiv:2606.29281](https://arxiv.org/abs/2606.29281).
 
 Please cite that work when using this model. Its
 [model card](src/hamlet/resources/models/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)

@@ -20,6 +20,36 @@ keywords:
 # measurement logic so an equivalent model can be trained.
 references:
   - type: article
+    title: "Learning Inhomogeneous Heisenberg Hamiltonians in Nanographene Spin Chains"
+    authors:
+      - family-names: Lupi
+        given-names: Greta
+      - family-names: Ravuri
+        given-names: Saketh
+      - family-names: Zhao
+        given-names: Chenxiao
+      - family-names: Zhang
+        given-names: Weidan
+      - family-names: Roncaglia
+        given-names: Cesare
+      - family-names: Liu
+        given-names: Renxiang
+      - family-names: Feng
+        given-names: Xinliang
+      - family-names: Passerone
+        given-names: Daniele
+      - family-names: Ruffieux
+        given-names: Pascal
+      - family-names: Fasel
+        given-names: Roman
+      - family-names: Lado
+        given-names: Jose L.
+      - family-names: Catarina
+        given-names: "Gon\xe7alo"
+    year: 2026
+    url: "https://arxiv.org/abs/2606.29281"
+    notes: "Preprint, arXiv:2606.29281. The model trained for this work is the pretrained bond-inhomogeneous artifact shipped with the package."
+  - type: article
     title: "Hamiltonian-learning quantum magnets with nonlocal impurity tomography"
     authors:
       - family-names: Lupi

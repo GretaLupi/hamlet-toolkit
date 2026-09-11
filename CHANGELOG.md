@@ -57,6 +57,20 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Changed
 
+- The README states the Python requirement instead of leaving it blank. The
+  badge read the supported versions from PyPI, where the package is not
+  published, so the one place a reader looks for it showed nothing. It is now
+  a static badge naming 3.10 to 3.13, checked against `requires-python` and
+  the classifiers by a test so the two cannot drift. Python 3.13 is added to
+  the classifiers: it was already inside `requires-python`, and an install
+  there is known to work.
+- The nanographene paper is cited with its preprint identifier,
+  [arXiv:2606.29281](https://arxiv.org/abs/2606.29281), in the README, the
+  model card's BibTeX entry, and `CITATION.cff`. It had been cited by title
+  and year alone, which is not enough to find it.
+- `RELEASING.md` is written for someone who has not published a package
+  before: what PyPI and Trusted Publishing are, every field of the pending
+  publisher, where each button is, and what the common failures look like.
 - Bond shading in the inferred chain spans the couplings actually present
   rather than zero to the largest. Real chains sit in a narrow band -- 32 to
   38 meV is an ordinary result -- and against an absolute scale every bond

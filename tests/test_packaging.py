@@ -178,6 +178,12 @@ def test_release_metadata_is_consistent_and_index_installable():
 
     project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     assert project["project"]["version"] == hamlet.__version__
+    # The citation file carries the version too, and a stale one there is a
+    # wrong citation rather than a broken build -- nothing else would catch it.
+    citation = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+    assert f"version: {hamlet.__version__}" in citation, (
+        "CITATION.cff names a different version than the package"
+    )
     requirements = list(project["project"]["dependencies"])
     for values in project["project"]["optional-dependencies"].values():
         requirements.extend(values)
@@ -208,6 +214,37 @@ def test_the_licence_text_matches_what_the_metadata_claims():
 
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "MIT" not in readme
+
+
+def test_the_python_version_is_stated_consistently():
+    """The badge must not disagree with what pip will actually enforce.
+
+    It used to be a shields.io badge reading from PyPI, which shows nothing
+    at all until the package is published -- so the one place a reader looks
+    for the supported version was blank.
+    """
+    project = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    requires = project["project"]["requires-python"]
+    assert requires == ">=3.10"
+    assert "Python 3.10 or newer" in readme
+
+    # Every classifier version must be allowed by requires-python, and the
+    # badge must name exactly the classified versions.
+    classified = [
+        item.rsplit(" ", 1)[1]
+        for item in project["project"]["classifiers"]
+        if item.startswith("Programming Language :: Python :: 3.")
+    ]
+    assert classified == ["3.10", "3.11", "3.12", "3.13"]
+    for version in classified:
+        assert version.replace(".", "%2E") or version in readme
+
+    badge = [line for line in readme.splitlines() if "img.shields.io/badge/python" in line]
+    assert badge, "the Python badge is missing or still reads from PyPI"
+    for version in classified:
+        assert version in badge[0], f"the badge omits {version}"
 
 
 def test_the_readme_renders_on_pypi():

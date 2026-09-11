@@ -14,6 +14,7 @@ work was done with:
 > Greta Lupi, Saketh Ravuri, Chenxiao Zhao, Weidan Zhang, Cesare Roncaglia,
 > Renxiang Liu, Xinliang Feng, Daniele Passerone, Pascal Ruffieux, Roman Fasel,
 > Jose L. Lado, and Gonçalo Catarina (2026).
+> [arXiv:2606.29281](https://arxiv.org/abs/2606.29281)
 
 ```bibtex
 @article{lupi2026,
@@ -22,7 +23,11 @@ work was done with:
           and Roncaglia, Cesare and Liu, Renxiang and Feng, Xinliang and
           Passerone, Daniele and Ruffieux, Pascal and Fasel, Roman and
           Lado, Jose L. and Catarina, Gon{\c{c}}alo},
-  year={2026}
+  year={2026},
+  eprint={2606.29281},
+  archivePrefix={arXiv},
+  primaryClass={cond-mat.mes-hall},
+  url={https://arxiv.org/abs/2606.29281}
 }
 ```
 
