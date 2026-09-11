@@ -105,6 +105,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(api.describe_compute_options())
             elif route == "/api/cluster-config":
                 self._send_json(api.read_cluster_config())
+            elif route == "/api/cluster-form":
+                self._send_json(api.read_cluster_form())
             elif route == "/api/browse":
                 self._send_json(
                     api.browse_directory(
@@ -199,7 +201,13 @@ class _Handler(BaseHTTPRequestHandler):
             elif route == "/api/cancel-job":
                 self._send_json(self.registry.cancel(payload["job_id"]))
             elif route == "/api/save-cluster-config":
-                self._send_json(api.write_cluster_config(payload["text"]))
+                # The form is the normal path; raw text stays accepted because
+                # a site whose scheduler is not one of the built-in five still
+                # has to be able to write its own block.
+                if "form" in payload:
+                    self._send_json(api.build_cluster_config(payload["form"]))
+                else:
+                    self._send_json(api.write_cluster_config(payload["text"]))
             elif route == "/api/check-cluster":
                 self._send_json(api.check_cluster())
             elif route == "/api/cluster-script":

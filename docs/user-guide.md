@@ -268,6 +268,47 @@ Hamiltonian: import your experiment, choose a physically usable cutoff, let
 the package decide whether to reuse, retrain, or generate a model, then read
 the report. See the [README](../README.md) for install instructions.
 
+## Sending a run to a cluster
+
+Two facts are needed: the address you `ssh` to, and which batch system the
+cluster runs. Both go in the form under *Where it runs*.
+
+**Access must be key-based.** Runs are submitted from a background thread with
+no terminal attached, so nothing can answer a password prompt — HamLeT passes
+`BatchMode=yes` to `ssh`, which makes it fail with a message instead of
+hanging on a question nobody will see. Set a key up once:
+
+```bash
+ssh-keygen -t ed25519          # only if you have no key yet
+ssh-copy-id you@cluster.example.edu
+ssh you@cluster.example.edu true
+```
+
+That last line must succeed without asking you for anything. If your key has a
+passphrase, load it into `ssh-agent` first. **Test the connection** on the page
+distinguishes a refused key from an unreachable host, because the fixes are
+different.
+
+Everything else is optional: cpus, gpus, memory, walltime, queue and account
+are passed to the scheduler if you set them and left to the site default if you
+do not, and the setup lines are whatever your site needs to make
+`python -m hamlet` work — usually a `module load` and a virtualenv.
+
+The batch systems offered are Slurm, PBS/Torque, LSF, Grid Engine, and *no
+scheduler* (which just runs the job in the background on that machine). You do
+not configure how they are spoken to; picking the name is the whole decision.
+If your site runs something else, write a `scheduler:` block by hand in
+`cluster.yaml` — `hamlet where` prints its location — and the form will tell
+you it cannot show it rather than quietly replacing it.
+
+### Windows
+
+This is how a Windows user reaches a GPU. TensorFlow cannot use one on native
+Windows at all, so the interface does not offer **Require a GPU** there;
+*Automatic* already takes a GPU whenever the job lands on a node that has one,
+which is exactly what happens on a cluster. Ask for one with `gpus: 1` in the
+cluster form.
+
 ## Making generation faster
 
 Generation is the stage that costs hours. Every chain is an independent
@@ -360,8 +401,14 @@ The NVIDIA driver still has to come from the system; pip cannot supply it.
 GPU support at version 2.11, and its Windows wheels have been CPU-only since.
 No driver update, CUDA install, or environment variable changes that, and the
 DirectML plugin sometimes suggested instead is pinned to TensorFlow 2.10 and
-Python ≤ 3.10 and cannot work with a current install. The supported route is
-WSL2:
+Python ≤ 3.10 and cannot work with a current install. The interface therefore
+does not offer **Require a GPU** on Windows or macOS — it offers only choices
+it can honour.
+
+The straightforward answer is to
+[send the run to a cluster](#sending-a-run-to-a-cluster), where *Automatic*
+picks up the GPU on the node. If you want one on the machine in front of you,
+the only route is WSL2:
 
 ```powershell
 wsl --install -d Ubuntu

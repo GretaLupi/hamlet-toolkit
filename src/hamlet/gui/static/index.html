@@ -422,20 +422,65 @@
 
   <h3>A cluster</h3>
   <p class="lead">
-    Cluster access uses the local <code>ssh</code> configuration, including keys,
-    agents, and jump hosts. HamLeT does not store SSH credentials.
+    Two things are needed: the address you <code>ssh</code> to, and which batch
+    system it runs. HamLeT uses your own <code>ssh</code> and never stores a
+    credential.
   </p>
-  <div id="scheduler-out"></div>
+  <div class="box" id="cluster-key-note">
+    <b>Key-based access is required.</b> Runs are submitted from a background
+    thread with no terminal, so nothing can answer a password prompt. If
+    <code>ssh &lt;address&gt; true</code> asks you for anything, set up a key
+    first:
+    <pre class="log">ssh-keygen -t ed25519        # only if you have no key yet
+ssh-copy-id you@cluster.example.edu
+ssh you@cluster.example.edu true</pre>
+    The last line must succeed without asking. If your key has a passphrase,
+    load it into <code>ssh-agent</code>.
+  </div>
+
+  <div class="row">
+    <label>address you ssh to
+      <input type="text" id="cl-host" placeholder="you@cluster.example.edu"
+             style="width:22em" autocomplete="off">
+    </label>
+    <label>batch system
+      <select id="cl-scheduler"></select>
+    </label>
+  </div>
+  <div class="row">
+    <label>directory to run in on the cluster
+      <input type="text" id="cl-remote-dir" placeholder="/scratch/work/you/hamlet"
+             style="width:26em" autocomplete="off">
+    </label>
+  </div>
+
   <p class="hint">
-    Select a built-in scheduler profile or define the submission commands in
-    the <code>scheduler:</code> block.
+    What to ask the scheduler for. Leave anything blank to accept your site's
+    default.
   </p>
-  <textarea id="cluster-text" rows="22" spellcheck="false"></textarea>
+  <div class="row">
+    <label>cpus <input type="number" id="cl-cpus" min="0" step="1" style="width:5em"></label>
+    <label>gpus <input type="number" id="cl-gpus" min="0" step="1" style="width:5em"></label>
+    <label>memory <input type="text" id="cl-memory" placeholder="16G" style="width:7em"></label>
+    <label>walltime <input type="text" id="cl-walltime" placeholder="24:00:00" style="width:9em"></label>
+    <label>queue <input type="text" id="cl-queue" placeholder="batch" style="width:8em"></label>
+    <label>account <input type="text" id="cl-account" placeholder="optional" style="width:9em"></label>
+  </div>
+  <p class="hint">
+    Commands to run before the job starts &mdash; whatever your site needs to
+    make <code>python -m hamlet</code> work. One per line.
+  </p>
+  <textarea id="cl-setup" rows="3" spellcheck="false"
+    placeholder="module load python/3.11&#10;source ~/venvs/hamlet/bin/activate"></textarea>
   <div class="row">
     <button id="cluster-save" class="primary">Save settings</button>
     <button id="cluster-check">Test the connection</button>
     <span class="hint" id="cluster-path"></span>
   </div>
+  <p class="hint" id="cluster-custom-note" hidden>
+    The saved file defines its own <code>scheduler:</code> block, which this
+    form cannot show. Saving here will replace it.
+  </p>
   <div id="cluster-out"></div>
 
   <h3>Send a run there</h3>

@@ -14,10 +14,11 @@ import io
 import json
 from pathlib import Path
 import re
+import sys
 import threading
 import time
 import traceback
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 import numpy as np
 
@@ -1288,26 +1289,45 @@ def describe_compute_options() -> dict[str, Any]:
     from ..cluster import RESOURCE_FIELDS, available_profiles
     from ..compute import describe_compute, gpu_unavailable_summary
 
+    import sys
+
     report = describe_compute()
     no_gpu_here = gpu_unavailable_summary(report)
-    return {
-        **report.to_dict(),
-        # `unavailable_here` marks a choice this machine cannot honour without
-        # forbidding it: a configuration built here is often destined for a
-        # cluster that does have a card, and the interface has no business
-        # refusing that. The card says so, and the plan says so again before
-        # anything runs.
-        "devices": [
-            {"name": "auto", "title": "Automatic",
-             "notes": "Use an available GPU; otherwise use the CPU.",
-             "unavailable_here": ""},
-            {"name": "cpu", "title": "Force the CPU",
-             "notes": "Use CPU training, including on systems with an available GPU.",
-             "unavailable_here": ""},
+    devices = [
+        {"name": "auto", "title": "Automatic",
+         "notes": "Use an available GPU; otherwise use the CPU.",
+         "unavailable_here": ""},
+        {"name": "cpu", "title": "Force the CPU",
+         "notes": "Use CPU training, including on systems with an available GPU.",
+         "unavailable_here": ""},
+    ]
+    # "Require a GPU" is offered on Linux only, because Linux is the only
+    # platform where TensorFlow can use one: native Windows has had no GPU
+    # build since 2.11 and macOS has no CUDA path at all. Offering a choice
+    # that cannot ever be honoured -- even labelled -- is an invitation to
+    # spend an afternoon on drivers. It is not needed for cluster work either:
+    # "Automatic" already takes a GPU when the job lands on a node that has
+    # one, which is how a Windows user reaches a card.
+    if sys.platform == "linux":
+        devices.append(
             {"name": "gpu", "title": "Require a GPU",
              "notes": "Use a GPU when available; fall back to the CPU otherwise.",
-             "unavailable_here": no_gpu_here},
-        ],
+             "unavailable_here": no_gpu_here}
+        )
+    return {
+        **report.to_dict(),
+        "devices": devices,
+        "gpu_possible_here": sys.platform == "linux",
+        "gpu_elsewhere_note": (
+            ""
+            if sys.platform == "linux"
+            else (
+                "TensorFlow cannot use a GPU on this platform at all, so the "
+                "choice is not offered. Send the run to a cluster instead: "
+                "Automatic uses a GPU whenever the job lands on a node that "
+                "has one."
+            )
+        ),
         "gpu_help_url": (
             "https://github.com/GretaLupi/hamlet-toolkit/blob/main/"
             "docs/user-guide.md#using-a-gpu"
@@ -1317,6 +1337,128 @@ def describe_compute_options() -> dict[str, Any]:
             "resources": list(RESOURCE_FIELDS),
             "config_path": str(_cluster_config_path()),
             "configured": _cluster_config_path().exists(),
+        },
+    }
+
+
+# What the cluster form asks for, and nothing else. The scheduler profiles
+# behind these names carry a dozen directive templates each, but none of that
+# is a decision a user makes -- picking "slurm" is the decision, and the
+# profile follows from it. Sites that genuinely differ still edit the YAML by
+# hand; that escape hatch is the file, not the form.
+CLUSTER_SCHEDULER_CHOICES: tuple[tuple[str, str], ...] = (
+    ("slurm", "Slurm — sbatch. The usual one in academic HPC."),
+    ("pbs", "PBS / Torque — qsub."),
+    ("lsf", "LSF — bsub."),
+    ("sge", "Grid Engine — qsub."),
+    ("none", "No scheduler — run it in the background on that machine."),
+)
+
+
+def build_cluster_config(form: Mapping[str, Any]) -> dict[str, Any]:
+    """Turn the cluster form into a saved configuration.
+
+    Deliberately few fields. The address to ssh to and the scheduler name are
+    the two facts a user actually has; everything else either has a working
+    default or is a resource request they can leave alone.
+    """
+    host = str(form.get("host", "")).strip()
+    if not host:
+        raise ValueError(
+            "enter the address you ssh to, for example greta@triton.aalto.fi"
+        )
+    if " " in host:
+        raise ValueError(f"that does not look like an ssh address: {host!r}")
+
+    scheduler = str(form.get("scheduler", "slurm")).strip() or "slurm"
+    known = {name for name, _ in CLUSTER_SCHEDULER_CHOICES}
+    if scheduler not in known:
+        raise ValueError(f"scheduler must be one of {sorted(known)}; got {scheduler!r}")
+
+    remote_dir = str(form.get("remote_dir", "")).strip()
+    if not remote_dir:
+        raise ValueError(
+            "enter the directory on the cluster to run in, for example "
+            "/scratch/work/yourname/hamlet"
+        )
+
+    resources: dict[str, Any] = {}
+    for field_name in ("cpus", "gpus"):
+        value = form.get(field_name)
+        if value not in (None, "", 0, "0"):
+            resources[field_name] = int(value)
+    for field_name in ("memory", "walltime", "queue", "account"):
+        value = str(form.get(field_name, "") or "").strip()
+        if value:
+            resources[field_name] = value
+
+    setup = form.get("setup") or ""
+    if isinstance(setup, str):
+        setup = [line.strip() for line in setup.splitlines() if line.strip()]
+    else:
+        setup = [str(line).strip() for line in setup if str(line).strip()]
+
+    payload: dict[str, Any] = {
+        "cluster_schema_version": 1,
+        "host": host,
+        "remote_dir": remote_dir,
+        "scheduler": scheduler,
+    }
+    if resources:
+        payload["resources"] = resources
+    if setup:
+        payload["setup"] = setup
+    python = str(form.get("python", "") or "").strip()
+    if python:
+        payload["python"] = python
+
+    import yaml
+
+    header = (
+        "# Written by the HamLeT interface. Access is over your own ssh, with\n"
+        "# keys only -- HamLeT never types a password and never stores one.\n"
+    )
+    text = header + yaml.safe_dump(payload, sort_keys=False)
+    written = write_cluster_config(text)
+    return {**written, "settings": payload}
+
+
+def read_cluster_form() -> dict[str, Any]:
+    """The saved settings as form fields, plus the choices the form offers."""
+    path = _cluster_config_path()
+    saved: dict[str, Any] = {}
+    if path.exists():
+        import yaml
+
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        if isinstance(loaded, Mapping):
+            saved = dict(loaded)
+    resources = dict(saved.get("resources") or {})
+    setup = saved.get("setup") or []
+    if isinstance(setup, str):
+        setup = [line for line in setup.splitlines() if line.strip()]
+    scheduler = saved.get("scheduler")
+    return {
+        "configured": path.exists(),
+        "config_path": str(path),
+        "schedulers": [
+            {"name": name, "title": title} for name, title in CLUSTER_SCHEDULER_CHOICES
+        ],
+        "form": {
+            "host": str(saved.get("host") or ""),
+            "remote_dir": str(saved.get("remote_dir") or ""),
+            # A hand-written `scheduler:` block cannot be shown in a dropdown,
+            # so it falls back to the default rather than being misreported.
+            "scheduler": scheduler if isinstance(scheduler, str) else "slurm",
+            "custom_scheduler": not isinstance(scheduler, (str, type(None))),
+            "cpus": resources.get("cpus", ""),
+            "gpus": resources.get("gpus", ""),
+            "memory": str(resources.get("memory") or ""),
+            "walltime": str(resources.get("walltime") or ""),
+            "queue": str(resources.get("queue") or ""),
+            "account": str(resources.get("account") or ""),
+            "setup": "\n".join(str(line) for line in setup),
+            "python": str(saved.get("python") or ""),
         },
     }
 
@@ -2467,6 +2609,15 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
     device = str(form.get("device", "auto"))
     if device not in {"auto", "cpu", "gpu"}:
         raise ValueError(f"device must be auto, cpu or gpu; got {device!r}")
+    if device == "gpu" and sys.platform != "linux":
+        # Refused rather than silently downgraded, because the request cannot
+        # be met here and never will be: TensorFlow has no GPU build for this
+        # platform. `auto` is what a run bound for a GPU cluster wants anyway.
+        raise ValueError(
+            "TensorFlow can only use a GPU on Linux, so 'Require a GPU' is not "
+            "available on this platform. Choose Automatic -- it uses a GPU "
+            "whenever one is present, including on a cluster node."
+        )
 
     # Parallel chains. Refused at the form rather than at generation time,
     # which on this stage would mean failing after the first chunk of an

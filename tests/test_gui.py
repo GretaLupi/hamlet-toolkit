@@ -471,6 +471,104 @@ def test_quotes_can_be_turned_off_and_stay_off():
     assert "catch" in quotes
 
 
+# --- the cluster, reduced to the two facts a user has ------------------------
+
+def test_the_cluster_form_needs_only_an_address_and_a_batch_system(tmp_path, monkeypatch):
+    """Everything else has a default or is a resource request.
+
+    The scheduler profiles behind these names carry a dozen directive
+    templates each, but none of that is a decision anyone makes: picking
+    "slurm" is the decision and the profile follows from it.
+    """
+    import yaml
+
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    saved = api.build_cluster_config({
+        "host": "you@cluster.example.edu",
+        "remote_dir": "/scratch/work/you/hamlet",
+        "scheduler": "slurm",
+    })
+    written = yaml.safe_load(Path(saved["path"]).read_text(encoding="utf-8"))
+    assert written["host"] == "you@cluster.example.edu"
+    assert written["scheduler"] == "slurm"
+    # Nothing invented on the user's behalf.
+    assert "resources" not in written
+    assert "setup" not in written
+
+
+def test_the_cluster_form_round_trips_what_it_saved(tmp_path, monkeypatch):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster.example.edu",
+        "remote_dir": "/scratch/work/you/hamlet",
+        "scheduler": "pbs",
+        "cpus": 16,
+        "walltime": "12:00:00",
+        "setup": "module load python/3.11\nsource ~/venvs/hamlet/bin/activate",
+    })
+    form = api.read_cluster_form()["form"]
+    assert form["host"] == "you@cluster.example.edu"
+    assert form["scheduler"] == "pbs"
+    assert form["cpus"] == 16
+    assert form["setup"].splitlines() == [
+        "module load python/3.11",
+        "source ~/venvs/hamlet/bin/activate",
+    ]
+
+
+@pytest.mark.parametrize(
+    "form, message",
+    [
+        ({"remote_dir": "/x", "scheduler": "slurm"}, "ssh to"),
+        ({"host": "you@x", "scheduler": "slurm"}, "directory on the cluster"),
+        ({"host": "you@x", "remote_dir": "/x", "scheduler": "condor"}, "scheduler must be"),
+        ({"host": "a b", "remote_dir": "/x", "scheduler": "slurm"}, "ssh address"),
+    ],
+)
+def test_the_cluster_form_refuses_what_cannot_work(tmp_path, monkeypatch, form, message):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    with pytest.raises(ValueError, match=message):
+        api.build_cluster_config(form)
+
+
+def test_a_hand_written_scheduler_block_is_reported_not_misshown(tmp_path, monkeypatch):
+    """A dropdown cannot represent a custom block, so it says so."""
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.write_cluster_config(
+        "cluster_schema_version: 1\n"
+        "host: you@x\n"
+        "remote_dir: /x\n"
+        "scheduler:\n"
+        "  name: custom\n"
+        "  submit_command: [qsub]\n"
+        "  directive_prefix: '#PBS'\n"
+    )
+    form = api.read_cluster_form()["form"]
+    assert form["custom_scheduler"] is True
+    assert form["scheduler"] == "slurm", "a custom block must not be mislabelled"
+
+
+def test_the_page_no_longer_asks_anyone_to_write_cluster_yaml():
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="cl-host"' in html and 'id="cl-scheduler"' in html
+    # The raw editor and the profile table are gone from the normal path.
+    assert 'id="cluster-text"' not in html
+    assert 'id="scheduler-out"' not in html
+    assert "cluster-text" not in script
+    # And the page states the access requirement up front.
+    assert "ssh-copy-id" in html
+
+
 def test_the_page_says_where_it_writes_things(server):
     """The workspace is not in the same place for everyone.
 

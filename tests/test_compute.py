@@ -152,3 +152,86 @@ def test_the_report_survives_tensorflow_not_being_installed(monkeypatch):
     assert not report.has_gpu
     assert report.cpu_count >= 1
     assert "not importable" in _notes(report)
+
+
+# --- cluster access is key-based, by construction ---------------------------
+
+def test_ssh_never_asks_for_anything():
+    """A prompt on a worker thread has nobody to answer it.
+
+    Every cluster operation runs in the background with no terminal attached,
+    so an ssh that decides to ask for a password or a passphrase would wait
+    forever and the job would look hung. BatchMode turns that into an error
+    that names the fix.
+    """
+    from hamlet.cluster import DEFAULT_SSH_COMMAND, ClusterConfig, get_profile
+
+    assert "BatchMode=yes" in DEFAULT_SSH_COMMAND
+    assert any(item.startswith("ConnectTimeout") for item in DEFAULT_SSH_COMMAND)
+
+    config = ClusterConfig(remote_dir="/x", scheduler=get_profile("slurm"), host="you@x")
+    assert "BatchMode=yes" in config.ssh_command
+
+
+def test_a_refused_key_is_told_apart_from_an_unreachable_host():
+    """They need different fixes, and the generic message sends you to the wrong one."""
+    from hamlet.cluster import _looks_like_an_auth_refusal
+
+    assert _looks_like_an_auth_refusal("you@x: Permission denied (publickey,password).")
+    assert _looks_like_an_auth_refusal(
+        "Host key verification failed."
+    )
+    assert not _looks_like_an_auth_refusal(
+        "ssh: connect to host x port 22: Connection timed out"
+    )
+    assert not _looks_like_an_auth_refusal("bash: sbatch: command not found")
+
+
+def test_the_key_hint_gives_the_commands_to_run():
+    from hamlet.cluster import _connection_hint
+
+    hint = _connection_hint(False, True, "you@cluster.example.edu")
+    assert "ssh-copy-id you@cluster.example.edu" in hint
+    assert "ssh-keygen" in hint
+    assert "ssh-agent" in hint
+
+    unreachable = _connection_hint(False, False, "you@cluster.example.edu")
+    assert "ssh-copy-id" not in unreachable, "wrong fix for an unreachable host"
+
+    assert _connection_hint(True, False, "you@x") is None
+
+
+def test_a_custom_ssh_command_is_still_honoured(tmp_path):
+    """A site with a jump host or a wrapper keeps control of its own ssh."""
+    from hamlet.cluster import ClusterConfig
+
+    config = ClusterConfig.from_mapping({
+        "remote_dir": "/x",
+        "host": "you@x",
+        "scheduler": "slurm",
+        "ssh_command": "ssh -J bastion",
+    })
+    assert config.ssh_command == ("ssh", "-J", "bastion")
+
+
+# --- the GPU choice exists only where it can be honoured ---------------------
+
+def test_a_gpu_is_offered_on_linux_only(monkeypatch):
+    """TensorFlow has no GPU build for Windows and no CUDA on macOS.
+
+    Offering a choice that can never be honoured -- even labelled -- is an
+    invitation to spend an afternoon on drivers.
+    """
+    from hamlet.gui import api
+
+    monkeypatch.setattr(api.sys, "platform", "linux")
+    assert "gpu" in {d["name"] for d in api.describe_compute_options()["devices"]}
+
+    for platform in ("win32", "darwin"):
+        monkeypatch.setattr(api.sys, "platform", platform)
+        options = api.describe_compute_options()
+        names = {d["name"] for d in options["devices"]}
+        assert names == {"auto", "cpu"}, f"{platform} was offered {names}"
+        assert options["gpu_possible_here"] is False
+        # And says where a GPU is actually reachable from here.
+        assert "cluster" in options["gpu_elsewhere_note"]

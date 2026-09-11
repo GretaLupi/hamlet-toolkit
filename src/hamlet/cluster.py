@@ -32,6 +32,10 @@ CLUSTER_CONFIG_SCHEMA_VERSION = 1
 
 # The resource names this package speaks. Each profile maps them onto whatever
 # its scheduler calls them, so a project configuration never has to.
+# Passwordless access is a precondition, so it is spelled into the default
+# command rather than left to whatever the user's ssh config happens to do.
+DEFAULT_SSH_COMMAND = ("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10")
+
 RESOURCE_FIELDS = (
     "job_name",
     "nodes",
@@ -297,6 +301,48 @@ def profile_from_mapping(payload: Mapping[str, Any]) -> SchedulerProfile:
     return profile
 
 
+def _looks_like_an_auth_refusal(detail: str) -> bool:
+    """Whether ssh declined for want of a usable key.
+
+    Worth telling apart from an unreachable host: one is fixed with
+    `ssh-copy-id` and the other with a VPN or a corrected address, and the
+    generic "could not reach it" sends people to check the wrong one. Under
+    BatchMode ssh says so in a small number of recognisable ways.
+    """
+    lowered = detail.lower()
+    return any(
+        phrase in lowered
+        for phrase in (
+            "permission denied",
+            "batch mode",
+            "publickey",
+            "no supported authentication",
+            "host key verification failed",
+        )
+    )
+
+
+def _connection_hint(reachable: bool, needs_key: bool, host: str | None) -> str | None:
+    if reachable:
+        return None
+    target = host or "<host>"
+    if needs_key:
+        return (
+            "ssh reached it but would not log in without a password, and this "
+            "package never types one -- runs start on a background thread with "
+            "no terminal to prompt at. Set up key-based access once:\n"
+            f"    ssh-keygen -t ed25519        # if you have no key yet\n"
+            f"    ssh-copy-id {target}\n"
+            f"    ssh {target} true            # must succeed without asking\n"
+            "If your key has a passphrase, load it into ssh-agent first."
+        )
+    return (
+        "ssh could not reach it. This package uses your own ssh, so check that "
+        f"`ssh {target}` works in a terminal first -- including any jump host, "
+        "VPN, or key your ~/.ssh/config sets up."
+    )
+
+
 @dataclass(frozen=True)
 class ClusterConfig:
     """Where a run should go, and what it should ask for when it gets there.
@@ -312,7 +358,13 @@ class ClusterConfig:
     resources: dict[str, Any] = field(default_factory=dict)
     setup_lines: tuple[str, ...] = ()
     python: str = "python"
-    ssh_command: tuple[str, ...] = ("ssh",)
+    # BatchMode refuses to ask for anything. Every cluster operation here runs
+    # on a worker thread with no terminal attached, so a password or passphrase
+    # prompt has nobody to answer it: ssh would wait for an input that can
+    # never arrive and the job would hang until the interface was killed.
+    # Failing immediately turns that into a message that names the fix.
+    # Key-based access is therefore a requirement, not a preference.
+    ssh_command: tuple[str, ...] = DEFAULT_SSH_COMMAND
     rsync_command: tuple[str, ...] = ("rsync", "-az", "--delete")
     schema_version: int = CLUSTER_CONFIG_SCHEMA_VERSION
 
@@ -372,7 +424,7 @@ class ClusterConfig:
             resources=dict(payload.get("resources") or {}),
             setup_lines=tuple(str(line) for line in setup),
             python=str(payload.get("python", "python")),
-            ssh_command=command("ssh_command", ("ssh",)),
+            ssh_command=command("ssh_command", DEFAULT_SSH_COMMAND),
             rsync_command=command("rsync_command", ("rsync", "-az", "--delete")),
             schema_version=int(
                 payload.get("cluster_schema_version", CLUSTER_CONFIG_SCHEMA_VERSION)
@@ -551,19 +603,16 @@ class ClusterSession:
         )
         reachable = result.ok and "HAMLET_OK" in result.stdout
         scheduler_found = reachable and "NO_SCHEDULER" not in result.stdout
+        detail = (result.stderr or result.stdout).strip()
+        needs_key = not reachable and _looks_like_an_auth_refusal(detail)
         return {
             "host": self.cluster.host or "this machine",
             "reachable": reachable,
             "scheduler": self.cluster.scheduler.name,
             "scheduler_found": scheduler_found,
-            "detail": (result.stderr or result.stdout).strip(),
-            "hint": (
-                None
-                if reachable
-                else "ssh could not reach it. This package uses your own ssh, so "
-                "check that `ssh <host>` works in a terminal first -- including "
-                "any jump host or key your ~/.ssh/config sets up."
-            ),
+            "detail": detail,
+            "needs_key": needs_key,
+            "hint": _connection_hint(reachable, needs_key, self.cluster.host),
         }
 
     def stage(self, local_dir: str | Path) -> CommandResult:
@@ -738,6 +787,12 @@ EXAMPLE_CLUSTER_CONFIG = """\
 # Where HamLeT should send heavy runs. Everything goes through your own ssh, so
 # whatever `ssh <host>` already does -- keys, agent, jump hosts -- keeps working
 # and this package never sees a credential.
+#
+# Key-based access is required, not merely convenient: runs are submitted from
+# a background thread with no terminal, so nothing can answer a password
+# prompt. `ssh <host> true` must succeed without asking. If it does not:
+#     ssh-keygen -t ed25519        # only if you have no key yet
+#     ssh-copy-id user@cluster.example.edu
 cluster_schema_version: 1
 
 # Leave `host` out entirely if you are already on the login node.

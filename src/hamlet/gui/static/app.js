@@ -1701,14 +1701,6 @@ function renderCompute() {
       renderCompute();
     }));
 
-  const schedulers = compute.cluster.schedulers;
-  el("scheduler-out").innerHTML = `<div class="box">
-    <table><tr><th>Scheduler</th><th>Submits with</th><th>Notes</th></tr>
-    ${Object.entries(schedulers).map(([name, p]) => `<tr>
-      <td><code>${esc(name)}</code></td>
-      <td><code>${esc(p.submit_command.join(" "))}</code></td>
-      <td class="hint">${esc(p.notes)}</td></tr>`).join("")}
-    </table></div>`;
 }
 
 api("/api/compute").then((options) => {
@@ -1716,20 +1708,43 @@ api("/api/compute").then((options) => {
   renderCompute();
 }).catch((e) => showError(el("compute-out"), e));
 
-api("/api/cluster-config").then((saved) => {
-  el("cluster-text").value = saved.text;
-  el("cluster-path").textContent = saved.exists
-    ? `saved at ${saved.path}`
-    : `will be saved at ${saved.path}`;
+// --- the cluster form -------------------------------------------------------
+// Two fields carry the whole decision: where to ssh, and which batch system.
+// The scheduler profile behind the name is not something anyone chooses, so it
+// is no longer shown, and the YAML editor that used to be here is now only the
+// escape hatch for a site whose scheduler is not one of the five.
+
+const CLUSTER_FIELDS = {
+  host: "cl-host", remote_dir: "cl-remote-dir", scheduler: "cl-scheduler",
+  cpus: "cl-cpus", gpus: "cl-gpus", memory: "cl-memory",
+  walltime: "cl-walltime", queue: "cl-queue", account: "cl-account",
+  setup: "cl-setup",
+};
+
+function readClusterForm() {
+  const form = {};
+  for (const [name, id] of Object.entries(CLUSTER_FIELDS)) form[name] = el(id).value;
+  return form;
+}
+
+api("/api/cluster-form").then((saved) => {
+  el("cl-scheduler").innerHTML = saved.schedulers.map((s) =>
+    `<option value="${esc(s.name)}">${esc(s.title)}</option>`).join("");
+  for (const [name, id] of Object.entries(CLUSTER_FIELDS)) {
+    const value = saved.form[name];
+    if (value !== undefined && value !== null) el(id).value = value;
+  }
+  el("cluster-custom-note").hidden = !saved.form.custom_scheduler;
+  el("cluster-path").textContent = saved.configured
+    ? `saved at ${saved.config_path}`
+    : `will be saved at ${saved.config_path}`;
 }).catch((e) => showError(el("cluster-out"), e));
 
 el("cluster-save").addEventListener("click", async () => {
   const out = el("cluster-out");
   busy(out, "Checking the settings…");
   try {
-    const saved = await api("/api/save-cluster-config", {
-      text: el("cluster-text").value,
-    });
+    const saved = await api("/api/save-cluster-config", { form: readClusterForm() });
     out.innerHTML = `<div class="box">
       <div class="verdict good">Saved</div>
       <table>
@@ -1761,10 +1776,15 @@ el("cluster-check").addEventListener("click", async () => {
           d.scheduler_found ? "found" : "<b>not on the PATH there</b>"}</td></tr>
       </table>
       ${d.detail ? `<pre class="log">${esc(d.detail)}</pre>` : ""}
-      ${d.hint ? `<p class="hint">${esc(d.hint)}</p>` : ""}
+      ${d.hint ? (d.needs_key
+        // The key setup is three commands to copy, so it is shown as commands
+        // rather than folded into a paragraph that eats the line breaks.
+        ? `<p><b>This needs a key, not a password.</b></p>
+           <pre class="log">${esc(d.hint)}</pre>`
+        : `<p class="hint">${esc(d.hint)}</p>`) : ""}
       ${d.reachable && !d.scheduler_found ? `<p class="hint">If the scheduler
-        requires a module, add the module command under <code>setup:</code> or
-        select the appropriate scheduler profile.</p>` : ""}
+        needs a module loaded first, add that command to the setup lines
+        above, or pick the batch system your site actually runs.</p>` : ""}
     </div>`;
   } catch (e) { showError(out, e); }
 });

@@ -6,6 +6,34 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+### Changed
+
+- **Require a GPU** is offered on Linux only. It is the only platform where
+  TensorFlow can use one -- native Windows has had no GPU build since 2.11 and
+  macOS has no CUDA path -- and offering a choice that can never be honoured,
+  even labelled as such, is an invitation to spend an afternoon on drivers.
+  The form refuses `device: gpu` there rather than downgrading it silently,
+  and points at the cluster instead: *Automatic* already takes a GPU whenever
+  the job lands on a node that has one, which is how a Windows user reaches
+  a card.
+- Cluster access requires a key. `ssh` is invoked with `BatchMode=yes` and a
+  connect timeout, so it fails with a message rather than waiting on a
+  password prompt that nobody can answer -- every cluster operation runs on a
+  background thread with no terminal attached, where a prompt is an
+  indefinite hang that looks like a broken job. **Test the connection** now
+  tells a refused key apart from an unreachable host, because the fixes are
+  different, and prints the three `ssh-keygen`/`ssh-copy-id` commands that
+  resolve the first.
+- The cluster is configured by a form rather than by writing YAML. It asks for
+  the address you ssh to and which batch system the site runs; the rest --
+  cpus, gpus, memory, walltime, queue, account, setup lines -- is optional and
+  left to the site default when blank. The table of scheduler profiles and the
+  raw editor are gone from the page: which directives Slurm takes was never a
+  decision anyone made, and picking the name is the whole of it. A site whose
+  scheduler is none of the five still writes a `scheduler:` block in
+  `cluster.yaml` by hand, and the form reports that it cannot show one instead
+  of quietly replacing it. `GET /api/cluster-form` backs it.
+
 ### Added
 
 - Dataset generation runs several chains at once: `dataset.generate.workers`
