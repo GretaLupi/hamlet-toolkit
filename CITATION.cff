@@ -15,3 +15,39 @@ keywords:
   - spin chains
   - scanning tunneling spectroscopy
   - machine learning
+# The physics this package implements. The models trained for these papers are
+# not distributed here; the package provides the same Hamiltonian families and
+# measurement logic so an equivalent model can be trained.
+references:
+  - type: article
+    title: "Hamiltonian-learning quantum magnets with nonlocal impurity tomography"
+    authors:
+      - family-names: Lupi
+        given-names: Greta
+      - family-names: Lado
+        given-names: Jose L.
+    journal: "Physical Review Applied"
+    volume: 23
+    number: 5
+    start: 54077
+    year: 2025
+    doi: "10.1103/PhysRevApplied.23.054077"
+  - type: article
+    title: "Hamiltonian learning quantum magnets with dynamical impurity tomography"
+    authors:
+      - family-names: Karjalainen
+        given-names: Netta
+      - family-names: Lupi
+        given-names: Greta
+      - family-names: Koch
+        given-names: Rouven
+      - family-names: Fumega
+        given-names: Adolfo O.
+      - family-names: Lado
+        given-names: Jose L.
+    journal: "Physical Review Research"
+    volume: 8
+    number: 3
+    start: 33281
+    year: 2026
+    doi: "10.1103/cw27-2qqd"

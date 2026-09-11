@@ -230,7 +230,18 @@
         <label>cores to use
           <input type="number" id="f-workers" min="0" step="1" style="width:6em">
         </label>
+        <label>spin per site
+          <select id="f-site-spin"></select>
+        </label>
       </div>
+      <p class="hint" id="f-spin-hint">
+        <b>Spin per site</b> is the magnitude every site of the chain carries.
+        The cost is the Hilbert space, not the site count: raising an
+        eight-site chain from S=1/2 to S=1 takes it from 256 states to 6561, so
+        generation slows sharply and the simulator switches from exact
+        diagonalisation to DMRG on its own. It changes the physics, so a
+        dataset generated at one spin is not interchangeable with another.
+      </p>
       <p class="hint" id="f-workers-hint">
         <b>Cores to use</b> is how many chains are simulated at the same time,
         one per core. Every chain is independent, so this is the setting that

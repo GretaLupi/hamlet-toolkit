@@ -32,11 +32,13 @@ __pycache__/
 /AUGMENTATION_CALIBRATION_FINDINGS.txt
 /MODELS_TO_PRETRAIN.txt
 
-# Internal research/pilot scripts and validation-gate runners. The two scripts
-# cited by shipped model cards are part of the public reproducibility record.
+# Internal research/pilot scripts and validation-gate runners. The scripts
+# below are part of the public record: two are cited by shipped model cards,
+# and the third regenerates the figure the README displays.
 /scripts/*
 !/scripts/benchmark_homogeneous.py
 !/scripts/publish_homogeneous_artifact.py
+!/scripts/make_readme_figures.py
 /validation/
 
 # Stray local DMRGPy/MPS solver scratch output.

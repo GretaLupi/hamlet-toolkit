@@ -26,11 +26,17 @@ release uses the trusted publisher configured above.
    ```bash
    pytest
    ruff check src tests
+   rm -rf dist
    python -m build
    python -m twine check dist/*
    ```
 
-4. Commit and push the release changes. Wait for CI to pass on `main`.
+   `twine check` is what catches a README that PyPI will not render. Note
+   that PyPI resolves relative links against `pypi.org`, so images and
+   documentation links in `README.md` must stay absolute URLs.
+
+4. Commit and push the release changes to `main`. There is no CI
+   workflow, so step 3 is the gate: it has to pass locally.
 5. Create a GitHub release tagged `vX.Y.Z`. Publishing the GitHub release
    triggers `.github/workflows/release.yml`.
 6. Approve the protected `pypi` environment, then verify the PyPI page and a

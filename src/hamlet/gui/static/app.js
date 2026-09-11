@@ -675,7 +675,17 @@ function bondChainChart(rows) {
   const y = 126;
   const w = Math.max(760, edge * 2 + Math.max(1, sites.length - 1) * gap);
   const h = 230;
-  const maxMagnitude = Math.max(...rows.map((row) => Math.abs(row.value)), 1e-9);
+  const magnitudes = rows.map((row) => Math.abs(row.value));
+  const maxMagnitude = Math.max(...magnitudes, 1e-9);
+  // Shading spans the couplings that are actually present, not zero to the
+  // largest. A chain of 32-38 meV bonds occupies the top sixth of an
+  // absolute scale, so every bond came out within a tenth of full ink and the
+  // picture said "all the same" about a set that varies by 18%. Contrast is
+  // what the eye reads a chain with, so it is spent on the range that exists
+  // -- and the key prints the two end values, because full contrast over a
+  // narrow range would otherwise make a 0.1 meV spread look dramatic.
+  const minMagnitude = Math.min(...magnitudes);
+  const magnitudeSpan = maxMagnitude - minMagnitude;
   const bonds = rows.map((row) => {
     const leftPosition = sitePosition.get(row.left);
     const rightPosition = sitePosition.get(row.right);
@@ -685,20 +695,24 @@ function bondChainChart(rows) {
     const mid = (x1 + x2) / 2;
     const width = 5 + 5 * Math.abs(row.value) / maxMagnitude;
     const colourClass = row.value < 0 ? "negative" : "positive";
-    // Strength is shown twice: by thickness, and by how strongly the bond is
-    // inked. The second is what makes a chain readable at a glance -- the
-    // weak bonds recede and the strong ones carry the eye -- and stroke
-    // opacity is the one way to do it that survives both themes, since the
-    // hue still has to come from CSS to mean "antiferromagnetic" or
-    // "ferromagnetic". The floor keeps the weakest bond legible rather than
-    // letting it fade into an apparently broken chain.
-    const strength = Math.abs(row.value) / maxMagnitude;
-    const ink = (0.34 + 0.66 * strength).toFixed(2);
+    // Two encodings, deliberately different. Thickness is absolute -- it
+    // stays proportional to |J| against the largest bond, so a chain whose
+    // couplings really are equal looks equal. Ink is relative, stretched
+    // across the observed range, which is what makes a 5 meV difference
+    // among 35 meV bonds visible at all. Stroke opacity rather than a
+    // computed colour, because the hue still has to come from CSS to mean
+    // the sign of J, and that is where the light and dark palettes live.
+    const strength = magnitudeSpan > 1e-9
+      ? (Math.abs(row.value) - minMagnitude) / magnitudeSpan
+      : 1;
+    const ink = (0.3 + 0.7 * strength).toFixed(2);
     const uncertainty = Number.isFinite(row.uncertainty) && row.uncertainty > 0
       ? `± ${row.uncertainty.toFixed(2)}` : "";
     return `<g class="chain-bond ${colourClass}">
-      <title>sites ${esc(row.label)}: ${row.value.toFixed(3)} meV${uncertainty ? ` ${uncertainty} meV` : ""} — ${
-        (100 * strength).toFixed(0)}% of the strongest bond</title>
+      <title>sites ${esc(row.label)}: ${row.value.toFixed(3)} meV${uncertainty ? ` ${uncertainty} meV` : ""}${
+        magnitudeSpan > 1e-9
+          ? ` — ${(100 * Math.abs(row.value) / maxMagnitude).toFixed(0)}% of the strongest bond`
+          : ""}</title>
       <line x1="${x1 + 23}" x2="${x2 - 23}" y1="${y}" y2="${y}"
         style="stroke-width:${width.toFixed(1)};stroke-opacity:${ink}"/>
       <rect class="bond-value-bg" x="${mid - 43}" y="35" width="86" height="52" rx="8"/>
@@ -722,12 +736,14 @@ function bondChainChart(rows) {
         <line x1="0" x2="32" y1="0" y2="0" class="positive"/><text x="42" y="4">positive J</text>
         <line x1="132" x2="164" y1="0" y2="0" class="negative"/><text x="174" y="4">negative J</text>
         <line x1="272" x2="292" y1="0" y2="0" class="positive"
-          style="stroke-width:5;stroke-opacity:.34"/>
+          style="stroke-width:7;stroke-opacity:.3"/>
         <line x1="296" x2="316" y1="0" y2="0" class="positive"
-          style="stroke-width:8;stroke-opacity:.67"/>
+          style="stroke-width:7;stroke-opacity:.65"/>
         <line x1="320" x2="340" y1="0" y2="0" class="positive"
-          style="stroke-width:10;stroke-opacity:1"/>
-        <text x="350" y="4">weaker to stronger |J|</text>
+          style="stroke-width:7;stroke-opacity:1"/>
+        <text x="350" y="4">${magnitudeSpan > 1e-9
+          ? `shading spans ${minMagnitude.toFixed(2)} to ${maxMagnitude.toFixed(2)} meV`
+          : "all bonds equal"}</text>
       </g>
     </svg></div>
     <p class="chart-explanation">Circles mark measured sites. Labels give the inferred coupling and model spread; line thickness scales with |J|.</p>
@@ -1155,6 +1171,11 @@ function selectSystem(systemType) {
   // the machine is not a good surprise on a shared login node. The hint says
   // how to ask for all of them.
   el("f-workers").value = 1;
+  if (!el("f-site-spin").options.length) {
+    el("f-site-spin").innerHTML = (builder.chain_spins || ["S=1/2"]).map((s) =>
+      `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+  }
+  el("f-site-spin").value = "S=1/2";
   el("f-bias-lo").value = d.bias_range_mev[0];
   el("f-bias-hi").value = d.bias_range_mev[1];
   el("f-bias-points").value = d.bias_points;
@@ -1192,6 +1213,7 @@ function readForm() {
     system_type: chosenSystem,
     n_sites: Number(el("f-n-sites").value),
     n_samples: Number(el("f-n-samples").value),
+    site_spin: el("f-site-spin").value || "S=1/2",
     // An empty field means the default, not zero -- zero is the explicit
     // "one per core" request and is too big a difference to arrive by
     // clearing a box.

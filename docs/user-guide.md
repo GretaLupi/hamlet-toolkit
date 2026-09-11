@@ -383,6 +383,36 @@ the granularity at which a run can be stopped: **Stop** finishes the chunks
 already running and discards the ones not yet started, keeping every chunk
 already written.
 
+### Chains of spin greater than one half
+
+Every site carries spin 1/2 unless you say otherwise, in the form under
+**spin per site** or as `dataset.generate.site_spin`:
+
+```yaml
+dataset:
+  generate:
+    site_spin: "S=1"      # S=1/2, S=1, S=3/2, S=2, S=5/2
+```
+
+The cost is the Hilbert space rather than the site count. Eight spin-1/2 sites
+is 2<sup>8</sup> = 256 states; eight spin-1 sites is 3<sup>8</sup> = 6561, past
+the point where exact diagonalisation is the cheap option, so the simulator
+switches to DMRG on its own. Generation slows accordingly — this is the setting
+most likely to turn a lunchtime run into an overnight one.
+
+It is part of the physics, so it is part of the recipe: a dataset generated at
+S=1/2 will not be reused for a request at S=1, and a model trained at one spin
+does not apply at another.
+
+**Impurities must differ from the chain.** A substituted site carrying the
+chain's own spin is not a substitution, so it is refused — at the form, and
+again when the family is built, rather than partway through generation. The
+likelier mistake this catches is raising the chain's spin and forgetting that
+the impurities were S=1. Note that spin magnitude alone does not expose `D_z`:
+the transverse anisotropy does, as
+[the DMI specification](dmi-experiment-spec.md) sets out. Two impurities at
+distinct sites are still required.
+
 ### Why generation cannot use a GPU
 
 It is DMRG and exact diagonalisation, and neither has a CUDA path in the

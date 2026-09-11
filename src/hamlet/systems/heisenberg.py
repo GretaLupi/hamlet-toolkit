@@ -7,8 +7,34 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 
+def validate_site_spin(label: str) -> str:
+    """Check a spin label, and say what is on offer when it is wrong."""
+    if label not in _SPIN_MAGNITUDES:
+        raise ValueError(
+            f"site_spin must be one of {sorted(_SPIN_MAGNITUDES)}; got {label!r}"
+        )
+    return label
+
+
+class _UniformSpinChain:
+    """Per-site spins for a chain whose sites all carry the same magnitude.
+
+    A mixin rather than a repeated property: the simulator asks every system
+    for ``site_spins`` and falls back to spin-1/2 when the attribute is
+    missing, so a chain class that forgot to define it would silently simulate
+    the wrong Hilbert space rather than fail.
+    """
+
+    site_spin: str
+    n_sites: int
+
+    @property
+    def site_spins(self) -> tuple[str, ...]:
+        return (self.site_spin,) * self.n_sites
+
+
 @dataclass(frozen=True)
-class InhomogeneousHeisenbergChain:
+class InhomogeneousHeisenbergChain(_UniformSpinChain):
     """Open spin-1/2 chain with one isotropic exchange per bond.
 
     The represented Hamiltonian is
@@ -17,8 +43,10 @@ class InhomogeneousHeisenbergChain:
     """
 
     couplings_mev: ArrayLike
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         couplings = np.asarray(self.couplings_mev, dtype=float)
         if couplings.ndim != 1 or couplings.size < 1:
             raise ValueError("couplings_mev must be a non-empty one-dimensional array")
@@ -40,6 +68,7 @@ class InhomogeneousHeisenbergChain:
         n_sites: int,
         coupling_range_mev: tuple[float, float],
         rng: np.random.Generator | None = None,
+        site_spin: str = "S=1/2",
     ) -> "InhomogeneousHeisenbergChain":
         if n_sites < 2:
             raise ValueError("n_sites must be at least 2")
@@ -47,7 +76,7 @@ class InhomogeneousHeisenbergChain:
         if not low < high:
             raise ValueError("coupling_range_mev must satisfy low < high")
         generator = rng if rng is not None else np.random.default_rng()
-        return cls(generator.uniform(low, high, n_sites - 1))
+        return cls(generator.uniform(low, high, n_sites - 1), site_spin=site_spin)
 
     def as_array(self) -> NDArray[np.float64]:
         return np.asarray(self.couplings_mev, dtype=np.float64).copy()
@@ -58,7 +87,7 @@ class InhomogeneousHeisenbergChain:
 
 
 @dataclass(frozen=True)
-class HomogeneousHeisenbergChain:
+class HomogeneousHeisenbergChain(_UniformSpinChain):
     """Open J1-J2-... chain with each coupling shared at a distance.
 
     ``couplings_by_distance_mev[r - 1]`` is used for every pair separated by
@@ -68,8 +97,10 @@ class HomogeneousHeisenbergChain:
 
     n_sites: int
     couplings_by_distance_mev: ArrayLike
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         couplings = np.asarray(self.couplings_by_distance_mev, dtype=float)
         if self.n_sites < 2:
             raise ValueError("n_sites must be at least 2")
@@ -100,8 +131,10 @@ class InhomogeneousHeisenbergFamily:
     system_type: ClassVar[str] = "inhomogeneous_heisenberg"
     n_sites: int
     coupling_range_mev: tuple[float, float]
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         low, high = self.coupling_range_mev
         if self.n_sites < 3:
             raise ValueError("local inhomogeneous learning requires at least 3 sites")
@@ -114,7 +147,7 @@ class InhomogeneousHeisenbergFamily:
 
     def sample(self, rng: np.random.Generator) -> InhomogeneousHeisenbergChain:
         return InhomogeneousHeisenbergChain.sample(
-            self.n_sites, self.coupling_range_mev, rng
+            self.n_sites, self.coupling_range_mev, rng, site_spin=self.site_spin
         )
 
 
@@ -125,8 +158,10 @@ class HomogeneousHeisenbergFamily:
     system_type: ClassVar[str] = "homogeneous_heisenberg"
     n_sites: int
     coupling_ranges_mev: tuple[tuple[float, float], ...]
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         if self.n_sites < 2:
             raise ValueError("n_sites must be at least 2")
         if not self.coupling_ranges_mev:
@@ -142,11 +177,13 @@ class HomogeneousHeisenbergFamily:
 
     def sample(self, rng: np.random.Generator) -> HomogeneousHeisenbergChain:
         couplings = [rng.uniform(low, high) for low, high in self.coupling_ranges_mev]
-        return HomogeneousHeisenbergChain(self.n_sites, couplings)
+        return HomogeneousHeisenbergChain(
+            self.n_sites, couplings, site_spin=self.site_spin
+        )
 
 
 @dataclass(frozen=True)
-class HomogeneousXXZLongRangeChain:
+class HomogeneousXXZLongRangeChain(_UniformSpinChain):
     """Open homogeneous XXZ nearest-neighbour chain with isotropic J2 and J3.
 
     The parameter order is ``(J1_xy, J2, J3, Jz)`` and the Hamiltonian is
@@ -156,8 +193,10 @@ class HomogeneousXXZLongRangeChain:
 
     n_sites: int
     parameters_mev: ArrayLike
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         values = np.asarray(self.parameters_mev, dtype=float)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
@@ -180,8 +219,10 @@ class HomogeneousXXZLongRangeFamily:
     system_type: ClassVar[str] = "homogeneous_xxz_j1j2j3"
     n_sites: int
     parameter_ranges_mev: tuple[tuple[float, float], ...]
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
         if len(self.parameter_ranges_mev) != 4:
@@ -195,11 +236,13 @@ class HomogeneousXXZLongRangeFamily:
 
     def sample(self, rng: np.random.Generator) -> HomogeneousXXZLongRangeChain:
         values = [rng.uniform(low, high) for low, high in self.parameter_ranges_mev]
-        return HomogeneousXXZLongRangeChain(self.n_sites, values)
+        return HomogeneousXXZLongRangeChain(
+            self.n_sites, values, site_spin=self.site_spin
+        )
 
 
 @dataclass(frozen=True)
-class HomogeneousXXZDMILongRangeChain:
+class HomogeneousXXZDMILongRangeChain(_UniformSpinChain):
     """XXZ+J2+J3 chain with uniform nearest-neighbour z-axis DMI.
 
     Parameters are ``(J1_xy, J2, J3, Jz, D_z)``. ``D_z`` is represented as a
@@ -209,8 +252,10 @@ class HomogeneousXXZDMILongRangeChain:
 
     n_sites: int
     parameters_mev: ArrayLike
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         values = np.asarray(self.parameters_mev, dtype=float)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
@@ -237,8 +282,10 @@ class HomogeneousXXZDMILongRangeFamily:
     system_type: ClassVar[str] = "homogeneous_xxz_j1j2j3_dmi"
     n_sites: int
     parameter_ranges_mev: tuple[tuple[float, float], ...]
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
         if len(self.parameter_ranges_mev) != 5:
@@ -254,11 +301,13 @@ class HomogeneousXXZDMILongRangeFamily:
 
     def sample(self, rng: np.random.Generator) -> HomogeneousXXZDMILongRangeChain:
         values = [rng.uniform(low, high) for low, high in self.parameter_ranges_mev]
-        return HomogeneousXXZDMILongRangeChain(self.n_sites, values)
+        return HomogeneousXXZDMILongRangeChain(
+            self.n_sites, values, site_spin=self.site_spin
+        )
 
 
 @dataclass(frozen=True)
-class HomogeneousXXZDMIFieldChain:
+class HomogeneousXXZDMIFieldChain(_UniformSpinChain):
     """XXZ+J2+J3 chain with uniform z-axis DMI in a transverse field.
 
     Parameters are ``(J1_xy, J2, J3, Jz, D_z)`` as in
@@ -286,8 +335,10 @@ class HomogeneousXXZDMIFieldChain:
     n_sites: int
     parameters_mev: ArrayLike
     transverse_field_mev: float = 0.0
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         values = np.asarray(self.parameters_mev, dtype=float)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
@@ -337,8 +388,10 @@ class HomogeneousXXZDMIFieldFamily:
     n_sites: int
     parameter_ranges_mev: tuple[tuple[float, float], ...]
     transverse_field_mev: float = 0.0
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
         if len(self.parameter_ranges_mev) != 5:
@@ -357,7 +410,10 @@ class HomogeneousXXZDMIFieldFamily:
     def sample(self, rng: np.random.Generator) -> HomogeneousXXZDMIFieldChain:
         values = [rng.uniform(low, high) for low, high in self.parameter_ranges_mev]
         return HomogeneousXXZDMIFieldChain(
-            self.n_sites, values, transverse_field_mev=self.transverse_field_mev
+            self.n_sites,
+            values,
+            transverse_field_mev=self.transverse_field_mev,
+            site_spin=self.site_spin,
         )
 
 
@@ -483,8 +539,10 @@ class HomogeneousXXZDMIImpurityChain:
     parameters_mev: ArrayLike
     impurities: tuple[SiteImpurity, ...] = ()
     transverse_field_mev: float = 0.0
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         values = np.asarray(self.parameters_mev, dtype=float)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
@@ -506,6 +564,23 @@ class HomogeneousXXZDMIImpurityChain:
             raise ValueError("every impurity site must index a site of the chain")
         if len(set(sites)) != len(sites):
             raise ValueError("impurity sites must be distinct")
+        # An impurity carrying the chain's own spin is not a substitution.
+        # The spin magnitude is not what exposes D_z -- the transverse
+        # anisotropy is, as the class docstring sets out -- but a site
+        # matching the chain in spin is a chain site with a defect rather than
+        # the substituted species this model is trained on. Refusing it keeps
+        # "impurity" meaning one thing, and catches the likelier mistake of
+        # raising the chain's spin and forgetting the impurity.
+        same_spin = sorted(
+            impurity.site for impurity in impurities if impurity.spin == self.site_spin
+        )
+        if same_spin:
+            raise ValueError(
+                f"impurities at site(s) {same_spin} carry the chain's own spin "
+                f"{self.site_spin!r}; a substituted site has to differ from the "
+                f"chain it sits in. Give the impurity another spin, or the "
+                f"chain another spin."
+            )
         object.__setattr__(self, "parameters_mev", values.copy())
         object.__setattr__(self, "impurities", impurities)
         object.__setattr__(
@@ -519,8 +594,8 @@ class HomogeneousXXZDMIImpurityChain:
 
     @property
     def site_spins(self) -> tuple[str, ...]:
-        """Per-site spin magnitudes, spin-1/2 except at substituted sites."""
-        spins = ["S=1/2"] * self.n_sites
+        """Per-site spin magnitudes: the chain's, except at substituted sites."""
+        spins = [self.site_spin] * self.n_sites
         for impurity in self.impurities:
             spins[impurity.site] = impurity.spin
         return tuple(spins)
@@ -568,8 +643,10 @@ class HomogeneousXXZDMIImpurityFamily:
     parameter_ranges_mev: tuple[tuple[float, float], ...]
     impurities: tuple[SiteImpurity, ...] = ()
     transverse_field_mev: float = 0.0
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        validate_site_spin(self.site_spin)
         if self.n_sites < 4:
             raise ValueError("J3 interactions require at least 4 sites")
         if len(self.parameter_ranges_mev) != 5:
@@ -585,6 +662,7 @@ class HomogeneousXXZDMIImpurityFamily:
             [low for low, _ in self.parameter_ranges_mev],
             impurities=tuple(self.impurities),
             transverse_field_mev=self.transverse_field_mev,
+            site_spin=self.site_spin,
         )
 
     @property
@@ -598,4 +676,5 @@ class HomogeneousXXZDMIImpurityFamily:
             values,
             impurities=tuple(self.impurities),
             transverse_field_mev=self.transverse_field_mev,
+            site_spin=self.site_spin,
         )

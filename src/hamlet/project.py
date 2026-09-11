@@ -69,6 +69,10 @@ class DatasetGenerationConfig:
     kpm_max_bond_dimension: int = 20
     seed: int = 42
     checkpoint_every: int = 25
+    # The spin magnitude every site of the chain carries. This *is* part of
+    # the physics -- it changes the Hilbert space and every spectrum in the
+    # dataset -- so unlike `workers` it stays in the recipe fingerprint.
+    site_spin: str = "S=1/2"
     # How many chains to simulate at once. Generation is the long stage and
     # every chain is independent, so this is the one setting that actually
     # shortens it; `0` means "one per core". It is an execution detail and not
@@ -95,6 +99,9 @@ class DatasetGenerationConfig:
             raise ValueError("bias_points must be at least 2 and checkpoint_every positive")
         if self.workers < 0:
             raise ValueError("workers must not be negative; 0 means one per core")
+        from .systems.heisenberg import validate_site_spin
+
+        validate_site_spin(self.site_spin)
         if (
             len(self.bias_range_mev) != 2
             or not self.bias_range_mev[0] < self.bias_range_mev[1]
@@ -177,6 +184,7 @@ class DatasetGenerationConfig:
                 self.coupling_ranges_mev,
                 impurities=self.impurities,
                 transverse_field_mev=self.transverse_field_mev,
+                site_spin=self.site_spin,
             )
 
     def to_recipe(self) -> dict[str, Any]:
@@ -578,19 +586,19 @@ class HamiltonianLearningProject:
         if recipe.system_type == "inhomogeneous_heisenberg":
             assert recipe.coupling_range_mev is not None
             family = InhomogeneousHeisenbergFamily(
-                recipe.n_sites, recipe.coupling_range_mev
+                recipe.n_sites, recipe.coupling_range_mev, site_spin=recipe.site_spin
             )
         elif recipe.system_type == "homogeneous_heisenberg":
             family = HomogeneousHeisenbergFamily(
-                recipe.n_sites, recipe.coupling_ranges_mev
+                recipe.n_sites, recipe.coupling_ranges_mev, site_spin=recipe.site_spin
             )
         elif recipe.system_type == "homogeneous_xxz_j1j2j3":
             family = HomogeneousXXZLongRangeFamily(
-                recipe.n_sites, recipe.coupling_ranges_mev
+                recipe.n_sites, recipe.coupling_ranges_mev, site_spin=recipe.site_spin
             )
         elif recipe.system_type == "homogeneous_xxz_j1j2j3_dmi":
             family = HomogeneousXXZDMILongRangeFamily(
-                recipe.n_sites, recipe.coupling_ranges_mev
+                recipe.n_sites, recipe.coupling_ranges_mev, site_spin=recipe.site_spin
             )
         else:
             family = HomogeneousXXZDMIImpurityFamily(
@@ -598,6 +606,7 @@ class HamiltonianLearningProject:
                 recipe.coupling_ranges_mev,
                 impurities=recipe.impurities,
                 transverse_field_mev=recipe.transverse_field_mev,
+                site_spin=recipe.site_spin,
             )
         protocol = SpectroscopyProtocol.uniform(
             bias_range_mev=recipe.bias_range_mev,
@@ -689,6 +698,7 @@ class HamiltonianLearningProject:
                 "seed": recipe.seed,
                 "output_path": recipe.output_path,
                 "workers": workers,
+                "site_spin": recipe.site_spin,
             }
             if recipe.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity":
                 dataset_detail["impurities"] = [
@@ -1421,6 +1431,7 @@ def _parse_generation_config(
         seed=int(values.get("seed", 42)),
         checkpoint_every=int(values.get("checkpoint_every", 25)),
         workers=int(values.get("workers", 1)),
+        site_spin=str(values.get("site_spin", "S=1/2")),
     )
 
 

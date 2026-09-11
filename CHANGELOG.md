@@ -8,6 +8,26 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Added
 
+- Chains of spin greater than one half. `dataset.generate.site_spin`, or
+  **spin per site** in the form, accepts S=1/2 through S=5/2 and carries
+  through every system family into the simulated Hilbert space. It is part of
+  the recipe fingerprint, unlike `workers`, because it changes every number in
+  the dataset -- eight spin-1 sites is 6561 states against 256, which also
+  moves the simulator from exact diagonalisation to DMRG on its own.
+- An impurity may no longer carry the chain's own spin. A substituted site
+  matching the chain is not a substitution, and the likelier mistake this
+  catches is raising the chain's spin while leaving the impurities at S=1. It
+  is refused at the form and again when the family is built, rather than
+  partway through an hours-long generation run. Spin magnitude alone still
+  does not expose `D_z` -- the transverse anisotropy does -- so this changes
+  what counts as an impurity, not the DMI physics.
+- A figure in the README showing what the package does: a simulated dynamical
+  correlator, the per-site dI/dV an STM would measure, and the couplings a
+  trained model reads back out of it. Every number in it comes from the
+  package, and `scripts/make_readme_figures.py` regenerates it.
+- The two papers whose Hamiltonians and impurity-tomography route this package
+  implements are cited in the README and `CITATION.cff`, with the models
+  trained for them explicitly noted as not distributed here.
 - A LaTeX summary of every analysis, and a PDF beside it when a TeX toolchain
   is installed: `report.tex`, `report.pdf`, and the figure they reference,
   written into the analysis folder alongside the HTML report. It is the
@@ -37,6 +57,16 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Changed
 
+- Bond shading in the inferred chain spans the couplings actually present
+  rather than zero to the largest. Real chains sit in a narrow band -- 32 to
+  38 meV is an ordinary result -- and against an absolute scale every bond
+  inked within a tenth of full, so the picture said "all the same" about a set
+  varying by a fifth. Thickness stays absolute, so genuinely equal couplings
+  still look equal, and the key prints the two end values so full contrast
+  over a narrow range cannot mislead.
+- README images use absolute URLs. PyPI resolves relative links against
+  `pypi.org`, so the logo and the new figure would have been broken icons on
+  the project page.
 - A line of Shakespeare is now always shown while a job runs. The opt-out and
   its stored preference are gone: a decoration that can be switched off
   permanently by a stray click, in browser storage that this session cannot

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logos/hamlet-logo.png" alt="HamLeT — Hamiltonian Learning Toolkit" width="390">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/logos/hamlet-logo.png" alt="HamLeT — Hamiltonian Learning Toolkit" width="390">
 </p>
 
 # HamLeT
@@ -25,6 +25,28 @@ and crop spectra, match compatible pretrained models, generate simulated
 training data, train their own estimators, infer couplings, and export results.
 Physical energies are expressed in meV; at the DMRGPy simulator boundary,
 `1 DMRGPy energy unit = 10 meV`.
+
+## How it works, in one picture
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/pipeline.png" alt="Simulate, measure, infer: a dynamical correlator becomes per-site dI/dV, and a model reads the couplings back out" width="100%">
+</p>
+
+**Simulate.** For a spin chain whose couplings you choose, DMRG or exact
+diagonalisation gives the site-resolved dynamical correlator — the left panel
+is one such chain, sites up the axis and bias across it.
+
+**Measure.** That correlator is what an STM sees as d*I*/d*V*: one spectrum per
+site, each step marking an excitation. This is the form your own data arrives
+in, and the form the simulated dataset is built to match.
+
+**Infer.** A model trained on thousands of such simulated chains reads the
+couplings back out of a single measured spectrum. The right panel recovers
+J1<sub>xy</sub>, J2, J3 and Jz for a chain the model never saw during
+training — grey is the truth, teal what it returned.
+
+Every number in that figure is produced by this package; regenerate it with
+`python scripts/make_readme_figures.py`.
 
 ## Start with the interface
 
@@ -111,6 +133,27 @@ Please cite that work when using this model. Its
 [model card](src/hamlet/resources/models/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
 contains the full author list, BibTeX entry, training provenance, and validity
 range.
+
+### Work this package builds on
+
+The uniform spin-chain Hamiltonians and the impurity-tomography route to
+parameters that are otherwise hidden come from:
+
+> G. Lupi and J. L. Lado, *Hamiltonian-learning quantum magnets with nonlocal
+> impurity tomography*, [Phys. Rev. Applied **23**, 054077
+> (2025)](https://doi.org/10.1103/PhysRevApplied.23.054077).
+
+> N. Karjalainen, G. Lupi, R. Koch, A. O. Fumega and J. L. Lado, *Hamiltonian
+> learning quantum magnets with dynamical impurity tomography*, [Phys. Rev.
+> Research **8**, 033281 (2026)](https://doi.org/10.1103/cw27-2qqd).
+
+**The models trained for those papers are not distributed with this package.**
+HamLeT implements the same families of Hamiltonians and the same measurement
+logic, so you can generate a dataset and train an equivalent model yourself,
+but any pretrained artifact shipped here is listed under
+[`src/hamlet/resources/models`](src/hamlet/resources/models) and is not one of
+theirs. Please cite these papers if you use the impurity route or the uniform
+chain families; the estimators you train are your own.
 
 ## Command line
 

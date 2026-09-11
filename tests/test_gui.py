@@ -674,11 +674,19 @@ def test_bond_strength_is_visible_without_reading_the_numbers():
     chart = script[start : script.index("function ", start + 20)]
 
     assert "stroke-opacity:${ink}" in chart
-    assert "Math.abs(row.value) / maxMagnitude" in chart
+    # Shading spans the couplings present, not zero to the largest. Real
+    # chains sit in a narrow band -- 32 to 38 meV is an ordinary result -- and
+    # against an absolute scale every bond inks within a tenth of full, so the
+    # picture claims "all the same" about a set that varies by a fifth.
+    assert "(Math.abs(row.value) - minMagnitude) / magnitudeSpan" in chart
     # A bond must never fade to invisible -- that reads as a broken chain.
-    assert "0.34 + 0.66 * strength" in chart
-    # And the key says what the shading means.
-    assert "weaker to stronger" in chart
+    assert "0.3 + 0.7 * strength" in chart
+    # Thickness stays absolute, so genuinely equal couplings still look equal.
+    assert "Math.abs(row.value) / maxMagnitude" in chart
+    # And the key prints the two ends, or full contrast over a 0.1 meV spread
+    # would read as a dramatic difference.
+    assert "shading spans" in chart
+    assert "all bonds equal" in chart
 
 
 # --- manifests from more than one pipeline ----------------------------------

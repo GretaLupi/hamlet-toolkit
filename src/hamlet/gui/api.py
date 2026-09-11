@@ -1049,6 +1049,10 @@ def describe_screening_options() -> dict[str, Any]:
 
     return {
         "defaults": json.loads(json.dumps(_SCREENING_DEFAULTS)),
+        # The screening page designs impurities for a spin-1/2 chain and
+        # offers no chain-spin control, so S=1/2 is not among them: an
+        # impurity must differ from the chain it substitutes into, and one
+        # that cannot differ is not worth offering.
         "spins": ["S=1", "S=3/2", "S=2", "S=5/2"],
         "observables": ["total_spin", "Sz"],
         "workspace_root": str(_screening_root()),
@@ -2581,7 +2585,13 @@ def describe_builder_options() -> dict[str, Any]:
                 "notes": "Weighted sum of all three components; the DMI work uses this.",
             },
         ],
-        "spins": ["S=1", "S=3/2", "S=2", "S=5/2"],
+        # Every spin the simulator knows, for both the chain and the
+        # impurities. S=1/2 is in the impurity list too, because which spins
+        # are valid depends on what the chain is: an S=1/2 impurity is a
+        # perfectly good substitution in an S=1 chain. The rule that they must
+        # differ is enforced where it is known, not by pruning a static list.
+        "spins": ["S=1/2", "S=1", "S=3/2", "S=2", "S=5/2"],
+        "chain_spins": ["S=1/2", "S=1", "S=3/2", "S=2", "S=5/2"],
         "tensorflow_available": tensorflow_available,
         "reference_seconds_per_correlator_l8": _reference_rate(),
     }
@@ -2716,6 +2726,26 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
         ]
     if spec["supports_field"]:
         generate["transverse_field_mev"] = float(form.get("transverse_field_mev", 0.0))
+
+    # The chain's own spin. Validated here as well as in the library, because
+    # a rejection after the generation stage has started costs hours.
+    site_spin = str(form.get("site_spin", "S=1/2") or "S=1/2")
+    from ..systems.heisenberg import validate_site_spin
+
+    validate_site_spin(site_spin)
+    if site_spin != "S=1/2":
+        generate["site_spin"] = site_spin
+    clashing = sorted(
+        int(item.get("site"))
+        for item in (form.get("impurities") or [])
+        if str(item.get("spin", "S=1")) == site_spin
+    )
+    if clashing:
+        raise ValueError(
+            f"the impurity at site(s) {clashing} has the same spin as the chain "
+            f"({site_spin}); a substituted site has to differ from the chain it "
+            f"sits in"
+        )
 
     device = str(form.get("device", "auto"))
     if device not in {"auto", "cpu", "gpu"}:

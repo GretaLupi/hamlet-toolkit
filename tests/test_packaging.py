@@ -11,6 +11,7 @@ way to catch a file that is present locally but missing from a fresh clone.
 """
 
 from pathlib import Path
+import re
 import subprocess
 import tomllib
 
@@ -207,6 +208,45 @@ def test_the_licence_text_matches_what_the_metadata_claims():
 
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "MIT" not in readme
+
+
+def test_the_readme_renders_on_pypi():
+    """PyPI resolves relative links against pypi.org, so images break there.
+
+    The project page is the first thing anyone installing this sees, and a
+    broken figure on it is worse than no figure. `twine check` validates the
+    markup but cannot know that a relative path will 404.
+    """
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    images = re.findall(r'<img\s+src="([^"]+)"', readme)
+    assert images, "the README has no figures"
+    for source in images:
+        assert source.startswith("https://"), (
+            f"{source!r} is relative and will not render on PyPI"
+        )
+    # And the file each absolute URL points at has to exist in the repo.
+    for source in images:
+        if "raw.githubusercontent.com" in source:
+            path = REPO_ROOT / source.split("/main/", 1)[1]
+            assert path.exists(), f"README points at a missing file: {path}"
+
+
+def test_the_inspiring_work_is_cited():
+    """The package implements these Hamiltonians; it does not ship their models."""
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    citation = (REPO_ROOT / "CITATION.cff").read_text(encoding="utf-8")
+
+    for doi in ("10.1103/PhysRevApplied.23.054077", "10.1103/cw27-2qqd"):
+        assert doi in readme, f"{doi} is not cited in the README"
+        assert doi in citation, f"{doi} is not in CITATION.cff"
+    # And the distinction that matters, stated rather than implied.
+    assert "are not distributed with this package" in readme
+
+
+def test_the_figure_script_is_shipped_so_the_figure_can_be_remade():
+    script = REPO_ROOT / "scripts" / "make_readme_figures.py"
+    assert script.exists()
+    assert (REPO_ROOT / "assets" / "figures" / "pipeline.png").exists()
 
 
 def test_source_distribution_manifest_contains_public_release_material():
