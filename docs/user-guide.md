@@ -180,6 +180,30 @@ states. It says which sites and which method it used.
 
 ### Designing a DMI sample
 
+**Spin is free here too.** The chain carries **spin per site** (S=1/2 through
+S=5/2), each impurity carries its own, and they need not match each other —
+one arrangement can mix two substituted species. Two rules constrain it, both
+physical rather than chosen:
+
+- An impurity may not carry the chain's own spin. A site matching the chain is
+  a chain site.
+- S=1/2 is never offered as an impurity. Single-ion anisotropy vanishes there,
+  and the transverse anisotropy is the entire mechanism that exposes `D_z`, so
+  a spin-1/2 impurity cannot break the symmetry whatever the chain is.
+
+Mixing species does not change the symmetry rule. The rotation that hides a DM
+vector acts with the same phase at every site regardless of its spin, so what
+matters is still two transverse-anisotropy impurities at distinct sites.
+
+**Cost, and what "promising" means.** Raising the spin raises the Hilbert
+space sharply — eight spin-1 sites is 6561 states against 256 — and screening
+picks exact diagonalisation or DMRG per design rather than fixing one. When it
+uses DMRG it sizes the bond dimension to resolve that design exactly. Above
+what screening will spend, it truncates and **says so**, with a `*` in the
+table: the imprint is then a lower bound, and the verdict beside it is not on
+the scale the calibration was measured on, which is exact spectra at S=1/2.
+
+
 The **DMI sample design** page is a form as well: the chain you can build (its
 length, `J_z`, `J_2`, `J_3`, the exchange scale `sqrt(J1_xy^2 + D_z^2)` and the
 `D_z` you are trying to resolve), the measurement you can take, and one row per

@@ -266,9 +266,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     screen.add_argument(
         "--dynamics-mode",
-        choices=["ED", "DMRG"],
-        default="ED",
-        help="ED is exact and appropriate for the short chains screening uses",
+        choices=["ED", "DMRG", "auto"],
+        default="auto",
+        help=(
+            "auto picks exact diagonalisation while the design's Hilbert space "
+            "is small enough for it, and DMRG above that. Fix one to compare "
+            "designs under identical approximation"
+        ),
     )
     return parser
 
@@ -305,7 +309,12 @@ def _run_screen_dmi(args) -> int:
 
     results = screen_dmi_designs(
         designs,
-        DmrgpySimulator(dynamics_mode=args.dynamics_mode),
+        # None lets each design be simulated at the cost it actually has: a
+        # screen may now mix spin-1/2 and spin-2 hosts, where one fixed choice
+        # either wastes the cheap designs or never finishes the dear ones.
+        None if args.dynamics_mode == "auto" else DmrgpySimulator(
+            dynamics_mode=args.dynamics_mode
+        ),
         protocol,
         skip_symmetric=not args.verify_symmetric,
         progress=lambda item: print(

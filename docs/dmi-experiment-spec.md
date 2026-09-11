@@ -185,7 +185,7 @@ candidates = [
     for e_mev in (1.0, 2.0)
 ]
 
-results = screen_dmi_designs(candidates, DmrgpySimulator(dynamics_mode="ED"), protocol)
+results = screen_dmi_designs(candidates, None  # one simulator sized per design; see screening_cost(), protocol)
 print(format_screening_table(results))
 ```
 

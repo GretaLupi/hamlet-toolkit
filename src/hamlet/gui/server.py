@@ -353,8 +353,6 @@ class _Handler(BaseHTTPRequestHandler):
                 load_screening_config,
                 screen_dmi_designs,
             )
-            from ..simulation import DmrgpySimulator
-
             designs, protocol = load_screening_config(config_path)
             print(f"screening {len(designs)} candidate design(s)")
 
@@ -366,7 +364,11 @@ class _Handler(BaseHTTPRequestHandler):
 
             results = screen_dmi_designs(
                 designs,
-                DmrgpySimulator(dynamics_mode="ED"),
+                # None: each design gets a simulator sized to its own Hilbert
+                # space. A screen can now mix spin-1/2 and spin-2 hosts, and
+                # one fixed choice of exact diagonalisation would either waste
+                # the cheap designs or never finish the expensive ones.
+                None,
                 protocol,
                 skip_symmetric=not verify,
                 progress=report,

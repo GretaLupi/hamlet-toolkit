@@ -19,7 +19,7 @@ DMRGPY_ENERGY_UNIT_MEV = 10.0
 # Above this many basis states, exact diagonalisation stops being the cheap
 # option and DMRG is the better trade. The cost that matters is the Hilbert
 # dimension, not the site count: eight spin-1/2 sites is 256 states, but eight
-# sites carrying three spin-1 impurities is 3456.
+# sites carrying three spin-1 impurities is 2^5 * 3^3 = 864.
 ED_DIMENSION_LIMIT = 2048
 
 

@@ -412,6 +412,9 @@ button.linky:hover { color: var(--accent); text-decoration: underline; }
   margin-top: 4px; max-width: 70ch;
 }
 .info-body[hidden] { display: none; }
+/* One species select per chosen site, shown under the chain it annotates. */
+.spin-rows { gap: 8px; align-items: center; font-size: 13px; margin-top: 6px; }
+.spin-rows label { display: inline-flex; align-items: center; gap: 4px; }
 .layers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .layer {
   display: inline-flex; align-items: center; gap: 2px;

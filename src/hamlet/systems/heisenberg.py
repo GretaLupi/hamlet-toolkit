@@ -432,7 +432,7 @@ def spin_multiplicity(label: str) -> int:
     Exposed because the product over sites is the exact-diagonalisation cost,
     and choosing between ED and DMRG has to be based on it rather than on the
     site count: eight spin-1/2 sites is a 256-state problem, but eight sites
-    with three spin-1 impurities is 3456.
+    with three spin-1 impurities is 2^5 * 3^3 = 864.
     """
     try:
         magnitude = _SPIN_MAGNITUDES[label]

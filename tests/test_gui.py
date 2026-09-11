@@ -1373,7 +1373,7 @@ def test_preview_site_count_never_exceeds_the_cap():
 
 
 def test_dynamics_mode_is_chosen_by_basis_size_not_site_count():
-    """Eight sites is 256 states, or 3456 with three spin-1 impurities."""
+    """Eight sites is 256 states, or 2^5 * 3^3 = 864 with three spin-1 impurities."""
     from hamlet.simulation.dmrgpy import hilbert_dimension, recommended_dynamics_mode
     from hamlet.systems import HomogeneousXXZDMIImpurityChain, SiteImpurity
 

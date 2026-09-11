@@ -1012,6 +1012,7 @@ _SCREENING_DEFAULTS: dict[str, Any] = {
         "jz_mev": 5.5,
         "j2_mev": 0.0,
         "j3_mev": 0.0,
+        "site_spin": "S=1/2",
     },
     "protocol": {
         "bias_range_mev": [0.0, 20.0],
@@ -1049,11 +1050,14 @@ def describe_screening_options() -> dict[str, Any]:
 
     return {
         "defaults": json.loads(json.dumps(_SCREENING_DEFAULTS)),
-        # The screening page designs impurities for a spin-1/2 chain and
-        # offers no chain-spin control, so S=1/2 is not among them: an
-        # impurity must differ from the chain it substitutes into, and one
-        # that cannot differ is not worth offering.
+        # Every spin, for both the host and the impurities. Which pairings
+        # are legal depends on the host -- an impurity must differ from the
+        # chain it sits in, and single-ion anisotropy vanishes at S=1/2, so a
+        # spin-1/2 impurity cannot break the symmetry whatever the host is.
+        # Both rules are enforced where the host is known rather than by
+        # pruning a list that cannot see it.
         "spins": ["S=1", "S=3/2", "S=2", "S=5/2"],
+        "chain_spins": ["S=1/2", "S=1", "S=3/2", "S=2", "S=5/2"],
         "observables": ["total_spin", "Sz"],
         "workspace_root": str(_screening_root()),
         "calibration": [
@@ -1137,16 +1141,36 @@ def _screening_candidate(entry: Any, index: int, n_sites: int) -> dict[str, Any]
         )
         if sites and field:
             label += f", B={field:g}"
+    # `spins` gives one species per site; `spin` is the single species used
+    # for all of them, and stays accepted because every configuration written
+    # before this, and the shipped example, use it.
+    given = entry.get("spins")
+    if given is not None and entry.get("spin") is not None and given:
+        # Matches the library, which refuses a configuration giving both
+        # rather than silently preferring one.
+        raise ValueError(
+            f"arrangement {index + 1} gives both spin and spins; use spins for "
+            "one species per site, or spin for one species throughout"
+        )
+    if not given:
+        spins = [str(entry.get("spin", "S=1"))] * len(sites)
+    else:
+        spins = [str(item) for item in given]
+        if len(spins) != len(sites):
+            raise ValueError(
+                f"arrangement {index + 1} lists {len(spins)} spin(s) for "
+                f"{len(sites)} site(s); give one spin per site"
+            )
     return {
         "label": label,
         "impurities": [
             {
                 "site": site,
-                "spin": str(entry.get("spin", "S=1")),
+                "spin": spin,
                 "transverse_mev": transverse,
                 "axial_mev": float(entry.get("axial_mev", 0.0) or 0.0),
             }
-            for site in sites
+            for site, spin in zip(sites, spins)
         ],
         "transverse_field_mev": field,
     }
@@ -1189,12 +1213,32 @@ def build_screening_config(
     if broadening <= 0:
         raise ValueError("broadening must be positive")
 
+    from ..systems.heisenberg import validate_site_spin
+
+    site_spin = str(chain.get("site_spin", "S=1/2") or "S=1/2")
+    validate_site_spin(site_spin)
+
     entries = form.get("candidates") or []
     if not entries:
         raise ValueError("add at least one arrangement to screen")
     candidates = [
         _screening_candidate(entry, index, n_sites) for index, entry in enumerate(entries)
     ]
+    # Named here rather than left to escape from the chain class, which knows
+    # the rule but not which arrangement on the page broke it.
+    for index, candidate in enumerate(candidates):
+        clashing = sorted(
+            impurity["site"]
+            for impurity in candidate["impurities"]
+            if impurity["spin"] == site_spin
+        )
+        if clashing:
+            raise ValueError(
+                f"arrangement {index + 1} "
+                f"({candidate['label'] or 'unnamed'}) puts {site_spin} at "
+                f"site(s) {clashing}, which is the chain's own spin; a "
+                f"substituted site has to differ from the chain it sits in"
+            )
 
     payload: dict[str, Any] = {
         "screening_schema_version": 1,
@@ -1206,6 +1250,7 @@ def build_screening_config(
             "jz_mev": float(chain.get("jz_mev", 5.5)),
             "j2_mev": float(chain.get("j2_mev", 0.0)),
             "j3_mev": float(chain.get("j3_mev", 0.0)),
+            "site_spin": site_spin,
         },
         "protocol": {
             "bias_range_mev": [low, high],

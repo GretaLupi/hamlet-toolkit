@@ -1480,6 +1480,27 @@ let builtScreening = null;
 // is entirely about *where* the impurities go, so the sites are the control and
 // the numbers are the annotation, not the other way round.
 
+/** Impurity species that are legal in the chosen host.
+ *
+ * A substituted site has to differ from the chain it sits in, so the host's
+ * own spin is not an impurity. Filtering the menu rather than validating
+ * afterwards matters here because the page ships default arrangements: raise
+ * the host to S=1 with an unfiltered menu and every default becomes invalid
+ * at once, which reads as the page breaking rather than as a rule.
+ */
+function impuritySpins() {
+  const host = el("d-site-spin") ? el("d-site-spin").value : "S=1/2";
+  return screening.spins.filter((s) => s !== host);
+}
+
+function spinOptions(selected) {
+  const legal = impuritySpins();
+  const value = legal.includes(selected) ? selected : legal[0];
+  return legal.map((s) =>
+    `<option value="${esc(s)}"${s === value ? " selected" : ""}>${esc(s)}</option>`
+  ).join("");
+}
+
 function candidateCard(entry, index) {
   return `<div class="candidate" data-candidate="${index}">
     <div class="row" style="justify-content:space-between">
@@ -1489,9 +1510,10 @@ function candidateCard(entry, index) {
     </div>
     <div class="chain cand-chain"></div>
     <input type="hidden" class="cand-sites" value="${esc(siteText(entry.sites))}">
+    <input type="hidden" class="cand-spins" value="${esc((entry.spins || []).join(","))}">
+    <div class="cand-spin-rows"></div>
     <div class="row">
-      <label>spin <select class="cand-spin">${screening.spins.map((s) =>
-        `<option value="${esc(s)}"${s === entry.spin ? " selected" : ""}>${esc(s)}</option>`).join("")}</select></label>
+      <label>new sites get <select class="cand-spin">${spinOptions(entry.spin)}</select></label>
       <label>transverse E <input type="number" class="cand-transverse" step="0.1"
         value="${entry.transverse_mev ?? 2.0}" style="width:5.5em"> meV</label>
       <label>axial D <input type="number" class="cand-axial" step="0.1"
@@ -1533,25 +1555,77 @@ function candidateVerdict(sites, field) {
   return ["bad", "Nothing here breaks the symmetry that hides D_z."];
 }
 
+/** The species at each chosen site, in site order.
+ *
+ * Held beside the site list rather than inside it, because the sites are what
+ * the chain drawing edits and a spin annotation smuggled into that string
+ * would be parsed away by parseSites(). A site with no entry yet takes the
+ * card's default, which is what "new sites get" selects.
+ */
+function candidateSpins(card, sites) {
+  const stored = String(card.querySelector(".cand-spins").value || "")
+    .split(",").map((part) => part.trim()).filter(Boolean);
+  const fallback = card.querySelector(".cand-spin").value;
+  return sites.map((_, index) => stored[index] || fallback);
+}
+
+function renderSpinRows(card, sites, spins) {
+  const host = card.querySelector(".cand-spin-rows");
+  if (!sites.length) { host.innerHTML = ""; return; }
+  // Shown only once there is more than one site to tell apart: a single
+  // impurity has nothing to differ from, and the row would just repeat the
+  // default above it.
+  host.innerHTML = `<div class="row spin-rows">
+    <span class="hint">species at each site</span>
+    ${sites.map((site, index) => `<label>${site}
+      <select class="cand-site-spin" data-index="${index}">${
+        spinOptions(spins[index])}</select></label>`).join("")}
+  </div>`;
+  host.querySelectorAll(".cand-site-spin").forEach((select) =>
+    select.addEventListener("change", () => {
+      const current = candidateSpins(card, sites);
+      current[Number(select.dataset.index)] = select.value;
+      card.querySelector(".cand-spins").value = current.join(",");
+      drawCandidateChain(card);
+    }));
+}
+
 function drawCandidateChain(card) {
   const host = card.querySelector(".cand-chain");
   const store = card.querySelector(".cand-sites");
   const nSites = Number(el("d-n-sites").value) || 0;
   const sites = parseSites(store.value);
-  const spin = card.querySelector(".cand-spin").value;
+  const spins = candidateSpins(card, sites);
+  // Normalised back into the store so a site that has just been added, and
+  // took the default, keeps that species when another site changes.
+  card.querySelector(".cand-spins").value = spins.join(",");
+  const spinAt = new Map(sites.map((site, index) => [site, spins[index]]));
   renderChain(host, {
     nSites,
     marked: sites.filter((site) => site < nSites),
-    labelFor: () => spin,
+    labelFor: (site) => spinAt.get(site) || "",
     onToggle: (site) => {
       const current = parseSites(store.value);
+      const currentSpins = candidateSpins(card, current);
+      const keep = new Map(current.map((s, i) => [s, currentSpins[i]]));
       const next = current.includes(site)
         ? current.filter((value) => value !== site)
         : [...current, site].sort((a, b) => a - b);
       store.value = next.join(", ");
+      card.querySelector(".cand-spins").value = next
+        .map((s) => keep.get(s) || card.querySelector(".cand-spin").value)
+        .join(",");
       drawCandidateChain(card);
     },
   });
+  // Paired before filtering. Filtering the two lists separately shifts every
+  // species after an off-chain site by one, which silently reassigns them --
+  // a site past the chain end is ordinary while the site count is being
+  // lowered.
+  const onChain = sites
+    .map((site, index) => [site, spins[index]])
+    .filter(([site]) => site < nSites);
+  renderSpinRows(card, onChain.map(([site]) => site), onChain.map(([, spin]) => spin));
   host.insertAdjacentHTML("beforeend", offChainWarning(sites, nSites));
   const [tone, message] = candidateVerdict(
     sites.filter((site) => site < nSites),
@@ -1584,7 +1658,12 @@ function readCandidates() {
   return [...el("d-candidates").querySelectorAll(".candidate")].map((card) => ({
     label: card.querySelector(".cand-label").value.trim(),
     sites: card.querySelector(".cand-sites").value,
+    // The card's default for a site clicked next; not sent to the server.
     spin: card.querySelector(".cand-spin").value,
+    // `spins` only. Sending both leans on the server preferring one of them,
+    // and the library rejects a configuration that gives both -- a
+    // disagreement worth not having in the first place.
+    spins: candidateSpins(card, parseSites(card.querySelector(".cand-sites").value)),
     transverse_mev: Number(card.querySelector(".cand-transverse").value),
     axial_mev: Number(card.querySelector(".cand-axial").value),
     transverse_field_mev: Number(card.querySelector(".cand-field").value),
@@ -1601,6 +1680,7 @@ function readScreeningForm() {
       jz_mev: Number(el("d-jz").value),
       j2_mev: Number(el("d-j2").value),
       j3_mev: Number(el("d-j3").value),
+      site_spin: el("d-site-spin").value || "S=1/2",
     },
     protocol: {
       bias_range_mev: [Number(el("d-bias-lo").value), Number(el("d-bias-hi").value)],
@@ -1705,6 +1785,21 @@ api("/api/screening-options").then((options) => {
   el("d-jz").value = d.chain.jz_mev;
   el("d-j2").value = d.chain.j2_mev;
   el("d-j3").value = d.chain.j3_mev;
+  el("d-site-spin").innerHTML = (options.chain_spins || ["S=1/2"]).map((s) =>
+    `<option value="${esc(s)}"${s === (d.chain.site_spin || "S=1/2")
+      ? " selected" : ""}>${esc(s)}</option>`).join("");
+  // The arrangements are redrawn when the host changes: every card shows the
+  // species at each site, and which of those are legal depends on the host.
+  el("d-site-spin").addEventListener("change", () => {
+    // Anything now equal to the host is remapped rather than left invalid,
+    // so raising the host never leaves the page in a state that cannot run.
+    const legal = impuritySpins();
+    renderCandidates(readCandidates().map((entry) => ({
+      ...entry,
+      spin: legal.includes(entry.spin) ? entry.spin : legal[0],
+      spins: (entry.spins || []).map((s) => (legal.includes(s) ? s : legal[0])),
+    })));
+  });
   el("d-bias-lo").value = d.protocol.bias_range_mev[0];
   el("d-bias-hi").value = d.protocol.bias_range_mev[1];
   el("d-bias-points").value = d.protocol.bias_points;

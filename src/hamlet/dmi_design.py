@@ -68,8 +68,15 @@ class DmiDesign:
     j2_mev: float = 0.0
     j3_mev: float = 0.0
     label: str = ""
+    # The spin every unsubstituted site carries. Impurities carry their own,
+    # and each must differ from this -- a site matching the host is a host
+    # site, which the chain class enforces.
+    site_spin: str = "S=1/2"
 
     def __post_init__(self) -> None:
+        from .systems.heisenberg import validate_site_spin
+
+        validate_site_spin(self.site_spin)
         if not 0.0 < self.d_z_mev <= self.j_eff_mev:
             # The pair is built by trading D_z against exchange at fixed
             # hypotenuse, so D_z cannot exceed it.
@@ -82,8 +89,19 @@ class DmiDesign:
     def name(self) -> str:
         if self.label:
             return self.label
-        sites = ",".join(str(imp.site) for imp in self.impurities) or "none"
-        return f"L{self.n_sites} imp[{sites}] B={self.transverse_field_mev:g}"
+        # Spins appear only when they carry information: a spin-1/2 host is
+        # the default, and identical impurities are the ordinary case, so
+        # naming them always would make every label longer to no purpose.
+        spins = {imp.spin for imp in self.impurities}
+        sites = ",".join(
+            f"{imp.site}:{imp.spin}" if len(spins) > 1 else str(imp.site)
+            for imp in self.impurities
+        ) or "none"
+        host = "" if self.site_spin == "S=1/2" else f" {self.site_spin} host"
+        return (
+            f"L{self.n_sites}{host} imp[{sites}]"
+            f" B={self.transverse_field_mev:g}"
+        )
 
     def gauge_pair(self) -> tuple[HomogeneousXXZDMIImpurityChain, ...]:
         """The two chains that a DMI-blind measurement cannot tell apart.
@@ -98,6 +116,7 @@ class DmiDesign:
                 [j1, self.j2_mev, self.j3_mev, self.jz_mev, d_z],
                 impurities=self.impurities,
                 transverse_field_mev=self.transverse_field_mev,
+                site_spin=self.site_spin,
             )
             for j1, d_z in ((self.j_eff_mev, 0.0), (j1_alt, self.d_z_mev))
         )
@@ -148,6 +167,86 @@ def classify_imprint(imprint: float) -> str:
     return "strong"
 
 
+# Above this, an exact matrix-product state costs more than screening is
+# worth and the run is truncated -- which is reported rather than absorbed,
+# because the imprint thresholds were calibrated on exact spectra.
+MAX_SCREENING_BOND_DIMENSION = 512
+
+
+def exact_bond_dimension(chain: Any) -> int:
+    """The bond dimension at which an MPS of this chain stops approximating.
+
+    For an open chain it is the largest ``min(left, right)`` over every cut,
+    the two sides being the products of the local dimensions. Worth computing
+    rather than guessing: it is the difference between a DMRG number that
+    equals the exact one and a DMRG number that is quietly 40% low.
+    """
+    from .simulation.dmrgpy import site_spins_of
+    from .systems import spin_multiplicity
+
+    dimensions = [spin_multiplicity(label) for label in site_spins_of(chain)]
+    best, left = 1, 1
+    for cut in range(1, len(dimensions)):
+        left *= dimensions[cut - 1]
+        right = 1
+        for value in dimensions[cut:]:
+            right *= value
+        best = max(best, min(left, right))
+    return best
+
+
+def simulator_for(design: DmiDesign) -> Any:
+    """A simulator sized to what this design actually costs.
+
+    Two things have to be sized, and fixing only the first is worse than
+    fixing neither. The *mode* was pinned to exact diagonalisation, which is
+    right while every design is a spin-1/2 host -- eight such sites is 256
+    states -- and hopeless once the host or the impurities carry more spin,
+    where eight spin-1 sites with two heavier impurities is 14580 and an ED
+    that size does not fail, it simply never returns.
+
+    But switching to DMRG at the library's default bond dimension of 20 buys
+    that at the price of a silently truncated answer: an eight-site spin-1
+    chain needs 81 to be exact, and at 20 the imprint came out 41% low --
+    enough to move a design across the thresholds in IMPRINT_CALIBRATION,
+    which were measured on exact spectra. So the bond dimension is sized to
+    the design too, and when even that is capped the result says so.
+    """
+    from .simulation import DmrgpySimulator
+    from .simulation.dmrgpy import recommended_dynamics_mode
+
+    chain = design.gauge_pair()[0]
+    mode = recommended_dynamics_mode(chain)
+    if mode == "ED":
+        return DmrgpySimulator(dynamics_mode=mode)
+    bond = min(exact_bond_dimension(chain), MAX_SCREENING_BOND_DIMENSION)
+    return DmrgpySimulator(
+        dynamics_mode=mode,
+        max_bond_dimension=bond,
+        kpm_max_bond_dimension=bond,
+    )
+
+
+def screening_cost(design: DmiDesign) -> dict[str, Any]:
+    """What simulating this design will take, before committing to it."""
+    from .simulation.dmrgpy import hilbert_dimension, recommended_dynamics_mode
+
+    chain = design.gauge_pair()[0]
+    mode = recommended_dynamics_mode(chain)
+    required = exact_bond_dimension(chain)
+    bond = min(required, MAX_SCREENING_BOND_DIMENSION) if mode == "DMRG" else None
+    return {
+        "hilbert_dimension": hilbert_dimension(chain),
+        "dynamics_mode": mode,
+        "site_spins": list(chain.site_spins),
+        "bond_dimension": bond,
+        "exact_bond_dimension": required,
+        # The one fact a verdict cannot be read without: the thresholds were
+        # calibrated on exact spectra, so a truncated run is not comparable.
+        "exact": mode == "ED" or required <= MAX_SCREENING_BOND_DIMENSION,
+    }
+
+
 def measure_dmi_imprint(
     design: DmiDesign,
     simulator: Any,
@@ -158,7 +257,13 @@ def measure_dmi_imprint(
     The imprint is the largest absolute difference between the two spectral
     maps, relative to the scale of the first, so it is comparable across
     designs and to :data:`IMPRINT_CALIBRATION`.
+
+    ``simulator`` of ``None`` means "one sized to this design" -- see
+    :func:`simulator_for`. The two members of a gauge pair share a Hilbert
+    space, so one choice covers both.
     """
+    if simulator is None:
+        simulator = simulator_for(design)
     first, second = design.gauge_pair()
     a = np.asarray(simulator.simulate(first, protocol).spectral_map, dtype=float)
     b = np.asarray(simulator.simulate(second, protocol).spectral_map, dtype=float)
@@ -177,8 +282,26 @@ def measure_dmi_imprint(
             "j1_xy_mev": (design.j_eff_mev, float(second.as_array()[0])),
             "d_z_mev": (0.0, design.d_z_mev),
             "shared_gauge_invariant_mev": design.j_eff_mev,
+            # How the number was produced. The verdict thresholds in
+            # IMPRINT_CALIBRATION were measured on exact spectra, so an
+            # imprint from a truncated run is not on the same scale as the
+            # thresholds it is about to be compared against -- and an exact
+            # "promising" and a truncated "promising" were indistinguishable
+            # in every output this feature produced.
+            "dynamics_mode": getattr(simulator, "dynamics_mode", "unknown"),
+            "bond_dimension": getattr(simulator, "max_bond_dimension", None),
+            "site_spins": list(first.site_spins),
+            "exact": _is_exact(simulator, first),
         },
     )
+
+
+def _is_exact(simulator: Any, chain: Any) -> bool:
+    """Whether this simulator resolves this chain without truncating it."""
+    if getattr(simulator, "dynamics_mode", None) == "ED":
+        return True
+    bond = getattr(simulator, "max_bond_dimension", 0) or 0
+    return bond >= exact_bond_dimension(chain)
 
 
 def screen_dmi_designs(
@@ -196,6 +319,10 @@ def screen_dmi_designs(
     positions: those are reported with a zero imprint and the ``hidden``
     verdict without touching the simulator. Set it False to verify the
     prediction rather than trust it.
+
+    ``simulator`` of ``None`` gives each design one sized to its own Hilbert
+    space, which is what a sweep over mixed spins needs: designs in one screen
+    no longer all cost the same.
     """
     results: list[DmiImprint] = []
     for design in designs:
@@ -219,35 +346,69 @@ def transverse_impurities(
     sites: Sequence[int],
     transverse_mev: float,
     *,
-    spin: str = "S=1",
+    spin: str | Sequence[str] = "S=1",
     axial_mev: float = 0.0,
 ) -> tuple[SiteImpurity, ...]:
-    """Convenience builder for a set of identical transverse-anisotropy sites.
+    """Builder for a set of transverse-anisotropy sites.
 
     Transverse anisotropy is what breaks the symmetry; ``axial_mev`` is carried
     through because real adatoms have it and it changes the spectra, not
     because it can expose ``D_z`` on its own.
+
+    ``spin`` may be one label for every site, or one per site -- a chain can
+    carry two different substituted species, and nothing about the symmetry
+    argument requires them to match. What it does require is two of them at
+    distinct sites, whatever they are.
     """
+    sites = list(sites)
+    if isinstance(spin, str):
+        spins = [spin] * len(sites)
+    else:
+        spins = [str(item) for item in spin]
+        if len(spins) != len(sites):
+            raise ValueError(
+                f"{len(spins)} spin(s) were given for {len(sites)} site(s); "
+                "pass one spin for every site, or a single spin for all of them"
+            )
     return tuple(
         SiteImpurity(
-            site, spin, axial_mev=axial_mev, transverse_mev=transverse_mev
+            site, this_spin, axial_mev=axial_mev, transverse_mev=transverse_mev
         )
-        for site in sites
+        for site, this_spin in zip(sites, spins)
     )
 
 
 def format_screening_table(results: Sequence[DmiImprint]) -> str:
-    """Render screening results, best first, as a fixed-width table."""
+    """Render screening results, best first, as a fixed-width table.
+
+    A row whose imprint came from a truncated run is marked, because the
+    verdict beside it is calibrated on exact spectra and the two are not on
+    the same scale.
+    """
     lines = [
         f"{'design':>34s}{'imprint':>11s}  verdict",
         "-" * 62,
     ]
+    approximate = False
     for item in results:
+        # A skipped design was never simulated, so there is nothing to mark.
+        simulated = "skipped" not in item.detail
+        exact = item.detail.get("exact", True)
+        mark = "" if exact or not simulated else "  *"
+        approximate = approximate or (simulated and not exact)
         lines.append(
-            f"{item.design.name:>34s}{item.imprint:11.3e}  {item.verdict}"
+            f"{item.design.name:>34s}{item.imprint:11.3e}  {item.verdict}{mark}"
+        )
+    if approximate:
+        lines.append("")
+        lines.append(
+            "  * truncated: this design needed a larger bond dimension than "
+            "screening\n    allows, so its imprint is a lower bound and the "
+            "verdict beside it is\n    not on the scale the calibration below "
+            "was measured on."
         )
     lines.append("")
-    lines.append("calibration (imprint -> D_z skill actually achieved):")
+    lines.append("calibration (imprint -> D_z skill actually achieved, at S=1/2 under ED):")
     for value, note in IMPRINT_CALIBRATION:
         lines.append(f"  {value:9.2e}  {note}")
     return "\n".join(lines)
@@ -277,6 +438,7 @@ _ALLOWED_CHAIN_KEYS = {
     "jz_mev",
     "j2_mev",
     "j3_mev",
+    "site_spin",
 }
 _ALLOWED_PROTOCOL_KEYS = {
     "bias_range_mev",
@@ -289,7 +451,10 @@ _ALLOWED_PROTOCOL_KEYS = {
 _ALLOWED_SWEEP_KEYS = {
     "sites",
     "transverse_mev",
+    # One spin for every impurity the sweep makes, or `spins` for one per
+    # site within each arrangement.
     "spin",
+    "spins",
     "axial_mev",
     "transverse_angle_rad",
     "transverse_field_mev",
@@ -388,6 +553,7 @@ def load_screening_config(
         jz_mev=float(chain["jz_mev"]),
         j2_mev=float(chain.get("j2_mev", 0.0)),
         j3_mev=float(chain.get("j3_mev", 0.0)),
+        site_spin=str(chain.get("site_spin", "S=1/2")),
     )
 
     designs: list[DmiDesign] = []
@@ -428,6 +594,15 @@ def load_screening_config(
         field_values = sweep.get("transverse_field_mev", [0.0])
         if not isinstance(field_values, (list, tuple)):
             field_values = [field_values]
+        # `spin` is one species for every impurity; `spins` gives one per
+        # site within each arrangement, for a chain carrying two different
+        # substituted species. Giving both is a contradiction, not a default.
+        if "spin" in sweep and "spins" in sweep:
+            raise ValueError(
+                "sweep gives both spin and spins; use spin for one species "
+                "throughout, or spins for one per site"
+            )
+        spin_list = sweep.get("spins")
         spin = str(sweep.get("spin", "S=1"))
         axial = float(sweep.get("axial_mev", 0.0))
         angle = float(sweep.get("transverse_angle_rad", 0.0))
@@ -436,14 +611,24 @@ def load_screening_config(
                 raise ValueError("sweep.sites must be a list of site lists")
             for transverse in transverse_values:
                 for field in field_values:
+                    if spin_list is not None:
+                        if len(spin_list) != len(sites):
+                            raise ValueError(
+                                f"sweep.spins has {len(spin_list)} entries for "
+                                f"an arrangement of {len(sites)} site(s); give "
+                                "one spin per site, or use spin for one species"
+                            )
+                        site_spins = [str(item) for item in spin_list]
+                    else:
+                        site_spins = [spin] * len(sites)
                     impurities = tuple(
                         SiteImpurity(
-                            int(site), spin,
+                            int(site), this_spin,
                             axial_mev=axial,
                             transverse_mev=float(transverse),
                             transverse_angle_rad=angle,
                         )
-                        for site in sites
+                        for site, this_spin in zip(sites, site_spins)
                     )
                     label = (
                         f"{len(sites)} imp at {list(sites)}, E={float(transverse):g}"

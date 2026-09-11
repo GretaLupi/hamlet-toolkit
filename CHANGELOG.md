@@ -17,6 +17,26 @@ and reports.
 
 ### Added
 
+- DMI sample design takes any spin, in any combination. The chain carries
+  `chain.site_spin` (S=1/2 through S=5/2), each impurity carries its own, and
+  they need not match each other: `sweep.spins` gives one species per site,
+  and the `candidates:` route already did. Mixing species does not change the
+  symmetry rule -- the rotation that hides a DM vector acts with the same
+  phase at every site whatever its spin -- so what still matters is two
+  transverse-anisotropy impurities at distinct sites. S=1/2 remains unoffered
+  as an impurity, now for its real reason: single-ion anisotropy vanishes
+  there, so it cannot break the symmetry whatever the host is.
+- Screening sizes the simulation to each design instead of fixing exact
+  diagonalisation. That was right while every design was a spin-1/2 host, at
+  256 states, and hopeless at 14580 -- but switching to DMRG at the library's
+  default bond dimension of 20 would have been worse than hopeless: an
+  eight-site spin-1 chain needs 81 to be exact, and at 20 the imprint came out
+  41% low, enough to move a design across thresholds that were calibrated on
+  exact spectra. The bond dimension is therefore sized to the design too, and
+  a design too large to resolve is marked in the table as a lower bound rather
+  than reported as though it were comparable. The dynamics mode, bond
+  dimension and site spins are recorded with every result. `hamlet screen-dmi
+  --dynamics-mode` gains `auto`, and defaults to it.
 - Chains of spin greater than one half. `dataset.generate.site_spin`, or
   **spin per site** in the form, accepts S=1/2 through S=5/2 and carries
   through every system family into the simulated Hilbert space. It is part of
@@ -406,6 +426,9 @@ and reports.
   scores at these dataset sizes are noisy enough to invert a conclusion.
 
 ### Fixed
+
+- Three docstrings put an eight-site chain with three spin-1 impurities at
+  3456 states. It is 2^5 * 3^3 = 864.
 
 - The waiting quotes were unstable and could not be turned back on. Three
   faults: the line was derived from the elapsed time sampled at render, and

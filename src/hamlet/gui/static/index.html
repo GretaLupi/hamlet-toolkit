@@ -368,10 +368,25 @@
       <h3>1 &middot; The chain you can build</h3>
       <div class="row">
         <label>sites <input type="number" id="d-n-sites" min="2" max="16" step="1" style="width:5em"></label>
+        <label>spin per site <select id="d-site-spin"></select>
+          <button type="button" class="info" data-info="d-spin-hint"
+            aria-expanded="false" aria-controls="d-spin-hint"
+            title="What does this do?">i</button>
+        </label>
         <label>J<sub>z</sub> <input type="number" id="d-jz" step="0.1" style="width:6em"> meV</label>
         <label>J<sub>2</sub> <input type="number" id="d-j2" step="0.1" style="width:6em"> meV</label>
         <label>J<sub>3</sub> <input type="number" id="d-j3" step="0.1" style="width:6em"> meV</label>
       </div>
+      <p class="hint info-body" id="d-spin-hint" hidden>
+        <b>Spin per site</b> is what the unsubstituted chain carries. Each
+        impurity must differ from it &mdash; a site matching the chain is a
+        chain site &mdash; and impurities need not match each other, so one
+        arrangement can mix species. Note that single-ion anisotropy vanishes
+        at S=1/2, so a spin-1/2 impurity cannot break the symmetry whatever
+        the chain is. Raising the chain&rsquo;s spin raises the cost sharply:
+        eight spin-1 sites is 6561 states against 256, and the screening
+        switches from exact diagonalisation to DMRG on its own.
+      </p>
       <div class="row">
         <label>exchange scale <input type="number" id="d-jeff" step="0.1" style="width:6em"> meV</label>
         <label>DMI to resolve <input type="number" id="d-dz" step="0.1" style="width:6em"> meV</label>

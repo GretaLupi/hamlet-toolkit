@@ -8,6 +8,11 @@ name: Which impurity arrangement can measure DMI in my chain?
 
 # The host chain you can actually build.
 chain:
+  # The spin every unsubstituted site carries: S=1/2 through S=5/2. Optional,
+  # and S=1/2 when absent. Raising it raises the cost sharply -- eight spin-1
+  # sites is 6561 states against 256 -- and screening moves from exact
+  # diagonalisation to DMRG on its own when it has to.
+  # site_spin: "S=1"
   n_sites: 8
   # The gauge-invariant combination sqrt(J1_xy^2 + D_z^2), i.e. the exchange
   # scale a zero-field measurement already reports.
@@ -40,6 +45,10 @@ sweep:
   # non-monotonic, so sweep it rather than assuming larger is better.
   transverse_mev: [1.0, 2.0]
   spin: S=1
+  # `spins` instead of `spin` gives one species per site of each arrangement,
+  # for a chain carrying two different substituted species. Give one or the
+  # other, not both.
+  # spins: ["S=1", "S=3/2"]
   # Real adatoms have axial anisotropy. It cannot expose D_z by itself, but it
   # changes the spectra, so screen with your measured value.
   axial_mev: 0.0
