@@ -30,7 +30,7 @@ CI runs the suite on 3.10/3.11/3.12, exercises the Keras paths separately, and
 verifies that the built wheel contains every module, installs into a clean
 environment, exposes all console scripts, and retains the GUI's published
 model catalog. The maintainer release procedure is in
-[RELEASING.md](RELEASING.md).
+[docs/releasing.md](docs/releasing.md).
 
 ## Conventions that are not negotiable
 

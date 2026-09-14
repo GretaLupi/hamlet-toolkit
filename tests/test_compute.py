@@ -235,3 +235,166 @@ def test_a_gpu_is_offered_on_linux_only(monkeypatch):
         assert options["gpu_possible_here"] is False
         # And says where a GPU is actually reachable from here.
         assert "cluster" in options["gpu_elsewhere_note"]
+
+
+# --- the run directory on the cluster ---------------------------------------
+
+def test_a_tilde_survives_quoting():
+    """`shlex.quote` makes a tilde literal; rsync expands it. That disagreement
+    sent mkdir and rsync to different directories.
+
+    The symptom was rsync failing on a parent that mkdir had been told to
+    create -- mkdir had made a directory named `~` instead.
+    """
+    from hamlet.cluster import quote_remote_path
+
+    assert quote_remote_path("~/scratch/work/me/runs") == "~/scratch/work/me/runs"
+    assert quote_remote_path("~") == "~"
+    assert quote_remote_path("~someone/runs") == "~someone/runs"
+    # Absolute paths are quoted as before.
+    assert quote_remote_path("/scratch/work/me") == "/scratch/work/me"
+    # And a space is still protected, without swallowing the tilde.
+    quoted = quote_remote_path("~/with space/runs")
+    assert quoted.startswith("~/") and "with space" in quoted
+    assert "'" in quoted
+
+
+def test_a_directory_that_cannot_be_made_is_reported(tmp_path):
+    """The mkdir result used to be discarded, so the run failed later and
+    somewhere else."""
+    from hamlet.cluster import ClusterConfig, ClusterSession, get_profile
+
+    class RefusingRunner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, argv, input_text=None, timeout=None):
+            from hamlet.cluster import CommandResult
+
+            self.commands.append(argv)
+            if any("mkdir" in part for part in argv):
+                return CommandResult(tuple(argv), 1, "", "Permission denied")
+            return CommandResult(tuple(argv), 0, "", "")
+
+    runner = RefusingRunner()
+    session = ClusterSession(
+        ClusterConfig(remote_dir="/nope/runs", scheduler=get_profile("slurm"),
+                      host="you@cluster"),
+        runner=runner,
+    )
+    with pytest.raises(RuntimeError, match="creating /nope/runs"):
+        session.stage(tmp_path)
+    # And it stopped before copying anything.
+    assert not any("rsync" in str(argv) for argv in runner.commands)
+
+
+def test_the_cluster_can_be_browsed_for_a_run_directory():
+    """Sites differ on where work belongs, so the alternative to listing is
+    typing a path from memory and finding out at rsync time."""
+    from hamlet.cluster import ClusterConfig, ClusterSession, get_profile
+
+    # No host: the same code path lists the local filesystem, which is also
+    # the login-node case.
+    session = ClusterSession(
+        ClusterConfig(remote_dir="~", scheduler=get_profile("slurm"))
+    )
+    listing = session.list_directories("~")
+    assert listing["readable"] is True
+    # An absolute path from the far end, so nothing later depends on how a
+    # tilde is expanded.
+    assert listing["path"].startswith("/")
+    assert listing["parent"].startswith("/")
+    assert all(not name.endswith("/") for name in listing["entries"])
+
+
+def test_an_unlistable_directory_reports_rather_than_raises():
+    from hamlet.cluster import ClusterConfig, ClusterSession, get_profile
+
+    session = ClusterSession(
+        ClusterConfig(remote_dir="~", scheduler=get_profile("slurm"))
+    )
+    listing = session.list_directories("/definitely/not/here")
+    assert listing["readable"] is False
+    assert listing["detail"]
+
+
+def test_browsing_needs_an_address_before_it_needs_a_saved_file(tmp_path, monkeypatch):
+    """The first thing anyone does is type an address and want to look."""
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    with pytest.raises(ValueError, match="no cluster is configured"):
+        api.browse_cluster("~")
+    with pytest.raises(ValueError, match="address you ssh to"):
+        api.browse_cluster("~", form={"remote_dir": "/x"})
+
+
+def test_the_connection_test_checks_that_hamlet_is_installed_there():
+    """The cluster runs the code, so a missing package is a failed job.
+
+    Without this the first sign is a batch job that starts, finds whatever
+    python the site defaults to, and stops with `No module named 'hamlet'`
+    minutes later -- after the project has been staged and the queue entered.
+    """
+    from hamlet.cluster import ClusterConfig, ClusterSession, get_profile
+
+    # This interpreter has hamlet, so the local path is the happy case.
+    session = ClusterSession(
+        ClusterConfig(remote_dir="/tmp", scheduler=get_profile("slurm"),
+                      python="python")
+    )
+    found = session.check_toolkit()
+    assert found["available"] is True
+    assert found["version"]
+
+    # A python without it reports unavailable and keeps the error to show.
+    missing = ClusterSession(
+        ClusterConfig(remote_dir="/tmp", scheduler=get_profile("slurm"),
+                      python="/usr/bin/python3")
+    ).check_toolkit()
+    if missing["available"]:  # pragma: no cover - the system python may have it
+        pytest.skip("the system python has hamlet installed")
+    assert missing["detail"], "an unavailable toolkit must say why"
+    assert missing["python"] == "/usr/bin/python3"
+
+
+def test_the_check_runs_the_setup_lines_first():
+    """`module load` and a venv activation are what make python find it."""
+    from hamlet.cluster import ClusterConfig, ClusterSession, get_profile
+
+    class RecordingRunner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, argv, input_text=None, timeout=None):
+            from hamlet.cluster import CommandResult
+
+            self.commands.append(argv)
+            return CommandResult(tuple(argv), 0, "0.1.0", "")
+
+    runner = RecordingRunner()
+    ClusterSession(
+        ClusterConfig(
+            remote_dir="/tmp", scheduler=get_profile("slurm"), host="you@cluster",
+            setup_lines=("module load python", "source ~/venvs/hamlet/bin/activate"),
+        ),
+        runner=runner,
+    ).check_toolkit()
+
+    sent = runner.commands[-1][-1]
+    assert "module load python" in sent
+    assert "source ~/venvs/hamlet/bin/activate" in sent
+    # And the probe runs after them, not before.
+    assert sent.index("module load") < sent.index("import hamlet")
+
+
+def test_the_job_script_can_cd_into_a_tilde_path():
+    """The same quoting that broke mkdir would break the script's own cd."""
+    from hamlet.cluster import ClusterConfig, get_profile, render_job_script
+
+    script = render_job_script(
+        ClusterConfig(remote_dir="~/scratch/runs", scheduler=get_profile("slurm")),
+        "python -m hamlet.project_cli run project.yaml",
+    )
+    assert "cd ~/scratch/runs" in script
+    assert "cd '~/scratch/runs'" not in script

@@ -1,0 +1,32 @@
+# Reuse a trained artifact on a new measurement, skipping generation and
+# training entirely.
+#
+# This is the configuration to copy once a model already exists that matches
+# the system under study. `hamlet run` re-verifies the artifact's contract --
+# system, view, exact cutoff, observable, chain-length rule, and its recorded
+# metrics -- before using it, and refuses rather than extrapolating when the
+# measurement does not match. `hamlet advise <measurement> --cutoff <meV>`
+# performs the same checks without running anything.
+config_schema_version: 1
+name: Follow-up chain
+
+system_type: inhomogeneous_heisenberg
+
+# The trained artifact directory: what `hamlet run` wrote, or one of the
+# published models under src/hamlet/resources/models. A relative path is
+# resolved against this file.
+artifact: ../results/my-first-run/run-a1b2c3d4/artifact
+
+experiment:
+  # One measurement. A manifest written by `hamlet import-experiment`, or a
+  # canonical measurement NPZ, or a CSV of site / bias / dI/dV columns.
+  manifest: ../results/gui-experiments/new_chain/experiment_manifest.json
+
+output_dir: ../results/follow-up-analysis
+
+training:
+  # The cutoff is part of the artifact's contract rather than a free choice:
+  # it must equal the one the model was trained at, and a mismatch is
+  # reported instead of being quietly accommodated.
+  cutoffs_mev: [50]
+  manual_cutoff_mev: 50

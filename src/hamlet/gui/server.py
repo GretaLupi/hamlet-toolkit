@@ -208,6 +208,13 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json(api.build_cluster_config(payload["form"]))
                 else:
                     self._send_json(api.write_cluster_config(payload["text"]))
+            elif route == "/api/browse-cluster":
+                self._send_json(
+                    api.browse_cluster(
+                        str(payload.get("path") or "~"),
+                        form=payload.get("form") or None,
+                    )
+                )
             elif route == "/api/check-cluster":
                 self._send_json(api.check_cluster())
             elif route == "/api/cluster-script":

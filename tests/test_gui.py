@@ -2380,14 +2380,22 @@ def test_the_page_shows_the_logo_and_sets_a_tab_icon():
     assert 'alt="HamLeT' in html
     assert "<title>HamLeT</title>" in html
 
-    # Exactly one icon is offered. When several match, browsers take the last
-    # usable one, and `media` on a favicon is honoured by some and ignored by
-    # others -- so any ordering that is right in one browser puts the wrong
-    # art in another's tab strip.
+    # Several icons are fine when they differ by size -- browsers pick by
+    # size reliably, and every size here is legible, so a wrong pick is
+    # harmless. They must never differ by `media`: that attribute is honoured
+    # by some browsers and ignored by others, so any ordering correct in one
+    # puts the wrong art in another's tab strip, and white on white is
+    # invisible rather than merely wrong.
     import re as _re
 
     icons = _re.findall(r'<link rel="icon"[^>]*>', html)
-    assert len(icons) == 1, f"more than one icon link: {icons}"
+    assert icons, "no icon link"
+    assert not [item for item in icons if "media=" in item], (
+        "a media-switched favicon can resolve to the invisible one"
+    )
+    sizes = [_re.search(r'sizes="([^"]+)"', item) for item in icons]
+    assert all(sizes), "every icon link must declare its size"
+    assert len({s.group(1) for s in sizes}) == len(icons), "two icons claim one size"
 
 
 def test_the_tab_icon_fills_the_tab():
@@ -2399,6 +2407,10 @@ def test_the_tab_icon_fills_the_tab():
     from PIL import Image
     import numpy as np
 
+    # Each file is checked at the size it is actually served for, because a
+    # 16px icon downscaled from 256 is not the same picture as one drawn at 16.
+    for name in ("hamlet-icon.png", "hamlet-icon-32.png", "hamlet-icon-16.png"):
+        assert (STATIC_ROOT / name).exists(), f"{name} is referenced but missing"
     icon = Image.open(STATIC_ROOT / "hamlet-icon.png").convert("RGBA")
     width, height = icon.size
     assert width == height, f"a non-square icon is letterboxed into the tab: {icon.size}"

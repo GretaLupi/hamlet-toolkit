@@ -1295,7 +1295,7 @@ def screening_preview(config_path: str | Path) -> dict[str, Any]:
     regardless of measurement quality, and saying so instantly is the single
     most useful thing this screen can do.
     """
-    from ..dmi_design import load_screening_config
+    from ..dmi_design import load_screening_config, screening_cost
 
     designs, protocol = load_screening_config(str(config_path))
     candidates = [
@@ -1313,6 +1313,16 @@ def screening_preview(config_path: str | Path) -> dict[str, Any]:
             ],
             "transverse_field_mev": design.transverse_field_mev,
             "breaks_symmetry": bool(design.breaks_symmetry),
+            # The counting rule can be optimistic: when the impurity spacings
+            # are a multiple of pi/alpha, one global rotation restores them
+            # all and D_z stays hidden despite the count.
+            "gauge_undone": bool(design.gauge_undoes_the_impurities),
+            # What this design will cost, before anything is run. No ceiling
+            # is imposed -- S=5/2 adatoms are ordinary in this literature, so
+            # refusing them would refuse real experiments -- but a design that
+            # will be solved approximately has to say so before the run, not
+            # only in the table afterwards.
+            "cost": screening_cost(design),
         }
         for design in designs
     ]
@@ -1554,6 +1564,36 @@ def check_cluster() -> dict[str, Any]:
 
     cluster = ClusterConfig.from_file(_cluster_config_path())
     return ClusterSession(cluster).check_connection()
+
+
+def browse_cluster(path: str = "~", *, form: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Directories on the cluster, so the run folder can be chosen not typed.
+
+    Takes the address from the form when one is open, rather than only from
+    the saved file: the first thing anyone does is type an address and then
+    want to look at what is there, which would otherwise mean saving settings
+    that have not been tested yet.
+    """
+    from ..cluster import ClusterConfig, ClusterSession, get_profile
+
+    if form:
+        host = str(form.get("host", "")).strip()
+        if not host:
+            raise ValueError("enter the address you ssh to first")
+        cluster = ClusterConfig(
+            remote_dir=str(form.get("remote_dir") or "~"),
+            scheduler=get_profile(str(form.get("scheduler") or "slurm")),
+            host=host,
+        )
+    else:
+        saved = _cluster_config_path()
+        if not saved.exists():
+            raise ValueError(
+                "no cluster is configured yet: enter the address you ssh to, "
+                "then browse"
+            )
+        cluster = ClusterConfig.from_file(saved)
+    return ClusterSession(cluster).list_directories(path)
 
 
 def cluster_script(config_path: str | Path) -> dict[str, Any]:

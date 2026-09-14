@@ -22,7 +22,7 @@ is a cluster this can drive.
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shlex
 import subprocess
@@ -301,6 +301,25 @@ def profile_from_mapping(payload: Mapping[str, Any]) -> SchedulerProfile:
     return profile
 
 
+def quote_remote_path(path: str) -> str:
+    """Quote a remote path, leaving a leading ``~`` able to expand.
+
+    ``shlex.quote`` wraps the whole thing in single quotes, inside which a
+    remote shell will not expand a tilde -- so ``mkdir -p '~/runs/x'`` makes a
+    directory literally named ``~``. rsync, meanwhile, hands its path to the
+    remote shell unquoted and the tilde *does* expand, so the two disagreed
+    about where the run was going and the only symptom was rsync failing on a
+    parent directory that mkdir had been told to create.
+    """
+    if not path.startswith("~"):
+        return shlex.quote(path)
+    head, separator, rest = path.partition("/")
+    if not separator:
+        # Bare "~" or "~user": nothing to quote, and quoting would break it.
+        return head
+    return f"{head}/{shlex.quote(rest)}" if rest else f"{head}/"
+
+
 def _looks_like_an_auth_refusal(detail: str) -> bool:
     """Whether ssh declined for want of a usable key.
 
@@ -493,7 +512,7 @@ def render_job_script(
         # a run that produced nothing, which is worse than failing.
         "set -euo pipefail",
         "",
-        f"cd {shlex.quote(directory)}",
+        f"cd {quote_remote_path(directory)}",
     ]
     if cluster.setup_lines:
         lines += ["", "# Environment, as configured for this cluster."]
@@ -605,6 +624,9 @@ class ClusterSession:
         scheduler_found = reachable and "NO_SCHEDULER" not in result.stdout
         detail = (result.stderr or result.stdout).strip()
         needs_key = not reachable and _looks_like_an_auth_refusal(detail)
+        toolkit = self.check_toolkit() if reachable else {
+            "available": False, "version": "", "detail": "", "python": self.cluster.python
+        }
         return {
             "host": self.cluster.host or "this machine",
             "reachable": reachable,
@@ -613,6 +635,74 @@ class ClusterSession:
             "detail": detail,
             "needs_key": needs_key,
             "hint": _connection_hint(reachable, needs_key, self.cluster.host),
+            "toolkit": toolkit,
+        }
+
+    def check_toolkit(self) -> dict[str, Any]:
+        """Whether the cluster can actually run HamLeT, under its own setup.
+
+        The job script runs ``python -m hamlet.project_cli`` after the setup
+        lines, so the only question that matters is whether *that* python,
+        after *those* lines, can import the package. Asking it here turns a
+        job that dies minutes later with ``No module named 'hamlet'`` into a
+        red line on the page before anything is submitted.
+        """
+        probe = (
+            f"{self.cluster.python} -c "
+            "'import hamlet; print(hamlet.__version__)'"
+        )
+        setup = list(self.cluster.setup_lines)
+        # Joined with newlines and run as one shell, so `module load` and a
+        # venv activation take effect exactly as they will in the job.
+        script = "\n".join([*setup, probe]) if setup else probe
+        result = self.run_remote(script)
+        version = result.stdout.strip().splitlines()[-1] if result.stdout.strip() else ""
+        available = result.ok and bool(version) and not version.startswith("Error")
+        return {
+            "available": available,
+            "version": version if available else "",
+            "python": self.cluster.python,
+            "detail": "" if available else (result.stderr or result.stdout).strip(),
+        }
+
+    def list_directories(self, path: str = "~") -> dict[str, Any]:
+        """Directories under ``path`` on the cluster, for choosing where to run.
+
+        Exists because the alternative is typing a path from memory. Sites
+        differ on where work belongs -- ``/scratch``, ``$WRKDIR``, a project
+        share -- and a wrong guess surfaces as an rsync failure after the
+        settings have been saved and a job started.
+
+        One ``ls`` over the connection that is already required to work; the
+        output is names, not a shell, and unreadable directories are reported
+        rather than raising.
+        """
+        target = path.strip() or "~"
+        # `cd` first so a relative answer is impossible, then print the
+        # directory that was actually reached: ~ and symlinks both mean the
+        # displayed path should come from the far end, not from what was typed.
+        command = (
+            f"cd {quote_remote_path(target)} 2>/dev/null && pwd && "
+            "ls -1A --file-type 2>/dev/null | grep '/$' || true"
+        )
+        result = self.run_remote(command)
+        lines = [line for line in result.stdout.splitlines() if line.strip()]
+        if not result.ok or not lines:
+            return {
+                "path": target,
+                "entries": [],
+                "readable": False,
+                "detail": (result.stderr or result.stdout).strip()
+                or f"{target} could not be listed",
+            }
+        here, *entries = lines
+        names = sorted(name.rstrip("/") for name in entries)
+        return {
+            "path": here.strip(),
+            "parent": str(PurePosixPath(here.strip()).parent),
+            "entries": names,
+            "readable": True,
+            "detail": "",
         }
 
     def stage(self, local_dir: str | Path) -> CommandResult:
@@ -628,7 +718,15 @@ class ClusterSession:
                 return CommandResult(("true",), 0, "already in place", "")
         else:
             destination = f"{self.cluster.host}:{self.cluster.remote_dir}"
-        self.run_remote(f"mkdir -p {shlex.quote(self.cluster.remote_dir)}")
+        # Checked, not fired and forgotten: if the directory cannot be made,
+        # rsync fails afterwards with a message about the destination and
+        # nothing points at the cause.
+        made = self.run_remote(
+            f"mkdir -p {quote_remote_path(self.cluster.remote_dir)}"
+        )
+        made.raise_for_status(
+            f"creating {self.cluster.remote_dir} on {self.cluster.host or 'this machine'}"
+        )
         return self.runner.run(
             (*self.cluster.rsync_command, source, destination), timeout=3600.0
         )
@@ -638,8 +736,9 @@ class ClusterSession:
         profile = self.cluster.scheduler
         remote_script = f"{self.cluster.remote_dir.rstrip('/')}/{script_name}"
         write = self.run_remote(
-            f"mkdir -p {shlex.quote(self.cluster.remote_dir)} && "
-            f"cat > {shlex.quote(remote_script)} && chmod +x {shlex.quote(remote_script)}",
+            f"mkdir -p {quote_remote_path(self.cluster.remote_dir)} && "
+            f"cat > {quote_remote_path(remote_script)} && "
+            f"chmod +x {quote_remote_path(remote_script)}",
             input_text=script_text,
         )
         write.raise_for_status("writing the job script")

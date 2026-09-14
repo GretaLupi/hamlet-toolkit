@@ -424,3 +424,192 @@ def test_the_form_sends_one_species_per_site(tmp_path):
 
     saved = yaml.safe_load(Path(built["config_path"]).read_text(encoding="utf-8"))
     assert saved["chain"]["site_spin"] == "S=1"
+
+
+# --- the gauge can undo what the counting rule allows ------------------------
+
+def test_the_symmetry_count_is_optimistic_at_particular_spacings():
+    """Two anisotropic impurities are not always enough.
+
+    The anisotropy enters as cos(2 phi), so it survives a half turn, and the
+    gauge separates impurities at s_i and s_1 by (s_i - s_1) * alpha with
+    sin(alpha) = D_z / j_eff. When every separation is a multiple of pi, one
+    global rotation restores the lot and D_z stays hidden -- while the rule
+    that counts impurities still says the design works.
+    """
+    import numpy as np
+
+    from hamlet.dmi_design import DmiDesign, transverse_impurities
+
+    # Four sites apart needs alpha = pi/4, i.e. D_z / j_eff = sin(pi/4).
+    j_eff = 5.0
+    design = DmiDesign(
+        8, j_eff, j_eff * float(np.sin(np.pi / 4)), 5.5,
+        impurities=transverse_impurities([1, 5], 2.0, spin="S=1"),
+    )
+    assert design.breaks_symmetry, "the counting rule should still say yes"
+    assert design.gauge_undoes_the_impurities, "and the geometry should say no"
+
+    # Moving one impurity by a single site removes it.
+    rescued = DmiDesign(
+        8, j_eff, j_eff * float(np.sin(np.pi / 4)), 5.5,
+        impurities=transverse_impurities([1, 6], 2.0, spin="S=1"),
+    )
+    assert not rescued.gauge_undoes_the_impurities
+
+
+def test_an_ordinary_design_is_not_flagged():
+    from hamlet.dmi_design import DmiDesign, transverse_impurities
+
+    design = DmiDesign(
+        8, 5.0, 1.5, 5.5, impurities=transverse_impurities([1, 6], 2.0, spin="S=1")
+    )
+    assert design.breaks_symmetry
+    assert not design.gauge_undoes_the_impurities
+
+
+def test_a_field_is_not_undone_this_way():
+    """The field is rotated into a spiral, which no global rotation restores."""
+    from hamlet.dmi_design import DmiDesign
+
+    design = DmiDesign(8, 5.0, 5.0, 5.5, transverse_field_mev=1.0)
+    assert design.breaks_symmetry
+    assert not design.gauge_undoes_the_impurities
+
+
+def test_the_table_names_the_designs_the_gauge_undoes():
+    import numpy as np
+
+    from hamlet.dmi_design import (
+        DmiDesign, DmiImprint, format_screening_table, transverse_impurities,
+    )
+
+    j_eff = 5.0
+    design = DmiDesign(
+        8, j_eff, j_eff * float(np.sin(np.pi / 4)), 5.5,
+        impurities=transverse_impurities([1, 5], 2.0, spin="S=1"),
+        label="degenerate spacing",
+    )
+    table = format_screening_table([
+        DmiImprint(design=design, imprint=0.14, verdict="promising",
+                   predicted_to_break_symmetry=True, detail={"exact": True})
+    ])
+    assert "degenerate spacing" in table
+    assert "one global rotation" in table
+    assert "Move an impurity by one site" in table
+
+
+def test_the_preview_costs_a_design_before_it_is_run(tmp_path):
+    """No ceiling -- S=5/2 adatoms are ordinary -- but no surprises either."""
+    from hamlet.gui import api
+
+    built = api.build_screening_config({
+        "name": "heavy",
+        "chain": {"n_sites": 8, "j_eff_mev": 5.0, "d_z_mev": 1.5, "site_spin": "S=2"},
+        "protocol": {"bias_range_mev": [0, 20], "bias_points": 21,
+                     "broadening_mev": 0.25},
+        "candidates": [{"label": "heavy", "sites": [1, 6],
+                        "spins": ["S=5/2", "S=5/2"], "transverse_mev": 2.0}],
+    }, workspace=tmp_path)
+
+    preview = api.screening_preview(built["config_path"])
+    cost = preview["candidates"][0]["cost"]
+    assert cost["hilbert_dimension"] > 100_000
+    assert cost["dynamics_mode"] == "DMRG"
+    # It will be approximate, and says so before the run rather than after.
+    assert cost["exact"] is False
+    assert cost["exact_bond_dimension"] > cost["bond_dimension"]
+
+
+def test_the_page_does_not_submit_its_own_card_state():
+    """The bug this pins was reported from the running interface.
+
+    `readCandidates()` returns each card's full state, including the default
+    species applied when a new site is clicked. That default is not part of
+    the design, and a payload carrying it alongside the per-site list is
+    exactly the ambiguity both the API and the library refuse -- so every
+    screen failed with "gives both spin and spins" before the first
+    simulation.
+
+    The earlier tests missed it because they built the payload by hand rather
+    than the way the page builds it, which is the only place the two keys met.
+    """
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "hamlet" / "gui" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    assert "function submitCandidates" in script
+    # The form submits the stripped list, not the card state.
+    assert "candidates: submitCandidates()," in script
+    assert "candidates: readCandidates()," not in script
+    body = script[script.index("function submitCandidates") :][:400]
+    assert "spin, ...design" in body, "the card default is still being sent"
+
+
+def test_the_defaults_the_page_ships_screen_without_editing(tmp_path):
+    """What a user gets by opening the page and pressing the button."""
+    from hamlet.gui import api
+
+    defaults = api.describe_screening_options()["defaults"]
+    # The page turns each shipped candidate into per-site species and drops
+    # the card default, which is what submitCandidates() produces.
+    candidates = [
+        {
+            "label": entry["label"],
+            "sites": ", ".join(str(site) for site in entry["sites"]),
+            "spins": [entry["spin"]] * len(entry["sites"]),
+            "transverse_mev": entry["transverse_mev"],
+            "axial_mev": entry["axial_mev"],
+            "transverse_field_mev": entry["transverse_field_mev"],
+        }
+        for entry in defaults["candidates"]
+    ]
+    built = api.build_screening_config({
+        "name": "which arrangement can measure DMI?",
+        "chain": defaults["chain"],
+        "protocol": defaults["protocol"],
+        "candidates": candidates,
+    }, workspace=tmp_path)
+
+    assert built["n_candidates"] == len(candidates)
+    assert built["n_can_break_symmetry"] >= 1
+
+
+def test_an_empty_site_list_is_not_an_impurity_at_site_zero():
+    """`Number("")` is 0 in JavaScript, and 0 is a valid site.
+
+    So the field-only arrangement parsed its empty site list as a substitution
+    at site 0: it drew an impurity it did not have, and sent one species for
+    no sites, which the server refused. The server's parser always filtered
+    empty pieces first; the page now does the same.
+    """
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "hamlet" / "gui" / "static" / "app.js"
+    ).read_text(encoding="utf-8")
+
+    body = script[script.index("function parseSites") :]
+    body = body[: body.index("\n}")]
+    filter_at = body.index('.filter((part) => part.trim() !== "")')
+    map_at = body.index(".map((part) => Number(part.trim()))")
+    assert filter_at < map_at, "empty pieces must be dropped before conversion"
+
+
+def test_a_field_only_arrangement_needs_no_species(tmp_path):
+    """What the page sends for 'no impurities, 1 meV transverse field'."""
+    from hamlet.gui import api
+
+    built = api.build_screening_config({
+        "name": "field only",
+        "chain": {"n_sites": 8, "j_eff_mev": 5.0, "d_z_mev": 1.5},
+        "protocol": {"bias_range_mev": [0, 20], "bias_points": 21,
+                     "broadening_mev": 0.25},
+        "candidates": [{"label": "field only", "sites": "", "spins": [],
+                        "transverse_mev": 0.0, "transverse_field_mev": 1.0}],
+    }, workspace=tmp_path)
+
+    candidate = built["candidates"][0]
+    assert candidate["impurities"] == []
+    # A field breaks the symmetry on its own, so it is still a viable design.
+    assert candidate["breaks_symmetry"] is True

@@ -193,7 +193,7 @@ model. See the [DMI experiment specification](docs/dmi-experiment-spec.md).
 
 - Changes: [CHANGELOG.md](CHANGELOG.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Releasing: [RELEASING.md](RELEASING.md)
+- Releasing: [docs/releasing.md](docs/releasing.md)
 - Security reports: [SECURITY.md](SECURITY.md)
 - Citation metadata: [CITATION.cff](CITATION.cff)
 

@@ -195,6 +195,20 @@ Mixing species does not change the symmetry rule. The rotation that hides a DM
 vector acts with the same phase at every site regardless of its spin, so what
 matters is still two transverse-anisotropy impurities at distinct sites.
 
+**When two impurities are not enough.** The rule that two
+transverse-anisotropy impurities at distinct sites expose `D_z` has one
+exception, and the screening now reports it rather than leaving you to find it
+by simulating. The anisotropy enters as cos(2φ), so it survives a half turn,
+and the gauge that hides `D_z` separates impurities at sites *s*₁ and *s*ᵢ by
+(*s*ᵢ − *s*₁)·α, with sin α = D_z/J_eff. When every separation is a multiple
+of π, one global rotation restores all of them at once and `D_z` stays hidden —
+while the impurity count still says the design works.
+
+It needs the spacing and the ratio to land on it, which is unlikely by
+accident and quite likely when choosing round numbers. Such designs are marked
+**optimistic** in the interface and with `!` in the table, and moving one
+impurity by a single site removes the degeneracy.
+
 **Cost, and what "promising" means.** Raising the spin raises the Hilbert
 space sharply — eight spin-1 sites is 6561 states against 256 — and screening
 picks exact diagonalisation or DMRG per design rather than fixing one. When it

@@ -4,12 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>HamLeT</title>
-<!-- One icon, not a media-query pair. When several icon links match, browsers
-     take the last usable one, and `media` on a favicon is honoured by some
-     and ignored by others -- so any ordering that is right in Chrome is wrong
-     in a browser that ignores it, and the tab ends up with white art on a
-     white strip. A single mark is the only arrangement that cannot pick the
-     invisible one. -->
+<!-- Three sizes of the same mark, chosen by `sizes`. Browsers select an
+     icon by size reliably, which is why this is safe where a `media` pair was
+     not: there the attribute is honoured by some and ignored by others, so
+     any ordering correct in one browser puts the wrong art in another's tab.
+     Here the worst case is a browser picking a neighbouring size, and every
+     one of them is legible.
+     The two small files are the letter alone, because at 16 pixels the hand
+     becomes a smudge and takes the letter down with it; from 64 upward there
+     is room for the whole mark, so that is what a bookmark and a home screen
+     get. Each is rendered at the size it is shown at, not downscaled. -->
+<link rel="icon" type="image/png" sizes="16x16" href="/hamlet-icon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/hamlet-icon-32.png">
 <link rel="icon" type="image/png" sizes="256x256" href="/hamlet-icon.png">
 <link rel="apple-touch-icon" sizes="256x256" href="/hamlet-icon.png">
 <link rel="stylesheet" href="/style.css">
@@ -497,7 +503,9 @@ ssh you@cluster.example.edu true</pre>
       <input type="text" id="cl-remote-dir" placeholder="/scratch/work/you/hamlet"
              style="width:26em" autocomplete="off">
     </label>
+    <button type="button" id="cl-browse">Browse the cluster…</button>
   </div>
+  <div id="cl-browse-out"></div>
 
   <p class="hint">
     What to ask the scheduler for. Leave anything blank to accept your site's

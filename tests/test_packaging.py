@@ -292,12 +292,11 @@ def test_source_distribution_manifest_contains_public_release_material():
         "CHANGELOG.md",
         "CITATION.cff",
         "CONTRIBUTING.md",
-        "RELEASING.md",
         "SECURITY.md",
     ):
         assert f"include {name}" in text
-    assert "include docs/user-guide.md" in text
-    assert "include docs/dmi-experiment-spec.md" in text
+    for name in ("user-guide.md", "dmi-experiment-spec.md", "releasing.md"):
+        assert f"include docs/{name}" in text
     assert "recursive-include examples" in text
 
 

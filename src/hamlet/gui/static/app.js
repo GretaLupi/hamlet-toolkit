@@ -1513,7 +1513,11 @@ function candidateCard(entry, index) {
     <input type="hidden" class="cand-spins" value="${esc((entry.spins || []).join(","))}">
     <div class="cand-spin-rows"></div>
     <div class="row">
-      <label>new sites get <select class="cand-spin">${spinOptions(entry.spin)}</select></label>
+      <label>default for a new site <select class="cand-spin">${
+        spinOptions(entry.spin)}</select>
+        <button type="button" class="info" data-info="cand-default-spin-${index}"
+          aria-expanded="false" aria-controls="cand-default-spin-${index}"
+          title="What does this do?">i</button></label>
       <label>transverse E <input type="number" class="cand-transverse" step="0.1"
         value="${entry.transverse_mev ?? 2.0}" style="width:5.5em"> meV</label>
       <label>axial D <input type="number" class="cand-axial" step="0.1"
@@ -1521,6 +1525,13 @@ function candidateCard(entry, index) {
       <label>field B <input type="number" class="cand-field" step="0.1"
         value="${entry.transverse_field_mev ?? 0}" style="width:5.5em"> meV</label>
     </div>
+    <p class="hint info-body" id="cand-default-spin-${index}" hidden>
+      The species used when you click a <em>new</em> site onto the chain above.
+      It is only a starting value: once a site is on the chain it gets its own
+      selector in <b>species at each site</b>, and they need not match &mdash;
+      one arrangement can mix species, which is the point of listing them
+      separately.
+    </p>
     <p class="hint cand-verdict"></p>
   </div>`;
 }
@@ -1534,6 +1545,12 @@ function parseSites(text) {
   return String(text || "")
     .replace(/;/g, ",")
     .split(",")
+    // Empty pieces dropped before conversion, not after: Number("") is 0, and
+    // 0 is a valid site, so an empty list parsed as an impurity at site 0.
+    // The field-only arrangement therefore drew a substitution it did not
+    // have, and sent one species for no sites -- which the server refused.
+    // The server's own parser has always filtered first; this now matches it.
+    .filter((part) => part.trim() !== "")
     .map((part) => Number(part.trim()))
     .filter((value) => Number.isInteger(value) && value >= 0);
 }
@@ -1576,7 +1593,7 @@ function renderSpinRows(card, sites, spins) {
   // impurity has nothing to differ from, and the row would just repeat the
   // default above it.
   host.innerHTML = `<div class="row spin-rows">
-    <span class="hint">species at each site</span>
+    <span class="hint">species at each site (each can differ)</span>
     ${sites.map((site, index) => `<label>${site}
       <select class="cand-site-spin" data-index="${index}">${
         spinOptions(spins[index])}</select></label>`).join("")}
@@ -1658,11 +1675,11 @@ function readCandidates() {
   return [...el("d-candidates").querySelectorAll(".candidate")].map((card) => ({
     label: card.querySelector(".cand-label").value.trim(),
     sites: card.querySelector(".cand-sites").value,
-    // The card's default for a site clicked next; not sent to the server.
+    // The card's default for a site clicked next. It is part of the card's
+    // state, not of the design, and submitCandidates() drops it -- a payload
+    // carrying both `spin` and `spins` is refused, because which one wins
+    // would otherwise be a silent guess.
     spin: card.querySelector(".cand-spin").value,
-    // `spins` only. Sending both leans on the server preferring one of them,
-    // and the library rejects a configuration that gives both -- a
-    // disagreement worth not having in the first place.
     spins: candidateSpins(card, parseSites(card.querySelector(".cand-sites").value)),
     transverse_mev: Number(card.querySelector(".cand-transverse").value),
     axial_mev: Number(card.querySelector(".cand-axial").value),
@@ -1688,8 +1705,19 @@ function readScreeningForm() {
       broadening_mev: Number(el("d-broadening").value),
       observable: el("d-observable").value,
     },
-    candidates: readCandidates(),
+    candidates: submitCandidates(),
   };
+}
+
+/** The candidates as the server takes them.
+ *
+ * `readCandidates()` returns the cards' full state, including the per-card
+ * default species used when a new site is clicked. That default is not part
+ * of the design, and sending it alongside the per-site list is precisely the
+ * ambiguity both this API and the library refuse.
+ */
+function submitCandidates() {
+  return readCandidates().map(({ spin, ...design }) => design);
 }
 
 function symmetryTable(d) {
@@ -1700,14 +1728,26 @@ function symmetryTable(d) {
     </div>
     ${incompatible ? `<p class="hint">${incompatible} will be skipped because
       the symmetry prevents them from constraining D_z.</p>` : ""}
-    <table><tr><th>Design</th><th>Impurities</th><th>Field</th><th>Can expose DMI?</th></tr>
+    <table><tr><th>Design</th><th>Impurities</th><th>Field</th><th>Can expose DMI?</th>
+      <th>Cost to screen</th></tr>
     ${d.candidates.map((c) => `<tr>
       <td>${esc(c.label)}</td>
       <td>${c.impurities.map((i) => `site ${i.site} ${esc(i.spin)} E=${i.transverse_mev}`).join("<br>") || "none"}</td>
       <td class="num">${c.transverse_field_mev || 0} meV</td>
-      <td>${c.breaks_symmetry ? "<b style='color:var(--good)'>yes</b>"
-        : "<span class='pill hidden'>no</span>"}</td></tr>`).join("")}
+      <td>${c.gauge_undone
+        ? "<b style='color:var(--warn)'>optimistic</b>"
+        : c.breaks_symmetry ? "<b style='color:var(--good)'>yes</b>"
+        : "<span class='pill hidden'>no</span>"}</td>
+      <td class="hint">${c.cost ? `${c.cost.hilbert_dimension.toLocaleString()} states
+        · ${esc(c.cost.dynamics_mode)}${c.cost.exact ? ""
+        : ` · <b style="color:var(--warn)">approximate</b>`}` : ""}</td></tr>`).join("")}
     </table>
+    ${(d.candidates || []).some((c) => c.gauge_undone) ? `<p class="hint failtext">
+      <b>Optimistic</b> means the impurity count says the symmetry is broken
+      but the geometry says otherwise: those spacings are a multiple of
+      &pi;/&alpha;, with sin&alpha; = D<sub>z</sub>/J<sub>eff</sub>, so one
+      global rotation restores every impurity at once and D<sub>z</sub> stays
+      hidden. Moving one impurity by a single site removes it.</p>` : ""}
     <p class="hint">Saved as <code>${esc(d.config_path)}</code>, so the same screen
       runs from the command line with
       <code>hamlet screen-dmi ${esc(d.config_path)}</code>.</p>
@@ -1933,6 +1973,49 @@ api("/api/cluster-form").then((saved) => {
     : `will be saved at ${saved.config_path}`;
 }).catch((e) => showError(el("cluster-out"), e));
 
+// Where a run goes is a question about the far end, and sites differ: a
+// wrong guess otherwise shows up as an rsync failure after the settings have
+// been saved and a job started.
+async function browseCluster(path) {
+  const out = el("cl-browse-out");
+  busy(out, `Listing ${path} …`);
+  try {
+    const d = await api("/api/browse-cluster", { path, form: readClusterForm() });
+    if (!d.readable) {
+      out.innerHTML = `<div class="box"><b>${esc(d.path)}</b> could not be listed.
+        <pre class="log">${esc(d.detail)}</pre></div>`;
+      return;
+    }
+    out.innerHTML = `<div class="box">
+      <div class="row" style="justify-content:space-between">
+        <code>${esc(d.path)}</code>
+        <span>
+          <button data-cl-dir="${esc(d.parent)}">↑ up</button>
+          <button class="primary" data-cl-pick="${esc(d.path)}">Run here</button>
+        </span>
+      </div>
+      ${d.entries.length
+        ? `<div class="row">${d.entries.map((name) =>
+            `<button data-cl-dir="${esc(d.path.replace(/\/$/, ""))}/${esc(name)}"
+              >${esc(name)}/</button>`).join("")}</div>`
+        : `<p class="hint">No subdirectories here. <b>Run here</b> uses this one.</p>`}
+    </div>`;
+    out.querySelectorAll("[data-cl-dir]").forEach((b) =>
+      b.addEventListener("click", () => browseCluster(b.dataset.clDir)));
+    out.querySelectorAll("[data-cl-pick]").forEach((b) =>
+      b.addEventListener("click", () => {
+        // An absolute path from the far end, so nothing depends on how a
+        // tilde is expanded later.
+        el("cl-remote-dir").value = b.dataset.clPick;
+        out.innerHTML = `<p class="hint">Run directory set to
+          <code>${esc(b.dataset.clPick)}</code>. Save the settings to keep it.</p>`;
+      }));
+  } catch (e) { showError(out, e); }
+}
+
+el("cl-browse").addEventListener("click", () =>
+  browseCluster(el("cl-remote-dir").value.trim() || "~"));
+
 el("cluster-save").addEventListener("click", async () => {
   const out = el("cluster-out");
   busy(out, "Checking the settings…");
@@ -1957,17 +2040,35 @@ el("cluster-check").addEventListener("click", async () => {
   busy(out, "Connecting through SSH… Check the terminal for any prompt.");
   try {
     const d = await api("/api/check-cluster", {});
-    const ok = d.reachable && d.scheduler_found;
+    const ok = d.reachable && d.scheduler_found
+      && (!d.toolkit || d.toolkit.available);
     out.innerHTML = `<div class="box">
       <div class="verdict ${ok ? "good" : "bad"}">
-        ${ok ? "Connection and scheduler available"
-             : d.reachable ? "Reachable, but the scheduler was not found"
-                           : "Could not reach it"}</div>
+        ${ok ? "Ready: reachable, scheduler present, HamLeT installed"
+             : !d.reachable ? "Could not reach it"
+             : !d.scheduler_found ? "Reachable, but the scheduler was not found"
+             : "Reachable, but HamLeT is not installed there"}</div>
       <table>
         <tr><th>Host</th><td>${esc(d.host)}</td></tr>
         <tr><th>Scheduler</th><td>${esc(d.scheduler)} — ${
           d.scheduler_found ? "found" : "<b>not on the PATH there</b>"}</td></tr>
+        ${d.toolkit ? `<tr><th>HamLeT there</th><td>${d.toolkit.available
+          ? `version ${esc(d.toolkit.version)}, via <code>${esc(d.toolkit.python)}</code>`
+          : `<b>not installed</b> for <code>${esc(d.toolkit.python)}</code>`}</td></tr>`
+          : ""}
       </table>
+      ${d.toolkit && !d.toolkit.available ? `<p><b>The cluster runs the code, so
+        the code has to be there.</b> A job would start, find that python, and
+        stop with <code>No module named 'hamlet'</code>. Install it once on the
+        cluster, in the environment your setup lines activate:</p>
+        <pre class="log">python -m venv ~/venvs/hamlet
+source ~/venvs/hamlet/bin/activate
+pip install "hamlet-toolkit[all]"</pre>
+        <p class="hint">Then put the activation in the setup lines above, so the
+        job uses it. If your site needs a module first, that goes there too
+        &mdash; for example <code>module load python</code>.</p>
+        ${d.toolkit.detail ? `<pre class="log">${esc(d.toolkit.detail)}</pre>` : ""}`
+        : ""}
       ${d.detail ? `<pre class="log">${esc(d.detail)}</pre>` : ""}
       ${d.hint ? (d.needs_key
         // The key setup is three commands to copy, so it is shown as commands

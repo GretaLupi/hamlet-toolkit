@@ -127,9 +127,53 @@ class DmiDesign:
 
         This is free -- no simulation -- and rules out hopeless designs
         immediately. It cannot say whether a surviving design is *strong
-        enough*, which is what :func:`measure_dmi_imprint` measures.
+        enough*, which is what :func:`measure_dmi_imprint` measures, and it
+        can be optimistic at particular geometries: see
+        :attr:`gauge_undoes_the_impurities`.
         """
         return self.gauge_pair()[0].exposes_dmi
+
+    @property
+    def gauge_rotation_rad(self) -> float:
+        """The per-site angle of the rotation that hides ``D_z``.
+
+        The gauge pair trades exchange against DMI at fixed
+        ``sqrt(J1_xy^2 + D_z^2)``, so the rotation that maps one member onto
+        the other turns site ``j`` by ``j * alpha`` with
+        ``sin(alpha) = D_z / j_eff``.
+        """
+        return float(np.arcsin(self.d_z_mev / self.j_eff_mev))
+
+    @property
+    def gauge_undoes_the_impurities(self) -> bool:
+        """Whether a single global rotation can put the impurities back.
+
+        Two transverse-anisotropy impurities expose ``D_z`` because the gauge
+        turns each one's in-plane axis by its own angle, and no global
+        rotation restores both at once. That argument has an exception. The
+        anisotropy enters as ``cos(2 phi)``, so it is invariant under a half
+        turn, and the gauge separates impurities at sites ``s_i`` and ``s_1``
+        by ``(s_i - s_1) * alpha``. When every such separation is a multiple
+        of ``pi``, one global ``R_z`` restores the lot and ``D_z`` stays
+        hidden after all.
+
+        This is narrow -- it needs the site spacing and ``D_z / j_eff`` to
+        land on it -- but it is reachable by choosing round numbers, which is
+        exactly what someone laying out a design does.
+        """
+        sites = sorted({imp.site for imp in self.impurities if imp.transverse_mev})
+        if self.transverse_field_mev or len(sites) < 2:
+            # A field is not undone this way, and fewer than two anisotropic
+            # impurities never exposed D_z to begin with.
+            return False
+        alpha = self.gauge_rotation_rad
+        if alpha <= 0.0:
+            return False
+        separations = [(site - sites[0]) * alpha for site in sites[1:]]
+        remainders = [abs(value % np.pi) for value in separations]
+        return all(
+            min(value, float(np.pi) - value) < 1e-9 for value in remainders
+        )
 
 
 @dataclass(frozen=True)
@@ -326,6 +370,9 @@ def screen_dmi_designs(
     """
     results: list[DmiImprint] = []
     for design in designs:
+        # A design the gauge can undo is simulated rather than skipped: the
+        # counting rule says it breaks the symmetry and the geometry says it
+        # does not, and the imprint is the thing that settles it.
         if skip_symmetric and not design.breaks_symmetry:
             result = DmiImprint(
                 design=design,
@@ -406,6 +453,19 @@ def format_screening_table(results: Sequence[DmiImprint]) -> str:
             "screening\n    allows, so its imprint is a lower bound and the "
             "verdict beside it is\n    not on the scale the calibration below "
             "was measured on."
+        )
+    degenerate = [
+        item.design.name for item in results
+        if item.predicted_to_break_symmetry and item.design.gauge_undoes_the_impurities
+    ]
+    if degenerate:
+        lines.append("")
+        lines.append(
+            "  ! the gauge can be undone by one global rotation for: "
+            + ", ".join(degenerate)
+            + "\n    Their impurity spacings are a multiple of pi/alpha, with "
+            "sin(alpha) = D_z/j_eff,\n    so the symmetry count is optimistic "
+            "for them. Move an impurity by one site."
         )
     lines.append("")
     lines.append("calibration (imprint -> D_z skill actually achieved, at S=1/2 under ED):")
