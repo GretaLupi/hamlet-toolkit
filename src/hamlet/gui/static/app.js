@@ -1441,6 +1441,12 @@ el("f-plan").addEventListener("click", async () => {
           ? `<ul class="checks">${plan.blocking_issues.map((r) =>
               `<li class="fail">${esc(r)}</li>`).join("")}</ul>`
           : ""}
+        ${plan.replaceable_dataset ? `<div class="danger-zone">
+          <button id="f-replace-dataset">Replace that dataset</button>
+          <span class="hint">Deletes
+            <code>${esc(plan.replaceable_dataset)}</code> and its checkpoints,
+            then plans again. Whatever it cost to simulate is not recoverable.</span>
+        </div>` : ""}
         <p class="hint">Saved as <code>${esc(builtConfig.config_path)}</code>,
           writing into <code>${esc(builtConfig.run_dir)}</code>. ${{
             local: `Repeat it with <code>hamlet run ${esc(builtConfig.config_path)}</code>.`,
@@ -1448,6 +1454,19 @@ el("f-plan").addEventListener("click", async () => {
           }[chosenRunTarget]}</p>
       </div>`;
     el("f-run-zone").hidden = (plan.blocking_issues || []).length > 0;
+    const replace = document.getElementById("f-replace-dataset");
+    if (replace) replace.addEventListener("click", async () => {
+      if (!confirm(`Delete ${plan.replaceable_dataset} and its checkpoints?\n\n`
+        + "This cannot be undone, and it is however many hours the simulation took.")) return;
+      replace.disabled = true;
+      try {
+        const done = await api("/api/replace-dataset", { config_path: builtConfig.config_path });
+        out.innerHTML = `<div class="box"><div class="verdict good">Removed ${
+          done.removed.length} item(s)</div><ul class="checks">${done.removed.map((p) =>
+          `<li><code>${esc(p)}</code></li>`).join("")}</ul>
+          <p class="hint">Plan the run again to continue.</p></div>`;
+      } catch (e) { showError(out, e); }
+    });
   } catch (e) { showError(out, e); builtConfig = null; }
 });
 

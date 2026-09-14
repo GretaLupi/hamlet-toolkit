@@ -124,6 +124,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan-json",
         help="with --dry-run, also write the machine-readable plan to this path",
     )
+    run.add_argument(
+        "--replace-dataset",
+        action="store_true",
+        help=(
+            "delete a dataset at the recipe's output path that was generated "
+            "from different settings, instead of refusing to overwrite it"
+        ),
+    )
     inspect = commands.add_parser("inspect", help="inspect an experiment without training")
     inspect.add_argument("config", help="YAML or JSON project configuration")
     import_command = commands.add_parser(
@@ -685,6 +693,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"HTML: {html_path}")
         return 0
     project = HamiltonianLearningProject(ProjectConfig.from_file(args.config))
+    if getattr(args, "replace_dataset", False):
+        # Once, here, before anything is generated or submitted: an array task
+        # treats an existing chunk as work already done, so clearing from
+        # inside a run would mix two recipes rather than replace one.
+        from .data import clear_generation_state
+
+        recipe = project.config.generation
+        if recipe is None:
+            print("--replace-dataset needs a configuration that generates a dataset")
+            return 1
+        for removed in clear_generation_state(recipe.output_path):
+            print(f"removed {removed}")
     if args.command == "generate-array-chunk":
         result = project.generate_training_dataset_chunk(args.chunk_index)
         action = "reused" if result.cache_hit else "generated"

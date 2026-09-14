@@ -977,6 +977,30 @@ def plan_project(
     return payload
 
 
+def replace_generated_dataset(config_path: str | Path) -> dict[str, Any]:
+    """Delete the dataset a project would otherwise refuse to overwrite.
+
+    Deliberately a separate action rather than a flag on the run: it destroys
+    hours of simulation, and the run that would do it silently is exactly the
+    run someone started without reading the plan. Done here it happens once,
+    in one process, before any task starts -- which is the only point at
+    which it is safe, since an array task treats an existing chunk as work
+    already finished.
+    """
+    from ..data import clear_generation_state
+    from ..project import HamiltonianLearningProject
+
+    project = HamiltonianLearningProject.from_config(str(config_path))
+    recipe = project.config.generation
+    if recipe is None:
+        raise ValueError("this project does not generate a dataset")
+    removed = clear_generation_state(recipe.output_path)
+    return {
+        "dataset_path": str(recipe.output_path),
+        "removed": [str(path) for path in removed],
+    }
+
+
 def read_config_text(config_path: str | Path) -> dict[str, Any]:
     path = Path(config_path).resolve()
     return {"path": str(path), "text": path.read_text(encoding="utf-8")}

@@ -413,6 +413,36 @@ def _combine_chunks(
     )
 
 
+def clear_generation_state(output_path: str | Path) -> list[Path]:
+    """Remove a generated dataset and everything that describes it.
+
+    The safe way to answer "same folder, so replace it": once, from one
+    process, before any task starts. Doing it inside the run cannot work --
+    a task treats an existing ``chunk-00007.npz`` as already generated, so an
+    array that overwrote in place would return old-recipe chunks as new ones
+    and produce a dataset silently mixing two recipes. Nothing would fail.
+
+    Returns what was removed, so a caller can say so rather than claiming it.
+    """
+    destination = Path(output_path).expanduser()
+    checkpoint_dir = destination.parent / f".{destination.stem}.checkpoints"
+    removed: list[Path] = []
+    # The sidecar first: while it is there, the state is still described, so
+    # an interruption part-way through leaves a refusal rather than a dataset
+    # that claims a recipe no longer backed by its chunks.
+    for path in (
+        destination.with_suffix(".generation.json"),
+        destination,
+    ):
+        if path.exists():
+            path.unlink()
+            removed.append(path)
+    if checkpoint_dir.exists():
+        shutil.rmtree(checkpoint_dir)
+        removed.append(checkpoint_dir)
+    return removed
+
+
 def generation_state_conflict(
     output_path: str | Path, recipe: Mapping[str, Any]
 ) -> str | None:

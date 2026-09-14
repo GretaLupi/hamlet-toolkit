@@ -700,3 +700,76 @@ dataset:
         simulator=LightweightSimulator()
     )
     assert reused.cache_hit
+
+
+def test_replacing_a_dataset_clears_the_checkpoints_with_it(tmp_path):
+    """A replacement that left the chunks behind would not be one.
+
+    An array task treats an existing `chunk-00007.npz` as work already done,
+    so chunks from the old recipe would be handed back as if they were new
+    and the dataset would silently mix two recipes. Clearing them is what
+    makes "same folder, so replace it" mean what it says.
+    """
+    from hamlet.data import clear_generation_state, generation_state_conflict
+
+    def write_config(n_samples):
+        path = tmp_path / "generate.yaml"
+        path.write_text(
+            f"""
+name: replace demo
+system_type: inhomogeneous_heisenberg
+output_dir: output
+dataset:
+  generate:
+    system: inhomogeneous_heisenberg
+    output: generated/train.npz
+    n_sites: 6
+    n_samples: {n_samples}
+    coupling_range_mev: [30, 45]
+    bias_range_mev: [0, 60]
+    bias_points: 13
+    broadening_mev: 0.5
+    output_quantity: didv
+    backend: dmrgpy
+    seed: 4
+    checkpoint_every: 1
+"""
+        )
+        return ProjectConfig.from_file(path)
+
+    first = write_config(4)
+    HamiltonianLearningProject(first).generate_training_dataset(
+        simulator=LightweightSimulator()
+    )
+    # The output directory records the configuration that owns it, and two
+    # configurations must not share one. That is a separate guard from the
+    # dataset's, so this test gives the changed run its own directory and
+    # keeps to the question of replacing a dataset.
+    (tmp_path / "output" / "resolved_project_config.json").unlink(missing_ok=True)
+    dataset_path = first.generation.output_path
+    checkpoints = dataset_path.parent / f".{dataset_path.stem}.checkpoints"
+    assert dataset_path.exists()
+
+    changed = write_config(6)
+    plan = HamiltonianLearningProject(changed).plan()
+    assert plan.would_refuse is True
+    # The plan names the dataset it could replace, so an interface can offer
+    # the choice instead of leaving the user to find the path themselves.
+    assert plan.replaceable_dataset == dataset_path
+
+    removed = clear_generation_state(dataset_path)
+    assert dataset_path in removed
+    assert dataset_path.with_suffix(".generation.json") in removed
+    assert not dataset_path.exists()
+    assert not checkpoints.exists(), "stale chunks would be reused as new work"
+
+    # And now the changed recipe is free to run.
+    assert generation_state_conflict(
+        dataset_path, changed.generation.to_recipe()
+    ) is None
+    regenerated = HamiltonianLearningProject(changed).generate_training_dataset(
+        simulator=LightweightSimulator()
+    )
+    assert regenerated.cache_hit is False
+    assert regenerated.dataset.n_samples == 6
+    assert HamiltonianLearningProject(changed).plan().would_refuse is False

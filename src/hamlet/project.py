@@ -484,6 +484,10 @@ class ProjectPlan:
     outputs: tuple[PlannedOutput, ...]
     notes: tuple[str, ...]
     blocking_issues: tuple[str, ...]
+    # Set when the only thing in the way is a dataset generated from other
+    # settings: the caller can offer to replace it, which is a decision and
+    # not a repair.
+    replaceable_dataset: Path | None = None
 
     @property
     def would_refuse(self) -> bool:
@@ -513,6 +517,9 @@ class ProjectPlan:
             ],
             "notes": list(self.notes),
             "blocking_issues": list(self.blocking_issues),
+            "replaceable_dataset": (
+                str(self.replaceable_dataset) if self.replaceable_dataset else None
+            ),
             "would_refuse": self.would_refuse,
         }
         return payload
@@ -696,6 +703,7 @@ class HamiltonianLearningProject:
         notes: list[str] = []
         blocking: list[str] = []
         outputs: list[PlannedOutput] = []
+        replaceable_dataset: Path | None = None
 
         def add_output(path: Path, description: str, *, blocks: bool) -> None:
             exists = path.exists()
@@ -774,6 +782,7 @@ class HamiltonianLearningProject:
             )
             if conflict is not None:
                 blocking.append(conflict)
+                replaceable_dataset = recipe.output_path
             elif already_generated:
                 notes.append(
                     f"{recipe.output_path} already exists and was generated from these "
@@ -812,11 +821,30 @@ class HamiltonianLearningProject:
                 "no experiment configured: this project can only generate or train, not infer"
             )
 
+        resolved_record = output_dir / "resolved_project_config.json"
         add_output(
-            output_dir / "resolved_project_config.json",
+            resolved_record,
             "resolved configuration (refuses a directory holding a different one)",
             blocks=False,
         )
+        # Checked, not merely described. This refusal comes from the run, and
+        # on a cluster the run is the job that starts after an array of a
+        # hundred generation tasks has succeeded -- the most expensive moment
+        # at which to discover a settled question.
+        if resolved_record.exists():
+            try:
+                existing = json.loads(resolved_record.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                existing = None
+            expected = {"toolkit": brand_manifest(), **_json_safe(asdict(config))}
+            if existing is not None and existing != expected:
+                blocking.append(
+                    f"{output_dir} already holds a different configuration "
+                    f"({resolved_record.name}). Two configurations writing into "
+                    "one directory would mix their artifacts, so give this run "
+                    "its own output_dir -- the interface does that automatically "
+                    "when you rename the run."
+                )
 
         # --- training or reuse ---------------------------------------------
         if reuses_artifact:
@@ -938,6 +966,7 @@ class HamiltonianLearningProject:
             outputs=tuple(outputs),
             notes=tuple(notes),
             blocking_issues=tuple(blocking),
+            replaceable_dataset=replaceable_dataset,
         )
 
     def inspect_experiment(self) -> dict[str, Any]:
