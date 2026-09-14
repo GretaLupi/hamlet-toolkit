@@ -66,7 +66,10 @@ def dmrgpy_energy_to_mev(values):
 class DmrgpySimulator:
     max_bond_dimension: int = 20
     kpm_max_bond_dimension: int = 20
-    max_relative_imaginary_residue: float = 1e-6
+    # None means "whatever suits the solver", which is the only defensible
+    # default: the tolerance is a statement about numerical noise, and the two
+    # solvers do not have the same noise. Set a number to override it.
+    max_relative_imaginary_residue: float | None = None
     dynamics_mode: str = "DMRG"
     # Which sites to evaluate correlators on. None means every site, which is
     # what a dataset needs. A subset exists for previews, where the cost is
@@ -86,10 +89,33 @@ class DmrgpySimulator:
             if any(site < 0 for site in sites):
                 raise ValueError("evaluate_sites must be non-negative")
             object.__setattr__(self, "evaluate_sites", sites)
-        if not 0.0 < self.max_relative_imaginary_residue < 1.0:
+        if self.max_relative_imaginary_residue is not None and not (
+            0.0 < self.max_relative_imaginary_residue < 1.0
+        ):
             raise ValueError("max_relative_imaginary_residue must lie between zero and one")
         if self.dynamics_mode not in {"DMRG", "ED"}:
             raise ValueError("dynamics_mode must be 'DMRG' or 'ED'")
+
+    @property
+    def imaginary_residue_tolerance(self) -> float:
+        """How much imaginary part is truncation noise rather than a result.
+
+        A Hermitian self-correlator has a real spectral function, so anything
+        imaginary is numerical. The guard exists to catch a *materially*
+        complex answer -- an operator pair that is not self-adjoint, a mode
+        that returned something other than a spectral function -- which shows
+        up at the percent level, not the sixth decimal.
+
+        ED is exact up to floating point, so 1e-6 there is a real statement.
+        An MPS solver is not: its truncation error lands in the imaginary part
+        at around 1e-6 to 1e-5 for the bond dimensions this package defaults
+        to, so judging DMRG by the ED threshold rejects sound chains at a rate
+        that scales with how many are generated. It is the same relaxation the
+        preview path has always applied for the same reason.
+        """
+        if self.max_relative_imaginary_residue is not None:
+            return float(self.max_relative_imaginary_residue)
+        return 1e-3 if self.dynamics_mode == "DMRG" else 1e-6
 
     def simulate(
         self, system: HeisenbergSystem, protocol: SpectroscopyProtocol
@@ -285,10 +311,10 @@ class DmrgpySimulator:
                 if np.iscomplexobj(component):
                     imaginary_scale = float(np.max(np.abs(component.imag)))
                     real_scale = max(float(np.max(np.abs(component.real))), 1.0)
-                    # Finite-MPS/KPM truncation leaves a small imaginary residue in
-                    # Hermitian self-correlators. Research runs keep the strict
-                    # default; deliberately coarse pilots may opt into a looser limit.
-                    if imaginary_scale > self.max_relative_imaginary_residue * real_scale:
+                    # Finite-MPS/KPM truncation leaves a small imaginary residue
+                    # in Hermitian self-correlators, so the threshold follows the
+                    # solver. See `imaginary_residue_tolerance`.
+                    if imaginary_scale > self.imaginary_residue_tolerance * real_scale:
                         raise ValueError(
                             "DMRGPy returned a materially complex spectral function "
                             f"(relative imaginary residue {imaginary_scale / real_scale:.3g})"

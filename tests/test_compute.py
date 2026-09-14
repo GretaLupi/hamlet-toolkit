@@ -678,3 +678,107 @@ def test_submission_refuses_an_array_an_old_cluster_cannot_run(tmp_path, monkeyp
     with pytest.raises(RuntimeError, match="generate-array-chunk"):
         api.submit_to_cluster(built["config_path"])
     assert staged == [], "the refusal has to come before the copy"
+
+
+def test_a_finished_cluster_job_is_reported_as_finished():
+    """"Not in the queue" is not an answer, and it is all a queue can give.
+
+    A job that completed cleanly and a job that died in its first second are
+    both simply absent from `squeue`, so the status shown for months was
+    "not listed", with a note explaining that this probably meant done. The
+    accounting record says which it was.
+    """
+    from hamlet.cluster import ClusterConfig, ClusterSession, CommandResult, get_profile
+
+    class ClusterWithHistory:
+        def __init__(self, states):
+            self.states = states
+
+        def run(self, argv, input_text=None, timeout=None):
+            command = argv[-1]
+            if "sacct" in command:
+                return CommandResult(tuple(argv), 0, "\n".join(self.states) + "\n", "")
+            # The queue no longer lists it, as for any job that has ended.
+            return CommandResult(tuple(argv), 0, "", "")
+
+    def status_for(states):
+        return ClusterSession(
+            ClusterConfig(
+                remote_dir="/work", scheduler=get_profile("slurm"), host="you@cluster"
+            ),
+            runner=ClusterWithHistory(states),
+        ).status("20258218")
+
+    done = status_for(["COMPLETED"] * 50)
+    assert done["state"] == "completed"
+    assert done["finished"] is True
+    assert done["tasks"]["completed"] == 50
+
+    # Part-way through: the count is the answer, since an array is many jobs.
+    partial = status_for(["COMPLETED"] * 27 + ["RUNNING"] * 3 + ["PENDING"] * 20)
+    assert partial["state"] == "running"
+    assert partial["finished"] is False
+    assert partial["tasks"] == {
+        "total": 50, "completed": 27, "failed": 0, "active": 23
+    }
+    assert "27 of 50" in partial["note"]
+
+    # Finished, but not successfully -- which the queue shows identically to
+    # finished and fine, and which is the case worth catching.
+    broken = status_for(["COMPLETED"] * 48 + ["FAILED", "CANCELLED by 12345"])
+    assert broken["state"] == "failed"
+    assert broken["finished"] is True
+    assert broken["tasks"]["failed"] == 2
+
+
+def test_a_scheduler_without_accounting_says_so_rather_than_guessing():
+    """Reporting "done" from an empty queue would be a guess dressed as a fact."""
+    from hamlet.cluster import ClusterConfig, ClusterSession, CommandResult, get_profile
+
+    class SilentCluster:
+        def run(self, argv, input_text=None, timeout=None):
+            return CommandResult(tuple(argv), 0, "", "")
+
+    profile = get_profile("sge")
+    assert profile.accounting_command == (), "this test needs a profile without one"
+    answer = ClusterSession(
+        ClusterConfig(remote_dir="/work", scheduler=profile, host="you@cluster"),
+        runner=SilentCluster(),
+    ).status("77")
+    assert answer["state"] == "unknown"
+    assert answer["finished"] is False
+    assert "cannot be read" in answer["note"]
+
+
+def test_the_imaginary_residue_tolerance_follows_the_solver():
+    """A threshold for an exact solver rejects sound chains from an approximate one.
+
+    Generation runs in DMRG mode, and the guard was judging it by the
+    tolerance that makes sense for exact diagonalisation. On a 50-chain
+    cluster array, 23 tasks failed on residues between 1e-6 and 1.1e-5 --
+    truncation noise, six orders of magnitude below the real part, and not
+    what a guard against a materially complex spectral function is for. The
+    array then failed, and the training job that depended on it could never
+    become satisfiable.
+    """
+    from hamlet.simulation.dmrgpy import DmrgpySimulator
+
+    assert DmrgpySimulator().dynamics_mode == "DMRG", "generation's mode"
+    assert DmrgpySimulator().imaginary_residue_tolerance == 1e-3
+    assert DmrgpySimulator(dynamics_mode="ED").imaginary_residue_tolerance == 1e-6
+
+    # Every residue that failed that run is now accepted, and by a margin:
+    # they are noise, not a near-miss against the new threshold.
+    observed_failures = [1.02e-06, 1.39e-06, 4.47e-06, 9.76e-06, 1.06e-05]
+    tolerance = DmrgpySimulator().imaginary_residue_tolerance
+    assert max(observed_failures) < tolerance / 50
+
+    # A materially complex answer -- the thing the guard is actually for --
+    # is still caught. It shows up at the percent level.
+    assert 0.05 > tolerance
+
+    # An explicit value always wins, so a stricter run stays available.
+    strict = DmrgpySimulator(max_relative_imaginary_residue=1e-9)
+    assert strict.imaginary_residue_tolerance == 1e-9
+    with pytest.raises(ValueError, match="between zero and one"):
+        DmrgpySimulator(max_relative_imaginary_residue=2.0)

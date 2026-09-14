@@ -69,6 +69,12 @@ class SchedulerProfile:
     cancel_command: tuple[str, ...] = ()
     job_id_pattern: str = r"(\d+)"
     submit_takes_script_on_stdin: bool = False
+    # How to ask what a job *did*, as opposed to whether it is still queued.
+    # A queue listing cannot answer it: a scheduler drops a finished job, so
+    # "not listed" covers both a clean success and a job that died in its
+    # first second. Empty where the site's accounting command is unknown, and
+    # the answer is then reported as unknown rather than guessed.
+    accounting_command: tuple[str, ...] = ()
     notes: str = ""
 
     def directive_lines(self, resources: Mapping[str, Any]) -> list[str]:
@@ -141,6 +147,9 @@ BUILT_IN_PROFILES: dict[str, SchedulerProfile] = {
             "stderr": "--error={value}",
         },
         status_command=("squeue", "-j"),
+        # One line per array task, no job steps, no header: a count of task
+        # states falls straight out of it.
+        accounting_command=("sacct", "-n", "-X", "-P", "-o", "State", "-j"),
         cancel_command=("scancel",),
         job_id_pattern=r"Submitted batch job (\d+)",
         notes="The most common scheduler in academic HPC.",
@@ -255,6 +264,57 @@ BUILT_IN_ARRAY_PROFILES: dict[str, SchedulerArrayProfile] = {
         dependency_arguments=("-hold_jid", "{job_id}"),
     ),
 }
+
+
+# What a scheduler's state words mean, reduced to the only three answers a
+# caller acts on. Anything unlisted counts as still going, which is the safe
+# reading: it never reports a job finished that is not.
+FINISHED_STATES = frozenset({"COMPLETED"})
+FAILED_STATES = frozenset({
+    "FAILED", "CANCELLED", "TIMEOUT", "OUT_OF_MEMORY", "NODE_FAIL",
+    "BOOT_FAIL", "DEADLINE", "PREEMPTED", "REVOKED", "SPECIAL_EXIT",
+})
+
+
+def summarise_task_states(states: Sequence[str]) -> dict[str, Any]:
+    """Reduce per-task scheduler states to what a person wants to know.
+
+    An array's whole point is that it is many jobs, so "is it done" is a
+    count, not a yes. And done-but-failed has to be distinguishable from
+    done-and-fine: they look identical in a queue listing, which shows
+    neither.
+    """
+    completed = failed = active = 0
+    for state in states:
+        # Slurm qualifies some states in place: `CANCELLED by 12345`.
+        word = state.strip().split()[0].upper() if state.strip() else ""
+        if not word:
+            continue
+        if word in FINISHED_STATES:
+            completed += 1
+        elif word in FAILED_STATES:
+            failed += 1
+        else:
+            active += 1
+    total = completed + failed + active
+    if not total:
+        state = "unknown"
+    elif active:
+        state = "running"
+    elif failed:
+        state = "failed"
+    else:
+        state = "completed"
+    return {
+        "state": state,
+        "finished": state in {"completed", "failed"},
+        "tasks": {
+            "total": total,
+            "completed": completed,
+            "failed": failed,
+            "active": active,
+        },
+    }
 
 
 def get_array_profile(scheduler: SchedulerProfile) -> SchedulerArrayProfile | None:
@@ -1018,19 +1078,67 @@ class ClusterSession:
             shlex.quote(part) for part in (*profile.status_command, job_id)
         )
         result = self.run_remote(command)
-        return {
+        payload = {
             "job_id": job_id,
             # A scheduler drops a finished job from its queue, so "not listed"
             # usually means done rather than missing -- said plainly, because
             # the opposite reading would look like a lost job.
             "known": result.ok and job_id in result.stdout,
             "detail": (result.stdout or result.stderr).strip(),
+            "state": "unknown",
+            "finished": False,
+            "tasks": {"total": 0, "completed": 0, "failed": 0, "active": 0},
             "note": (
-                "Most schedulers stop listing a job once it finishes, so an "
-                "empty answer usually means it is done. Fetch the results to "
-                "find out."
+                "This scheduler profile has no accounting command, so whether "
+                "the job finished cleanly cannot be read from here. Most "
+                "schedulers stop listing a job once it ends: fetch the results "
+                "to find out."
             ),
         }
+        if not profile.accounting_command:
+            return payload
+
+        # The queue answers "is it still there"; accounting answers "what
+        # happened", which is the question actually being asked, and the only
+        # one that distinguishes a clean finish from a job that died at once.
+        accounting = self.run_remote(
+            " ".join(
+                shlex.quote(part)
+                for part in (*profile.accounting_command, job_id)
+            )
+        )
+        if not accounting.ok:
+            payload["note"] = (
+                "The queue was read, but the accounting command failed, so a "
+                "finished job cannot be told apart from a lost one: "
+                f"{(accounting.stderr or accounting.stdout).strip()}"
+            )
+            return payload
+
+        summary = summarise_task_states(accounting.stdout.splitlines())
+        payload.update(summary)
+        counts = summary["tasks"]
+        if summary["state"] == "unknown":
+            payload["note"] = (
+                "The scheduler has no record of this job. That usually means "
+                "the id is wrong, or the site expires accounting records."
+            )
+        elif counts["total"] > 1:
+            payload["note"] = (
+                f"{counts['completed']} of {counts['total']} array tasks "
+                f"finished, {counts['failed']} failed, {counts['active']} "
+                "still queued or running."
+            )
+        else:
+            payload["note"] = {
+                "completed": "Finished cleanly.",
+                "failed": "It ended without finishing. The job's log in "
+                          "logs/ says why.",
+                "running": "Still queued or running.",
+            }[summary["state"]]
+        if summary["state"] == "completed":
+            payload["detail"] = payload["detail"] or "no longer queued"
+        return payload
 
     def cancel(self, job_id: str) -> dict[str, Any]:
         profile = self.cluster.scheduler
@@ -1187,7 +1295,10 @@ __all__ = [
     "ARRAY_CHUNK_COMMAND",
     "LOG_DIR",
     "default_log_path",
+    "FAILED_STATES",
+    "FINISHED_STATES",
     "get_array_profile",
+    "summarise_task_states",
     "get_profile",
     "make_portable",
     "profile_from_mapping",

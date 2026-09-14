@@ -2417,8 +2417,27 @@ async function refreshJobs() {
         note.textContent = "Checking cluster status…";
         try {
           const d = await api("/api/cluster-status", { job_id: b.dataset.clusterStatus });
-          note.textContent = (d.known ? "still queued or running. " : "not listed. ")
-            + d.note + " " + (d.detail || "");
+          // The verdict first and in plain words. A queue listing alone
+          // cannot give one: a finished job and a job that died in its first
+          // second are both simply absent from it.
+          const verdict = {
+            completed: ["good", "Done"],
+            failed: ["bad", "Ended without finishing"],
+            running: ["", "Still running"],
+            unknown: ["", "Could not tell"],
+          }[d.state] || ["", "Could not tell"];
+          const counts = d.tasks || {};
+          const box = document.createElement("div");
+          box.className = "box";
+          box.innerHTML = `<div class="verdict ${verdict[0]}">${esc(verdict[1])}
+              <span class="hint">job ${esc(d.job_id)}</span></div>
+            ${counts.total > 1 ? `<p><b>${counts.completed} of ${counts.total}</b>
+              array tasks finished${counts.failed ? `, <b>${counts.failed} failed</b>` : ""}${
+              counts.active ? `, ${counts.active} still queued or running` : ""}.</p>` : ""}
+            <p class="hint">${esc(d.note || "")}</p>
+            ${d.detail ? `<pre class="log">${esc(d.detail)}</pre>` : ""}`;
+          note.textContent = "";
+          note.appendChild(box);
         } catch (e) { note.textContent = e.message; }
       }));
     el("jobs-out").querySelectorAll("button[data-cluster-cancel]").forEach((b) =>

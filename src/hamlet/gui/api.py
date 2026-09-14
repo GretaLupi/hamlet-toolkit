@@ -3216,12 +3216,8 @@ def _preview_worker(task: dict[str, Any]) -> dict[str, Any]:
     simulator = DmrgpySimulator(
         dynamics_mode=task["dynamics_mode"],
         evaluate_sites=tuple(task["sites"]),
-        # A DMRG preview carries truncation error, which shows up as a small
-        # imaginary residue in these Hermitian autocorrelators. The strict
-        # research default would reject a perfectly usable preview.
-        max_relative_imaginary_residue=(
-            1e-3 if task["dynamics_mode"] == "DMRG" else 1e-6
-        ),
+        # The tolerance now follows the solver by default, which is what this
+        # path always wanted and set by hand.
     )
     result = simulator.simulate(chain, protocol)
     spectra = np.asarray(result.spectral_map, dtype=float)

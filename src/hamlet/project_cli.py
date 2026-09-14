@@ -504,10 +504,26 @@ def _run_cluster(args) -> int:
 
     if args.cluster_command == "status":
         answer = session.status(args.job_id)
-        print(answer["detail"] or "(no output)")
-        print(f"still queued or running: {'yes' if answer['known'] else 'no'}")
+        # The verdict first, because it is the question. What the queue
+        # printed is evidence for it, not a substitute.
+        print({
+            "completed": "done",
+            "failed": "ended without finishing",
+            "running": "still queued or running",
+            "unknown": "could not tell",
+        }[answer["state"]])
+        tasks = answer["tasks"]
+        if tasks["total"] > 1:
+            print(
+                f"array tasks: {tasks['completed']}/{tasks['total']} finished, "
+                f"{tasks['failed']} failed, {tasks['active']} queued or running"
+            )
         print(answer["note"])
-        return 0
+        if answer["detail"]:
+            print(answer["detail"])
+        # A failed job is a failure of the thing that was asked for, and a
+        # script checking this should be able to see that without parsing.
+        return 1 if answer["state"] == "failed" else 0
 
     if args.cluster_command == "cancel":
         answer = session.cancel(args.job_id)
