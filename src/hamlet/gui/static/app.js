@@ -569,9 +569,24 @@ async function loadModels() {
           <tr><th>Must match exactly</th><td>${conditionsText(m.fixed_conditions)}</td></tr>
         </table>
         ${m.has_model_card ? `<button data-card="${esc(m.label || m.name)}">Read the model card</button>` : ""}
+        ${m.origin === "yours" ? `<button data-delete-model="${esc(m.path)}"
+          data-model-label="${esc(m.label || m.name)}">Delete this model</button>` : ""}
       </div>`).join("");
     out.querySelectorAll("button[data-card]").forEach((b) =>
       b.addEventListener("click", () => showCard(b.dataset.card)));
+    // Only models you trained carry this button; a published artifact cannot
+    // be retrained from here, so deleting one would not be undoable.
+    out.querySelectorAll("button[data-delete-model]").forEach((b) =>
+      b.addEventListener("click", async () => {
+        const target = b.dataset.deleteModel;
+        if (!confirm(`Delete ${b.dataset.modelLabel}?\n\n${target}\n\n`
+          + "The trained model and its evaluation go with it. This cannot be undone.")) return;
+        b.disabled = true;
+        try {
+          await api("/api/delete-model", { path: target });
+          await loadModels();
+        } catch (e) { b.disabled = false; showError(out, e); }
+      }));
   } catch (e) { showError(out, e); }
 }
 
@@ -2517,5 +2532,6 @@ el("stop-server").addEventListener("click", async () => {
 
 refreshJobs();
 jobTimer = setInterval(refreshJobs, 3000);
+el("models-refresh").addEventListener("click", () => loadModels());
 loadModels();
 loadLocations();

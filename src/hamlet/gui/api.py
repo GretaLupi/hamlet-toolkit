@@ -977,6 +977,37 @@ def plan_project(
     return payload
 
 
+def delete_trained_model(artifact_path: str | Path) -> dict[str, Any]:
+    """Remove a model you trained, so a page of test runs can be cleared.
+
+    Three things it will not do, each of which would be the same mistake in a
+    different costume: delete a published artifact that ships with the package
+    and cannot be retrained from here, delete anything outside the workspace,
+    or follow a symlink out of it. The check is on the resolved path, because
+    a name is easy to aim somewhere unintended and a resolved path is not.
+    """
+    import shutil
+
+    workspace = _workspace_root().resolve()
+    target = Path(artifact_path).expanduser().resolve()
+    published = _published_root().resolve()
+
+    if published == target or published in target.parents:
+        raise ValueError(
+            "this model ships with the package and cannot be deleted from here"
+        )
+    if workspace != target and workspace not in target.parents:
+        raise ValueError(
+            f"{target} is outside the workspace ({workspace}), so it is not "
+            "something this page is allowed to delete"
+        )
+    if not (target / "manifest.json").exists():
+        raise ValueError(f"{target} does not look like a trained model")
+
+    shutil.rmtree(target)
+    return {"deleted": str(target)}
+
+
 def replace_generated_dataset(config_path: str | Path) -> dict[str, Any]:
     """Delete the dataset a project would otherwise refuse to overwrite.
 

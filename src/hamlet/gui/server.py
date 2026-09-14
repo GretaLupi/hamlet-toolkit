@@ -169,6 +169,8 @@ class _Handler(BaseHTTPRequestHandler):
                         seconds_per_chain=float(seconds) if seconds else None,
                     )
                 )
+            elif route == "/api/delete-model":
+                self._send_json(api.delete_trained_model(payload["path"]))
             elif route == "/api/replace-dataset":
                 self._send_json(api.replace_generated_dataset(payload["config_path"]))
             elif route == "/api/build-config":

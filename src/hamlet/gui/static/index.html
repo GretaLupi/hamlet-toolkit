@@ -159,11 +159,16 @@
 
 <!-- --------------------------------------------------------------- models -->
 <section id="panel-models" class="panel">
-  <h2>Published models</h2>
+  <h2>Existing models</h2>
   <p class="lead">
-    What each model was trained on, how accurate it is, and the conditions under
-    which it must not be reused.
+    Every model available here, published or trained by you: what it was trained
+    on, how accurate it is, and the conditions under which it must not be reused.
   </p>
+  <div class="row">
+    <button id="models-refresh">Refresh the list</button>
+    <span class="hint">A model trained since this page was opened &mdash; or one
+      fetched from the cluster &mdash; appears after a refresh.</span>
+  </div>
   <div id="models-out"></div>
   <div id="model-card-out"></div>
 </section>

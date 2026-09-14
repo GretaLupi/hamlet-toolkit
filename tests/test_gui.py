@@ -2741,3 +2741,67 @@ def test_the_fidelity_counter_exists_before_any_render_uses_it():
     """`let` is not hoisted: a render before the declaration would throw."""
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     assert script.index("let infoSequence") < script.index("\nloadModels();")
+
+
+def test_a_model_you_trained_can_be_deleted_and_a_published_one_cannot(tmp_path, monkeypatch):
+    """Test runs accumulate, and clearing them should not need a file manager.
+
+    The line that matters is which models the button appears on. A published
+    artifact ships with the package and cannot be retrained from this page, so
+    deleting one would be unrecoverable from here; a model you trained is
+    yours to discard.
+    """
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    mine = tmp_path / "gui-projects" / "demo" / "run-1" / "artifact"
+    mine.mkdir(parents=True)
+    (mine / "manifest.json").write_text("{}", encoding="utf-8")
+
+    assert api.delete_trained_model(mine) == {"deleted": str(mine)}
+    assert not mine.exists()
+
+    published = api._published_root() / "inhomogeneous_heisenberg_l12_keras_mlp_standard_v1"
+    if published.exists():
+        with pytest.raises(ValueError, match="ships with the package"):
+            api.delete_trained_model(published)
+        assert published.exists(), "a published model must survive the attempt"
+
+
+def test_deleting_a_model_cannot_reach_outside_the_workspace(tmp_path, monkeypatch):
+    """A path is an instruction from the page, so it is checked, not trusted."""
+    from hamlet.gui import api
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(workspace))
+
+    outside = tmp_path / "somewhere-else"
+    outside.mkdir()
+    (outside / "manifest.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="outside the workspace"):
+        api.delete_trained_model(outside)
+    assert outside.exists()
+
+    # Including by the usual route out of a directory you are allowed into.
+    with pytest.raises(ValueError, match="outside the workspace"):
+        api.delete_trained_model(workspace / ".." / "somewhere-else")
+    assert outside.exists()
+
+    # And inside the searched root, a directory that is not a model is
+    # refused rather than removed.
+    not_a_model = api._workspace_root() / "notes"
+    not_a_model.mkdir(parents=True)
+    with pytest.raises(ValueError, match="does not look like a trained model"):
+        api.delete_trained_model(not_a_model)
+    assert not_a_model.exists()
+
+
+def test_the_models_page_can_be_refreshed_without_restarting_the_server():
+    """A model trained or fetched after the page loaded should be reachable."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert 'id="models-refresh"' in html
+    assert 'el("models-refresh").addEventListener' in script
+    # The delete button belongs only to models you trained.
+    assert 'm.origin === "yours" ? `<button data-delete-model=' in script
