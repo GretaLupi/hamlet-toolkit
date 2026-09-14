@@ -102,6 +102,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan-json",
         help="with --dry-run, also write the machine-readable plan to this path",
     )
+    generate_chunk = commands.add_parser(
+        "generate-array-chunk",
+        help="generate one checkpoint selected by a scheduler-array index",
+    )
+    generate_chunk.add_argument("config", help="project configuration")
+    generate_chunk.add_argument("chunk_index", type=int, help="zero-based chunk index")
     run = commands.add_parser("run", help="calibrate, train, infer, and report")
     run.add_argument("config", help="YAML or JSON project configuration")
     run.add_argument(
@@ -449,8 +455,7 @@ def _run_cluster(args) -> int:
     from .cluster import (
         EXAMPLE_CLUSTER_CONFIG,
         available_profiles,
-        project_command,
-        render_job_script,
+        project_job_scripts,
     )
 
     if args.cluster_command == "profiles":
@@ -508,20 +513,40 @@ def _run_cluster(args) -> int:
         return 0 if result.ok else 1
 
     directory, config_name = _prepared_project(args)
-    command = project_command(
-        session.cluster, config_name, dry_run=getattr(args, "dry_run", False)
-    )
-    script = render_job_script(
-        session.cluster, command, job_name=directory.name
+    scripts = project_job_scripts(
+        session.cluster,
+        directory / config_name,
+        dry_run=getattr(args, "dry_run", False),
     )
     if args.cluster_command == "script":
-        print(script)
+        print(scripts["script"])
         return 0
 
+    if scripts["submission_mode"] == "array_then_train":
+        # Checked before staging: an old installation there fails every task
+        # of the array on the same argparse error, long after submission.
+        toolkit = session.check_toolkit()
+        if toolkit["available"] and not toolkit["array_ready"]:
+            print(toolkit["array_hint"])
+            return 1
     if not args.no_stage:
         print(f"copying {directory} to {session.cluster.remote_dir}")
         session.stage(directory).raise_for_status("copying the project")
-    submitted = session.submit(script)
+    if scripts["submission_mode"] == "array_then_train":
+        generated = session.submit(
+            scripts["generation_script"], script_name="hamlet-generate-array.sh"
+        )
+        print(
+            f"submitted generation array {generated['job_id']} "
+            f"({scripts['array_tasks']} task(s))"
+        )
+        submitted = session.submit(
+            scripts["training_script"],
+            script_name="hamlet-train.sh",
+            dependency_job_id=generated["job_id"],
+        )
+    else:
+        submitted = session.submit(scripts["training_script"])
     print(f"submitted job {submitted['job_id']} with {submitted['scheduler']}")
     print(f"script  : {submitted['script']}")
     print(f"watch it: hamlet cluster status {args.cluster} {submitted['job_id']}")
@@ -660,6 +685,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"HTML: {html_path}")
         return 0
     project = HamiltonianLearningProject(ProjectConfig.from_file(args.config))
+    if args.command == "generate-array-chunk":
+        result = project.generate_training_dataset_chunk(args.chunk_index)
+        action = "reused" if result.cache_hit else "generated"
+        print(
+            f"{action} chunk {result.chunk_index + 1}/{result.total_chunks}: "
+            f"{result.chunk_path} ({result.samples} sample(s))"
+        )
+        return 0
     if getattr(args, "dry_run", False):
         plan = project.plan(seconds_per_chain=args.seconds_per_chain)
         print(_render_plan(plan, command=args.command))

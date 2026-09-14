@@ -166,6 +166,7 @@ class TrainingRun:
             "dataset_metadata": _jsonable(self.dataset_metadata),
             "models": model_records,
             "ensemble_aggregation": _jsonable(self.aggregation),
+            "held_out_evaluation": {"file": "held_out_evaluation.json"},
         }
         if self.distribution_profile is not None:
             self.distribution_profile.save(destination / "training_distribution.npz")
@@ -173,6 +174,21 @@ class TrainingRun:
                 "file": "training_distribution.npz",
                 **self.distribution_profile.to_metadata(),
             }
+        held_out = {
+            "scope": (
+                "Performance on simulated chains withheld from fitting and model "
+                "selection; this tests the learned inverse map, not agreement "
+                "between the simulator and a real material."
+            ),
+            "target_names": list(self.target_names),
+            "split": _jsonable(self.metrics.get("split", {})),
+            "test": _jsonable(self.metrics.get("test", {})),
+        }
+        (destination / "held_out_evaluation.json").write_text(
+            json.dumps(held_out, indent=2, sort_keys=True), encoding="utf-8"
+        )
+        # Manifest last: its presence means all auxiliary evaluation files
+        # promised by it were written successfully.
         (destination / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
         )
@@ -341,11 +357,26 @@ def train_supervised(
     aggregation, aggregation_candidates = select_ensemble_aggregation(
         validation_predictions, split.validation.targets
     )
+    training_mean = np.mean(split.train.targets, axis=0)
     metrics = {
         "validation": _evaluate(
-            models, scaler, split.validation.inputs, split.validation.targets, aggregation
+            models,
+            scaler,
+            split.validation.inputs,
+            split.validation.targets,
+            aggregation,
+            target_names=supervised.target_names,
+            baseline=training_mean,
         ),
-        "test": _evaluate(models, scaler, split.test.inputs, split.test.targets, aggregation),
+        "test": _evaluate(
+            models,
+            scaler,
+            split.test.inputs,
+            split.test.targets,
+            aggregation,
+            target_names=supervised.target_names,
+            baseline=training_mean,
+        ),
         "aggregation_selection": {
             "selected": aggregation.method,
             "selection_split": "validation",
@@ -412,23 +443,59 @@ def _evaluate(
     inputs: NDArray[np.float32],
     expected: NDArray[np.float32],
     aggregation: EnsembleAggregation | None = None,
+    *,
+    target_names: Sequence[str] = (),
+    baseline: NDArray[np.float32] | None = None,
 ) -> dict[str, Any]:
     per_model = _physical_predictions(models, scaler, inputs)
     rule = aggregation or EnsembleAggregation()
     ensemble = rule.aggregate(per_model)
 
-    def scores(predicted: NDArray[np.float32]) -> dict[str, float]:
-        return {
-            "mae": mae(predicted, expected),
-            "rmse": rmse(predicted, expected),
-            "correlation_fidelity": correlation_fidelity(predicted, expected),
+    def scores(
+        predicted: NDArray[np.float32], expected_values: NDArray[np.float32] = expected
+    ) -> dict[str, float]:
+        result = {
+            "mae": mae(predicted, expected_values),
+            "rmse": rmse(predicted, expected_values),
+            "correlation_fidelity": correlation_fidelity(predicted, expected_values),
         }
+        if baseline is not None:
+            reference = np.broadcast_to(
+                np.asarray(baseline, dtype=np.float32), expected.shape
+            )
+            baseline_error = mae(reference, expected_values)
+            result["baseline_mae"] = baseline_error
+            result["skill"] = (
+                1.0 - result["mae"] / baseline_error if baseline_error else 0.0
+            )
+        return result
+
+    per_target = []
+    for index in range(expected.shape[1]):
+        name = target_names[index] if index < len(target_names) else f"target_{index}"
+        predicted = ensemble[:, index]
+        expected_column = expected[:, index]
+        target_scores = {
+            "mae": mae(predicted, expected_column),
+            "rmse": rmse(predicted, expected_column),
+            "correlation_fidelity": correlation_fidelity(predicted, expected_column),
+        }
+        if baseline is not None:
+            baseline_error = mae(
+                np.full(expected_column.shape, float(baseline[index])), expected_column
+            )
+            target_scores["baseline_mae"] = baseline_error
+            target_scores["skill"] = (
+                1.0 - target_scores["mae"] / baseline_error if baseline_error else 0.0
+            )
+        per_target.append({"name": str(name), **target_scores})
 
     return {
         "unit": "meV",
         "ensemble": scores(ensemble),
         "ensemble_aggregation": rule.method,
         "per_model": [scores(item) for item in per_model],
+        "per_target": per_target,
         "n_examples": int(expected.shape[0]),
     }
 

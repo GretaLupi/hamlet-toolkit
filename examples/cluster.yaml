@@ -1,0 +1,53 @@
+# Where HamLeT should send heavy runs, and what to ask the scheduler for.
+#
+# Save this as `cluster.yaml`, or let the interface write it for you: the
+# *Where it runs* page asks the same questions as a form, and `hamlet where`
+# prints the path it saves to.
+#
+# Access is over your own ssh, with keys only -- HamLeT never types a password
+# and never stores one. `ssh <address> true` must succeed without asking you
+# for anything before any of this works.
+cluster_schema_version: 1
+
+# The address you ssh to. Leave it out entirely if you are already sitting on
+# the login node, in which case "remote" is here and nothing is copied.
+host: you@cluster.example.edu
+
+# Where the run happens on the cluster. Use a real absolute path in scratch or
+# project space, not your home: a generated dataset is hundreds of megabytes
+# to several gigabytes, and home quotas are small. `Browse the cluster...` on
+# the interface's cluster page lists the directories so you need not guess.
+remote_dir: /scratch/work/you/hamlet-runs
+
+# One of: slurm, pbs, lsf, sge, none. `none` runs the job in the background on
+# that machine, for a workstation you can ssh to.
+scheduler: slurm
+
+# What to ask the scheduler for. Omit anything to accept your site's default.
+resources:
+  # Generation is CPU-bound and parallel across chains, so this is the number
+  # that shortens it -- and it should match `dataset.generate.workers` in the
+  # project configuration, or you are either wasting cores or oversubscribing
+  # the ones you were given.
+  cpus: 8
+  # Only the Keras models can use a GPU, and only for training, which takes
+  # minutes against generation's hours. Ask for one when you are training a
+  # network, not by default.
+  gpus: 0
+  memory: 16G
+  walltime: "24:00:00"
+  queue: batch
+  # account: your-project
+
+# Whatever your site needs to make `python -m hamlet` work, one per line. This
+# runs in a *non-interactive* shell, which does not read your ~/.bashrc, so an
+# environment that works when you ssh in will not be active here unless it is
+# named below. This is the single most common reason a job dies with
+# "No module named 'hamlet'".
+setup:
+  - module load python/3.11
+  - source ~/venvs/hamlet/bin/activate
+  # Results are written under this, not into your home.
+  - export HAMLET_WORKSPACE=/scratch/work/you/hamlet
+
+python: python

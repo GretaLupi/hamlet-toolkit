@@ -558,7 +558,12 @@ async function loadModels() {
           <tr><th>System</th><td>${esc(m.system_type)} · ${esc(m.view)} view · L = ${m.n_sites}</td></tr>
           <tr><th>Bias window</th><td>0 to ${num(m.bias_cutoff_mev, 1)} meV · observable ${esc(m.observable)}</td></tr>
           <tr><th>Trained on</th><td>${m.n_training_chains ?? "—"} simulated chains · ${esc(m.model)} (${esc(m.preset)})</td></tr>
-          <tr><th>Held-out MAE</th><td class="num">${num(m.test_mae_mev)} meV</td></tr>
+          <tr><th>Held-out simulated test</th><td>
+            <span class="num">MAE ${num(m.test_mae_mev)} meV</span> ·
+            <span class="num">fidelity ${num(m.test_correlation_fidelity)}</span>
+            ${m.test_groups ? `<span class="hint"> on ${m.test_groups} chains</span>` : ""}
+            ${fidelityNote()}
+          </td></tr>
           <tr><th>Couplings</th><td>${m.parameters.map((p) =>
             `${esc(p.name)}${p.trained_range_mev ? ` <span class="hint">[${p.trained_range_mev.join(", ")}]</span>` : ""}`).join(" · ")}</td></tr>
           <tr><th>Must match exactly</th><td>${conditionsText(m.fixed_conditions)}</td></tr>
@@ -600,6 +605,7 @@ function renderAnalysisModels() {
       <div class="does">${esc(m.system_type)} · L = ${m.n_sites} · ${esc(m.view)} view</div>
       <div class="meta"><b>Applies to:</b> 0 to ${num(m.bias_cutoff_mev, 1)} meV of
         ${esc(m.observable)} &nbsp;·&nbsp; <b>Held-out MAE:</b> ${num(m.test_mae_mev)} meV
+        &nbsp;·&nbsp; <b>fidelity:</b> ${num(m.test_correlation_fidelity)}
         &nbsp;·&nbsp; ${esc(m.preset || "")} preset</div>
     </div>`).join("");
   box.querySelectorAll(".card").forEach((c) =>
@@ -860,6 +866,49 @@ let builder = null;
 let chosenSystem = null;
 let chosenModel = null;
 let builtConfig = null;
+let builtClusterPlan = null;
+let chosenRunTarget = "local";
+let clusterTarget = { configured: false, host: "", scheduler: "", remote_dir: "" };
+
+function renderRunTarget() {
+  el("f-run-targets").querySelectorAll("[data-run-target]").forEach((card) =>
+    card.classList.toggle("chosen", card.dataset.runTarget === chosenRunTarget));
+  const note = el("f-cluster-target-note");
+  const help = el("f-cluster-target-help");
+  if (clusterTarget.configured) {
+    note.textContent = `${clusterTarget.scheduler} on ${clusterTarget.host}; results in ${clusterTarget.remote_dir}`;
+    help.innerHTML = chosenRunTarget === "cluster"
+      ? `Dataset generation will be a scheduler array with one job per simulated
+         chain. Training starts only after every sample finishes. <button type="button"
+         id="f-edit-cluster">Review cluster settings</button>` : "";
+  } else {
+    note.textContent = "Not configured yet.";
+    help.innerHTML = `<button type="button" id="f-edit-cluster">Set up the cluster</button>
+      once, then select it here.`;
+  }
+  const edit = document.getElementById("f-edit-cluster");
+  if (edit) edit.addEventListener("click", () => activate("compute"));
+  el("f-run").textContent = chosenRunTarget === "cluster"
+    ? "Submit to the cluster" : "Start on this machine";
+  el("f-run-hint").textContent = chosenRunTarget === "cluster"
+    ? "The project is copied, generation is submitted as an array, and training waits for it."
+    : "Generation and training take hours. It runs in the background.";
+}
+
+el("f-run-targets").querySelectorAll("[data-run-target]").forEach((card) =>
+  card.addEventListener("click", () => {
+    const target = card.dataset.runTarget;
+    if (target === "cluster" && !clusterTarget.configured) {
+      renderRunTarget();
+      return;
+    }
+    chosenRunTarget = target;
+    builtClusterPlan = null;
+    el("f-plan-out").innerHTML = "";
+    el("f-run-zone").hidden = true;
+    renderRunTarget();
+  }));
+renderRunTarget();
 
 function systemSpec() {
   return builder.systems.find((s) => s.system_type === chosenSystem);
@@ -1350,6 +1399,9 @@ el("f-plan").addEventListener("click", async () => {
   try {
     builtConfig = await api("/api/build-config", { form: readForm() });
     const plan = await api("/api/plan", { config_path: builtConfig.config_path });
+    builtClusterPlan = chosenRunTarget === "cluster"
+      ? await api("/api/cluster-script", { config_path: builtConfig.config_path })
+      : null;
     const hours = plan.estimated_generation_seconds
       ? (plan.estimated_generation_seconds / 3600) : null;
     out.innerHTML = `
@@ -1370,6 +1422,11 @@ el("f-plan").addEventListener("click", async () => {
           <tr><th>Stages</th><td>${(plan.stages || []).map(esc).join(" → ")}</td></tr>
           ${plan.generation_chains ? `<tr><th>Chains to simulate</th>
             <td class="num">${plan.generation_chains}</td></tr>` : ""}
+          ${builtClusterPlan ? `<tr><th>Runs on</th><td>${esc(builtClusterPlan.host)}
+            via ${esc(builtClusterPlan.scheduler)}</td></tr>
+            <tr><th>Cluster jobs</th><td>${builtClusterPlan.submission_mode === "array_then_train"
+              ? `${builtClusterPlan.array_tasks} generation array tasks (one per chain), then one dependent training job`
+              : "one project job (this scheduler has no array support)"}</td></tr>` : ""}
           ${hours ? `<tr><th>Rough compute</th><td class="num">${hours.toFixed(1)} h serial
             <span class="hint">(at ${num(plan.seconds_per_chain, 0)} s per chain)</span></td></tr>` : ""}
         </table>
@@ -1385,9 +1442,10 @@ el("f-plan").addEventListener("click", async () => {
               `<li class="fail">${esc(r)}</li>`).join("")}</ul>`
           : ""}
         <p class="hint">Saved as <code>${esc(builtConfig.config_path)}</code>,
-          writing into <code>${esc(builtConfig.run_dir)}</code>. Repeat this run
-          or submit it to a cluster with:<br>
-          <code>hamlet run ${esc(builtConfig.config_path)}</code></p>
+          writing into <code>${esc(builtConfig.run_dir)}</code>. ${{
+            local: `Repeat it with <code>hamlet run ${esc(builtConfig.config_path)}</code>.`,
+            cluster: `It will be staged directly from this page; fetched results return to this run folder.`,
+          }[chosenRunTarget]}</p>
       </div>`;
     el("f-run-zone").hidden = (plan.blocking_issues || []).length > 0;
   } catch (e) { showError(out, e); builtConfig = null; }
@@ -1395,6 +1453,18 @@ el("f-plan").addEventListener("click", async () => {
 
 el("f-run").addEventListener("click", async () => {
   if (!builtConfig) return;
+  if (chosenRunTarget === "cluster") {
+    if (!builtClusterPlan) {
+      showError(el("f-plan-out"), new Error("review the cluster run before submitting"));
+      return;
+    }
+    if (!confirm(`Copy this project to ${builtClusterPlan.host} and submit it?`)) return;
+    try {
+      await api("/api/submit-to-cluster", { config_path: builtConfig.config_path });
+      activate("jobs"); refreshJobs();
+    } catch (e) { showError(el("f-plan-out"), e); }
+    return;
+  }
   // Stopping is cooperative: the run finishes the chunk it is on, which can
   // be a minute of simulation. Starting the next one during that window is
   // the usual way to end up with two heavy jobs sharing the cores and both
@@ -1971,6 +2041,13 @@ api("/api/cluster-form").then((saved) => {
   el("cluster-path").textContent = saved.configured
     ? `saved at ${saved.config_path}`
     : `will be saved at ${saved.config_path}`;
+  clusterTarget = {
+    configured: saved.configured,
+    host: saved.form.host || "",
+    scheduler: saved.form.scheduler || "",
+    remote_dir: saved.form.remote_dir || "",
+  };
+  renderRunTarget();
 }).catch((e) => showError(el("cluster-out"), e));
 
 // Where a run goes is a question about the far end, and sites differ: a
@@ -2021,6 +2098,13 @@ el("cluster-save").addEventListener("click", async () => {
   busy(out, "Checking the settings…");
   try {
     const saved = await api("/api/save-cluster-config", { form: readClusterForm() });
+    clusterTarget = {
+      configured: true,
+      host: saved.summary.host || "this machine",
+      scheduler: saved.summary.scheduler || "",
+      remote_dir: saved.summary.remote_dir || "",
+    };
+    renderRunTarget();
     out.innerHTML = `<div class="box">
       <div class="verdict good">Saved</div>
       <table>
@@ -2056,7 +2140,17 @@ el("cluster-check").addEventListener("click", async () => {
           ? `version ${esc(d.toolkit.version)}, via <code>${esc(d.toolkit.python)}</code>`
           : `<b>not installed</b> for <code>${esc(d.toolkit.python)}</code>`}</td></tr>`
           : ""}
+        ${d.toolkit && d.toolkit.available ? `<tr><th>One job per chain</th><td>${
+          d.toolkit.array_ready
+            ? "supported"
+            : "<b>not supported by that version</b>"}</td></tr>` : ""}
       </table>
+      ${d.toolkit && d.toolkit.available && !d.toolkit.array_ready ? `<p><b>${
+        esc(d.toolkit.array_hint)}</b></p>
+        <p class="hint">Generation would otherwise be submitted as one long
+        job instead of an array. Update the installation your setup lines
+        activate:</p>
+        <pre class="log">python -m pip install --upgrade "hamlet-toolkit[all]"</pre>` : ""}
       ${d.toolkit && !d.toolkit.available ? `<p><b>The cluster runs the code, so
         the code has to be there.</b> A job would start, find that python, and
         stop with <code>No module named 'hamlet'</code>. Install it once on the
@@ -2103,10 +2197,21 @@ el("cluster-script-btn").addEventListener("click", async () => {
       <table>
         <tr><th>Goes to</th><td>${esc(d.host)}:<code>${esc(d.remote_dir)}</code></td></tr>
         <tr><th>Scheduler</th><td>${esc(d.scheduler)}</td></tr>
+        <tr><th>Results land in</th><td><code>${esc(d.results_dir)}</code>
+          <div class="hint">Staging makes the project's paths relative, so the
+            results follow the copy. <code>HAMLET_WORKSPACE</code> does not
+            apply to a submitted job.</div></td></tr>
       </table>
       ${d.portable ? "" : `<div class="error"><b>These paths point outside the
         project directory and will not be copied:</b><br>${
         d.outside_project_dir.map(esc).join("<br>")}</div>`}
+      ${(d.mismatches || []).length ? `<div class="box">
+        <b>What the job asks for and what the run does disagree:</b>
+        <ul class="checks">${d.mismatches.map((m) =>
+          `<li class="fail">${esc(m)}</li>`).join("")}</ul>
+        <p class="hint">Neither is an error, and a batch job reports neither
+          &mdash; it simply takes longer or reserves what it never uses. Worth
+          settling before an overnight run.</p></div>` : ""}
       <pre class="log">${esc(d.script)}</pre>
       <p class="hint">Preview only; nothing has been submitted. Add any required
         site-specific directives before manual submission.</p>
@@ -2135,13 +2240,61 @@ function screeningTable(results) {
       <td><span class="pill ${esc(r.verdict)}">${esc(r.verdict)}</span></td></tr>`).join("")}</table>`;
 }
 
+// One page can show several finished runs at once, and an (i) targets an
+// element by id, so a fixed id would make every button open the first note.
+let infoSequence = 0;
+
+/** The definition of fidelity, folded away until someone asks for it. */
+function fidelityNote() {
+  const id = `info-fidelity-${(infoSequence += 1)}`;
+  return `${infoButton(id)}
+    <div class="hint info-body" id="${id}" hidden>
+      <b>Fidelity</b> is the absolute Pearson correlation between the predicted
+      and the true parameter over the held-out chains &mdash; the same quantity
+      used in the inhomogeneous-Heisenberg work:
+      <div class="formula">F&nbsp;=&nbsp;|&thinsp;&lang;(J<sub>pred</sub> &minus;
+        &lang;J<sub>pred</sub>&rang;)(J<sub>true</sub> &minus;
+        &lang;J<sub>true</sub>&rang;)&rang;&thinsp;|&nbsp;/&nbsp;(&sigma;<sub>pred</sub>
+        &sigma;<sub>true</sub>)</div>
+      It runs from <b>0 to 1</b>: 1 means the predictions track the true values
+      perfectly, 0 that they carry no information about them.
+      Because it is a correlation it is blind to a constant offset or a scale
+      factor &mdash; a model can reach a high fidelity and still be wrong in
+      meV. Read it next to the MAE, not instead of it.
+    </div>`;
+}
+
 function trainingResult(result) {
   const tuning = result.tuning;
-  return `<table>
+  const held = result.held_out_evaluation || {};
+  const overall = held.ensemble || {};
+  const targets = held.per_target || [];
+  return `<div class="verdict good">The model has been tested before experimental inference</div>
+  <p>These are theoretical recovery scores on <b>${result.test_groups ?? "a held-out set of"}
+    simulated chains</b> that were used neither for fitting nor model selection.
+    Fidelity is the absolute prediction&ndash;truth correlation, between 0 and
+    1.${fidelityNote()}</p>
+  <table>
     <tr><th>Artifact</th><td><code>${esc(result.artifact_path)}</code></td></tr>
     <tr><th>Validation MAE</th><td class="num">${num(result.validation_mae_mev)} meV</td></tr>
     <tr><th>Held-out MAE</th><td class="num">${num(result.test_mae_mev)} meV</td></tr>
+    <tr><th>Held-out RMSE</th><td class="num">${num(overall.rmse)} meV</td></tr>
+    <tr><th>Held-out fidelity <span class="hint">(0 to 1)</span></th>
+      <td class="num"><b>${num(overall.correlation_fidelity)}</b></td></tr>
+    ${overall.skill !== undefined ? `<tr><th>Skill over guessing the training mean</th>
+      <td class="num">${num(overall.skill)}</td></tr>` : ""}
   </table>
+  ${targets.length ? `<h4>Per learned parameter</h4><table>
+    <tr><th>Parameter</th><th class="num">MAE [meV]</th><th class="num">Fidelity</th><th class="num">Skill</th></tr>
+    ${targets.map((target) => `<tr><td><code>${esc(target.name)}</code></td>
+      <td class="num">${num(target.mae)}</td>
+      <td class="num">${num(target.correlation_fidelity)}</td>
+      <td class="num">${num(target.skill)}</td></tr>`).join("")}
+  </table>` : ""}
+  ${result.evaluation_path ? `<p>${fileLink(result.evaluation_path,
+    "Open the complete held-out evaluation")}</p>` : ""}
+  <p class="hint">This measures recovery from spectra made by the same simulator.
+    It does not establish that the simulator describes a particular material.</p>
   ${tuning ? `<p class="hint">Hyperparameter search (${esc(tuning.backend)}):
     ${tuning.kept_defaults
       ? "the library defaults gave the lowest validation error."
@@ -2154,12 +2307,17 @@ function trainingResult(result) {
 
 function clusterResult(result) {
   return `<table>
-      <tr><th>Job id there</th><td><code>${esc(result.job_id)}</code></td></tr>
+      ${result.generation_job_id ? `<tr><th>Generation array</th><td><code>${esc(result.generation_job_id)}</code>
+        · ${result.array_tasks} task(s), one simulated chain per task</td></tr>` : ""}
+      <tr><th>${result.generation_job_id ? "Training job" : "Job id there"}</th><td><code>${esc(result.job_id)}</code>${
+        result.generation_job_id ? " · waits for the complete array" : ""}</td></tr>
       <tr><th>Host</th><td>${esc(result.host)}</td></tr>
       <tr><th>Scheduler</th><td>${esc(result.scheduler)}</td></tr>
       <tr><th>Script</th><td><code>${esc(result.script)}</code></td></tr>
     </table>
     <div class="row">
+      ${result.generation_job_id ? `<button data-cluster-status="${esc(result.generation_job_id)}">Check generation</button>
+        <button data-cluster-cancel="${esc(result.generation_job_id)}">Cancel generation</button>` : ""}
       <button data-cluster-status="${esc(result.job_id)}">Check status</button>
       <button data-cluster-cancel="${esc(result.job_id)}">Cancel job</button>
       <button data-cluster-fetch="${esc(result.project_dir)}">Fetch results</button>
@@ -2176,7 +2334,8 @@ function jobResult(job) {
   if (result.kind === "training") return trainingResult(result);
   if (result.kind === "cluster") return clusterResult(result);
   if (result.kind === "fetch") {
-    return `<p class="hint">Fetched into <code>${esc(result.project_dir)}</code>.</p>`;
+    return `<p class="hint">Fetched into <code>${esc(result.project_dir)}</code>.</p>
+      ${result.training_evaluation ? trainingResult(result.training_evaluation) : ""}`;
   }
   return "";
 }

@@ -93,8 +93,9 @@ The **Train a model** page is a form, not a file to edit. It asks, in order:
    disabled when it is not installed.
    Instead of choosing by hand you can tick **search before training** (see
    below).
-6. **Review and run** — the plan lists every file it would write and a compute
-   estimate before anything happens.
+6. **Review and run** — choose this machine or the saved cluster on the same
+   page. The plan lists every file and compute estimate before anything starts;
+   a cluster run can be submitted there without navigating away and back.
 
 Settings that cannot work are refused at step 6 rather than hours into the run:
 a cutoff outside the simulated window, more model input points than simulated
@@ -104,6 +105,25 @@ sliding window.
 Your answers are saved as a configuration file, so the same run can be repeated
 or submitted to a cluster with `hamlet run <path>`. The page shows that path;
 you never have to open the file.
+
+### Seeing whether a newly trained model actually learned the parameters
+
+Training always reserves whole simulated chains as a test set. They are used
+neither for fitting nor for hyperparameter or ensemble selection. As soon as
+training finishes—and before the model is offered for experimental
+inference—the **Running** page shows:
+
+- MAE and RMSE in meV;
+- correlation fidelity (the absolute prediction–truth Pearson correlation,
+  where 1 is perfect);
+- skill relative to guessing the training-set mean;
+- the same scores for every learned parameter; and
+- the number of held-out simulated chains.
+
+The full table is saved as `artifact/held_out_evaluation.json` and remains
+visible under **Existing models**. This is theoretical recovery on spectra
+made by the same simulator. It tests whether the inverse model learned its
+task; it does not test whether that simulator describes a particular material.
 
 ### Letting a search choose the hyperparameters
 
@@ -371,6 +391,80 @@ If your site runs something else, write a `scheduler:` block by hand in
 `cluster.yaml` — `hamlet where` prints its location — and the form will tell
 you it cannot show it rather than quietly replacing it.
 
+### Actually submitting a run
+
+The cluster settings say *where*; a project configuration says *what*. You
+need both, and the order is: build the project first, then send it.
+
+**From the interface.** Save the cluster settings once under *Where it runs*.
+On *Train a model*, select **The saved cluster**, review the plan, and submit
+there directly. The separate cluster controls can still preview or resubmit
+the scripts.
+
+- **Show me the job script** — the batch script it would submit, which is worth
+  reading once. If your site needs one more directive, this is the file to
+  hand-edit.
+- **Stage and submit** — copies the project directory over and queues it. The
+  *Running* tab then tracks it, and offers **fetch** to bring the results back.
+
+**From the command line**, with `cluster.yaml` beside your project:
+
+```bash
+hamlet cluster check cluster.yaml                       # ssh, scheduler, HamLeT
+hamlet cluster script cluster.yaml --project my-run     # read it first
+hamlet cluster submit cluster.yaml --project my-run     # stage and queue
+hamlet cluster status cluster.yaml <job id>
+hamlet cluster fetch  cluster.yaml --project my-run     # bring results back
+```
+
+`hamlet cluster init` writes a configuration to fill in, and
+[`examples/cluster.yaml`](../examples/cluster.yaml) is a documented one.
+
+`submit` makes the project configuration portable before copying it — paths
+inside it become relative, so the copy works wherever it lands. Add
+`--dry-run` to see what would happen without sending anything.
+
+For configurations built by the interface, generation is submitted as a
+native scheduler array: **one task per simulated chain**, each writing its own
+deterministic checkpoint in an isolated scratch directory. A second job is
+submitted with an `after successful completion` dependency. It joins the
+checkpoints in sample order and runs training only if every generation task
+succeeded. Slurm, PBS, LSF, and Grid Engine use their native array and
+dependency syntax. The no-scheduler and custom-profile fallbacks use one
+ordinary project job.
+
+The final job runs `python -m hamlet.project_cli run <config>` on the same
+configuration as a local run. Completed checkpoints are reusable, including
+after a failed or cancelled array task.
+
+Every job writes its output into a `logs/` folder inside the remote run
+directory — `logs/<run>-generate-<array>_<task>.out` for each generation task,
+`logs/<run>-train-<job>.out` for the training job. That keeps a thousand
+scheduler log files from sitting among the dataset chunks they are about to
+produce.
+
+**Three things that catch people out.**
+
+The setup lines run in a *non-interactive* shell, which does not read
+`~/.bashrc` — so a conda environment that is active when you ssh in will
+**not** be active in the job unless the setup lines activate it explicitly.
+
+The cluster needs a HamLeT recent enough to have the `generate-array-chunk`
+command, which is what an array task runs. Against an older installation every
+task of the array would fail identically on an argument error. HamLeT checks
+this before copying anything and tells you to update it there instead:
+
+```bash
+python -m pip install --upgrade "hamlet-toolkit[all]"
+```
+
+`HAMLET_WORKSPACE` does **not** decide where a submitted job writes. Staging
+rewrites the project's paths to relative ones, so the results follow the copy
+into the remote run directory, wherever that is. Setting the remote directory
+to a scratch path is what keeps a run off a home quota.
+
+**Test the connection** checks the first two for you.
+
 ### Windows
 
 This is how a Windows user reaches a GPU. TensorFlow cannot use one on native
@@ -391,8 +485,10 @@ dataset:
     workers: 8      # chains at once; 0 means one per core
 ```
 
-or **chains at once** on the *Train a model* page. The plan divides its
-estimate by that number before you commit to the run.
+or **cores to use** on the *Train a model* page. The plan divides its estimate
+by that number before you commit to a local run. On a supported cluster,
+HamLeT instead requests one CPU in each one-chain array task; the scheduler
+decides how many samples run simultaneously.
 
 This cannot change the dataset. Each chunk's seed is derived from the run's
 seed by position, so a chunk is identical whenever and wherever it is

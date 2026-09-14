@@ -459,6 +459,12 @@ class _Handler(BaseHTTPRequestHandler):
                 metrics = project.training_run.metrics
                 result["validation_mae_mev"] = metrics["validation"]["ensemble"]["mae"]
                 result["test_mae_mev"] = metrics["test"]["ensemble"]["mae"]
+                result["held_out_evaluation"] = metrics["test"]
+                result["test_groups"] = metrics["split"]["test_groups"]
+                result["target_names"] = list(project.training_run.target_names)
+                result["evaluation_path"] = str(
+                    outcome.artifact_path / "held_out_evaluation.json"
+                )
             if project.tuning_report is not None:
                 result["tuning"] = {
                     "backend": project.tuning_report.backend,

@@ -398,3 +398,283 @@ def test_the_job_script_can_cd_into_a_tilde_path():
     )
     assert "cd ~/scratch/runs" in script
     assert "cd '~/scratch/runs'" not in script
+
+
+def test_the_job_script_says_where_results_will_land(tmp_path, monkeypatch):
+    """The obvious guess is wrong, which is why it is worth stating.
+
+    Everything else the interface writes obeys HAMLET_WORKSPACE. A submitted
+    job does not: staging rewrites the project's paths to be relative, so the
+    results follow the copy into the run directory.
+    """
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster", "remote_dir": "/scratch/work/you/runs",
+        "scheduler": "slurm",
+    })
+    built = api.build_project_config(_cluster_project_form(), workspace=tmp_path)
+    described = api.cluster_script(built["config_path"])
+
+    assert described["results_dir"].startswith("/scratch/work/you/runs")
+    assert "run-" in described["results_dir"]
+
+
+def _cluster_project_form(**overrides):
+    form = {
+        "name": "overnight", "system_type": "homogeneous_heisenberg",
+        "n_sites": 8, "n_samples": 50, "coupling_ranges_mev": [[30, 40]],
+        "bias_range_mev": [0, 100], "bias_points": 50, "broadening_mev": 0.5,
+        "observable": "Sz", "cutoff_mev": 50.0, "output_points": 50,
+        "model": "ridge",
+    }
+    form.update(overrides)
+    return form
+
+
+def test_gui_cluster_generation_is_one_array_task_per_sample(tmp_path, monkeypatch):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster", "remote_dir": "/scratch/work/you/runs",
+        "scheduler": "slurm", "cpus": 1,
+    })
+    built = api.build_project_config(
+        _cluster_project_form(workers=8), workspace=tmp_path
+    )
+    described = api.cluster_script(built["config_path"])
+
+    assert described["submission_mode"] == "array_then_train"
+    assert described["array_tasks"] == 50
+    assert described["samples_per_task"] == 1
+    assert "#SBATCH --array=0-49" in described["generation_script"]
+    assert "generate-array-chunk" in described["generation_script"]
+    assert "hamlet.project_cli run" in described["training_script"]
+
+
+def test_array_generation_asks_for_one_cpu_per_sample_job(tmp_path, monkeypatch):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster", "remote_dir": "/scratch/work/you/runs",
+        "scheduler": "slurm", "cpus": 8,
+    })
+    built = api.build_project_config(
+        _cluster_project_form(workers=1), workspace=tmp_path
+    )
+    described = api.cluster_script(built["config_path"])
+    assert "#SBATCH --cpus-per-task=1" in described["generation_script"]
+    assert "#SBATCH --cpus-per-task=8" in described["training_script"]
+    assert described["mismatches"] == []
+
+
+@pytest.mark.parametrize(
+    ("scheduler", "directive", "task_variable"),
+    [
+        ("slurm", "#SBATCH --array=0-2", "SLURM_ARRAY_TASK_ID"),
+        ("pbs", "#PBS -J 0-2", "PBS_ARRAY_INDEX"),
+        ("lsf", '#BSUB -J "samples[1-3]"', "LSB_JOBINDEX"),
+        ("sge", "#$ -t 1-3", "SGE_TASK_ID"),
+    ],
+)
+def test_builtin_schedulers_map_array_ids_to_zero_based_chunks(
+    scheduler, directive, task_variable
+):
+    from hamlet.cluster import (
+        ClusterConfig,
+        get_profile,
+        render_array_job_script,
+    )
+
+    script = render_array_job_script(
+        ClusterConfig(remote_dir="/work", scheduler=get_profile(scheduler)),
+        'python -m hamlet.project_cli generate-array-chunk project.yaml "$HAMLET_CHUNK_INDEX"',
+        n_tasks=3,
+        job_name="samples",
+    )
+    assert directive in script
+    assert task_variable in script
+    assert "HAMLET_CHUNK_INDEX" in script
+
+
+def test_training_submission_waits_for_the_slurm_array():
+    from hamlet.cluster import ClusterConfig, ClusterSession, CommandResult, get_profile
+
+    class RecordingRunner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, argv, input_text=None, timeout=None):
+            self.commands.append(tuple(argv))
+            command = argv[-1]
+            output = "Submitted batch job 456" if "sbatch" in command else ""
+            return CommandResult(tuple(argv), 0, output, "")
+
+    runner = RecordingRunner()
+    session = ClusterSession(
+        ClusterConfig(
+            remote_dir="/work", scheduler=get_profile("slurm"), host="you@cluster"
+        ),
+        runner=runner,
+    )
+    submitted = session.submit(
+        "#!/bin/bash\ntrue\n",
+        script_name="train.sh",
+        dependency_job_id="123",
+    )
+    assert submitted["job_id"] == "456"
+    submit_command = next(command[-1] for command in runner.commands if "sbatch" in command[-1])
+    assert "--dependency=afterok:123" in submit_command
+
+
+def test_matched_resources_raise_nothing(tmp_path, monkeypatch):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster", "remote_dir": "/scratch/work/you/runs",
+        "scheduler": "slurm", "cpus": 8,
+    })
+    built = api.build_project_config(
+        _cluster_project_form(workers=8), workspace=tmp_path
+    )
+    assert api.cluster_script(built["config_path"])["mismatches"] == []
+
+
+def test_job_output_goes_to_a_log_folder_not_the_run_directory():
+    """A thousand array tasks write a thousand .out files.
+
+    Loose in the run directory they sit among the dataset chunks the run
+    exists to produce, and the directory stops being readable at exactly the
+    scale the array was introduced for.
+    """
+    from hamlet.cluster import (
+        ClusterConfig,
+        get_profile,
+        render_array_job_script,
+        render_job_script,
+    )
+
+    cluster = ClusterConfig(remote_dir="/work", scheduler=get_profile("slurm"))
+    single = render_job_script(cluster, "hamlet run project.yaml", job_name="chain")
+    assert "#SBATCH --output=logs/chain-%j.out" in single
+
+    array = render_array_job_script(
+        cluster, "hamlet generate-array-chunk", n_tasks=4, job_name="chain-generate"
+    )
+    # %A_%a, not %j: both are unique per task, but only this one sorts the
+    # files back into the order the tasks were launched in.
+    assert "#SBATCH --output=logs/chain-generate-%A_%a.out" in array
+
+
+def test_submitting_creates_the_log_folder_first():
+    """The scheduler opens the output file before the script runs.
+
+    So the script cannot be the thing that makes the directory: slurm fails
+    the job outright when the path does not exist.
+    """
+    from hamlet.cluster import ClusterConfig, ClusterSession, CommandResult, get_profile
+
+    class RecordingRunner:
+        def __init__(self):
+            self.commands = []
+
+        def run(self, argv, input_text=None, timeout=None):
+            self.commands.append(argv[-1])
+            return CommandResult(tuple(argv), 0, "Submitted batch job 7", "")
+
+    runner = RecordingRunner()
+    ClusterSession(
+        ClusterConfig(
+            remote_dir="/work/runs", scheduler=get_profile("slurm"), host="you@cluster"
+        ),
+        runner=runner,
+    ).submit("#!/bin/bash\necho hello\n")
+
+    written = runner.commands[0]
+    assert "mkdir -p /work/runs/logs" in written
+    assert written.index("mkdir") < written.index("cat >")
+
+
+def test_an_old_cluster_install_is_reported_before_anything_is_submitted():
+    """The array calls a subcommand older versions do not have.
+
+    Left unchecked, every task of the array dies on the same argparse error
+    after the project has been copied and the queue has been used, and the
+    only evidence is a folder of identical .out files.
+    """
+    from hamlet.cluster import ClusterConfig, ClusterSession, CommandResult, get_profile
+
+    class OldInstallRunner:
+        def run(self, argv, input_text=None, timeout=None):
+            return CommandResult(
+                tuple(argv), 0, "HAMLET_VERSION 0.0.9\nHAMLET_ARRAY_OLD\n", ""
+            )
+
+    old = ClusterSession(
+        ClusterConfig(
+            remote_dir="/work", scheduler=get_profile("slurm"), host="you@cluster"
+        ),
+        runner=OldInstallRunner(),
+    ).check_toolkit()
+    assert old["available"] is True, "it is installed; it is only out of date"
+    assert old["array_ready"] is False
+    assert "0.0.9" in old["array_hint"]
+    assert "generate-array-chunk" in old["array_hint"]
+
+    class CurrentInstallRunner:
+        def run(self, argv, input_text=None, timeout=None):
+            return CommandResult(
+                tuple(argv), 0, "HAMLET_VERSION 0.1.0\nHAMLET_ARRAY_OK\n", ""
+            )
+
+    current = ClusterSession(
+        ClusterConfig(
+            remote_dir="/work", scheduler=get_profile("slurm"), host="you@cluster"
+        ),
+        runner=CurrentInstallRunner(),
+    ).check_toolkit()
+    assert current["array_ready"] is True
+    assert current["version"] == "0.1.0"
+    assert current["array_hint"] == ""
+
+
+def test_submission_refuses_an_array_an_old_cluster_cannot_run(tmp_path, monkeypatch):
+    from hamlet.cluster import CommandResult
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    api.build_cluster_config({
+        "host": "you@cluster", "remote_dir": "/scratch/work/you/runs",
+        "scheduler": "slurm", "cpus": 1,
+    })
+    built = api.build_project_config(_cluster_project_form(), workspace=tmp_path)
+
+    staged = []
+
+    class OldInstallSession:
+        def __init__(self, cluster, runner=None):
+            self.cluster = cluster
+
+        def check_toolkit(self):
+            return {
+                "available": True, "version": "0.0.9", "array_ready": False,
+                "array_hint": "HamLeT 0.0.9 on the cluster has no "
+                              "`generate-array-chunk` command",
+                "python": "python", "detail": "",
+            }
+
+        def stage(self, directory):
+            staged.append(directory)
+            return CommandResult(("rsync",), 0, "", "")
+
+        def submit(self, *args, **kwargs):  # pragma: no cover - must not happen
+            raise AssertionError("nothing may be submitted against an old install")
+
+    monkeypatch.setattr("hamlet.cluster.ClusterSession", OldInstallSession)
+    with pytest.raises(RuntimeError, match="generate-array-chunk"):
+        api.submit_to_cluster(built["config_path"])
+    assert staged == [], "the refusal has to come before the copy"

@@ -75,13 +75,19 @@ def create_supervised_model(
         try:
             from sklearn.linear_model import Ridge
         except ImportError as exc:  # pragma: no cover
-            raise ImportError("ridge requires: pip install 'hamiltonian-learning[ml]'") from exc
+            raise ImportError(
+                "ridge needs scikit-learn, which is a core requirement of "
+                "this package: `pip install --upgrade hamlet-toolkit`"
+            ) from exc
         return Ridge(**kwargs)
     if name == "random_forest":
         try:
             from sklearn.ensemble import RandomForestRegressor
         except ImportError as exc:  # pragma: no cover
-            raise ImportError("random_forest requires: pip install 'hamiltonian-learning[ml]'") from exc
+            raise ImportError(
+                "random_forest needs scikit-learn, which is a core requirement "
+                "of this package: `pip install --upgrade hamlet-toolkit`"
+            ) from exc
         defaults = {"n_estimators": 200, "n_jobs": -1, "random_state": 42}
         defaults.update(kwargs)
         return RandomForestRegressor(**defaults)
@@ -121,7 +127,9 @@ def _keras_modules():
         import keras
         from keras import layers, regularizers
     except ImportError as exc:  # pragma: no cover
-        raise ImportError("Keras models require: pip install 'hamiltonian-learning[ml]'") from exc
+        raise ImportError(
+            'the Keras models need TensorFlow: pip install "hamlet-toolkit[ml]"'
+        ) from exc
     return keras, layers, regularizers
 
 

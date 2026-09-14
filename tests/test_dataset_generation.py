@@ -8,6 +8,7 @@ from hamlet.data import (
     as_supervised,
     generate_dataset,
     generate_dataset_checkpointed,
+    generate_dataset_chunk_checkpointed,
 )
 from hamlet.simulation import SpectroscopyProtocol, SpectroscopyResult
 from hamlet.systems import (
@@ -106,6 +107,105 @@ def test_each_worker_simulates_in_its_own_directory(tmp_path):
     # and everything else in the run resolves relative paths against it.
     assert Path.cwd() == origin
     assert not (origin / "cwd-witness.txt").exists()
+
+
+def test_array_tasks_generate_one_sample_each_and_the_normal_run_joins_them(tmp_path):
+    family = HomogeneousHeisenbergFamily(6, ((5.0, 15.0),))
+    protocol = SpectroscopyProtocol.uniform((0, 4), points=7)
+    recipe = {"demo": "array"}
+    output = tmp_path / "array.npz"
+
+    # Deliberately out of order, as a real scheduler will finish them.
+    for index in (3, 0, 2, 1):
+        generated = generate_dataset_chunk_checkpointed(
+            family,
+            DeterministicSimulator(),
+            protocol,
+            chunk_index=index,
+            n_samples=4,
+            output_path=output,
+            recipe=recipe,
+            seed=9,
+            checkpoint_every=1,
+        )
+        assert generated.samples == 1
+        assert generated.total_chunks == 4
+
+    joined = generate_dataset_checkpointed(
+        family,
+        DeterministicSimulator(),
+        protocol,
+        n_samples=4,
+        output_path=output,
+        recipe=recipe,
+        seed=9,
+        checkpoint_every=1,
+    )
+    assert joined.resumed_chunks == 4
+    assert joined.generated_chunks == 0
+    assert joined.dataset.n_samples == 4
+    assert not (tmp_path / ".array.checkpoints").exists()
+
+
+def test_each_array_task_simulates_in_its_own_directory(tmp_path, monkeypatch):
+    """Array tasks share the staged project directory; DMRGPy does not.
+
+    It derives its scratch paths from the working directory, so two tasks
+    running in the same one overwrite each other's wavefunctions and produce a
+    dataset that is wrong without ever failing. Separate processes on separate
+    nodes make this worse than the local-worker case rather than better:
+    nothing holds a lock, and nothing reports a conflict.
+    """
+    family = HomogeneousHeisenbergFamily(4, ((5.0, 15.0),))
+    protocol = SpectroscopyProtocol.uniform((0, 4), points=5)
+    run_directory = tmp_path / "staged"
+    run_directory.mkdir()
+    output = run_directory / "array.npz"
+    # The scheduler starts every task in the run directory, so that is where
+    # the test starts from too.
+    monkeypatch.chdir(run_directory)
+
+    for index in range(3):
+        generate_dataset_chunk_checkpointed(
+            family, ScratchWitnessSimulator(), protocol,
+            chunk_index=index, n_samples=3, output_path=output,
+            recipe={"demo": "isolation"}, seed=2, checkpoint_every=1,
+        )
+        # Restored after every task: the chunk is written to a path resolved
+        # against this directory, and a task that left it moved would put the
+        # next one's output somewhere else entirely.
+        assert Path.cwd() == run_directory
+
+    witnesses = sorted(run_directory.rglob("cwd-witness.txt"))
+    assert len(witnesses) == 3, "each task should have simulated somewhere"
+    assert len({witness.parent for witness in witnesses}) == 3, (
+        "two tasks shared a scratch directory"
+    )
+    assert not (run_directory / "cwd-witness.txt").exists(), (
+        "a task simulated in the shared run directory"
+    )
+
+
+def test_an_array_task_is_retry_safe(tmp_path):
+    family = HomogeneousHeisenbergFamily(4, ((5.0, 15.0),))
+    protocol = SpectroscopyProtocol.uniform((0, 4), points=5)
+    kwargs = dict(
+        chunk_index=1,
+        n_samples=3,
+        output_path=tmp_path / "retry.npz",
+        recipe={"demo": "retry"},
+        seed=4,
+        checkpoint_every=1,
+    )
+    first = generate_dataset_chunk_checkpointed(
+        family, DeterministicSimulator(), protocol, **kwargs
+    )
+    second = generate_dataset_chunk_checkpointed(
+        family, FailAfterTwoSimulator(), protocol, **kwargs
+    )
+    assert first.cache_hit is False
+    assert second.cache_hit is True
+    assert second.chunk_path == first.chunk_path
 
 
 def test_the_worker_pool_does_not_force_a_start_method():

@@ -328,6 +328,8 @@ def describe_available_models() -> dict[str, Any]:
             continue
 
         metrics = manifest.get("metrics", {})
+        test_metrics = metrics.get("test", {})
+        test_ensemble = test_metrics.get("ensemble", {})
         dataset_metadata = manifest.get("dataset_metadata", {})
         recipe = dataset_metadata.get("generation_recipe", {})
         preprocessing = manifest.get("preprocessing", {})
@@ -411,7 +413,12 @@ def describe_available_models() -> dict[str, Any]:
                 "observable": observable,
                 "n_training_chains": n_chains,
                 "validation_mae_mev": metrics.get("validation", {}).get("ensemble", {}).get("mae"),
-                "test_mae_mev": metrics.get("test", {}).get("ensemble", {}).get("mae"),
+                "test_mae_mev": test_ensemble.get("mae"),
+                "test_rmse_mev": test_ensemble.get("rmse"),
+                "test_correlation_fidelity": test_ensemble.get("correlation_fidelity"),
+                "test_groups": split.get("test_groups"),
+                "test_examples": test_metrics.get("n_examples"),
+                "per_target_test": test_metrics.get("per_target", []),
                 "parameters": per_parameter,
                 "fixed_conditions": conditions,
                 "has_model_card": (directory / "MODEL_CARD.md").exists(),
@@ -1596,6 +1603,82 @@ def browse_cluster(path: str = "~", *, form: Mapping[str, Any] | None = None) ->
     return ClusterSession(cluster).list_directories(path)
 
 
+def _remote_results_dir(remote_dir: str, project: Path) -> str:
+    """Where the job's output will land, said plainly.
+
+    Staging makes the project's paths relative, so the results follow the copy
+    into the run directory rather than going anywhere the local settings
+    point. Worth stating, because the obvious guess -- that it obeys
+    HAMLET_WORKSPACE, which governs everything else the interface writes -- is
+    wrong.
+    """
+    import yaml
+
+    payload = yaml.safe_load(project.read_text(encoding="utf-8")) or {}
+    output = str(payload.get("output_dir") or "")
+    stem = Path(output).name if output else "the project's output_dir"
+    return f"{remote_dir.rstrip('/')}/{stem}"
+
+
+def _resource_mismatches(
+    cluster: Any, project: Path, *, array_generation: bool = False
+) -> list[str]:
+    """Where what the scheduler is asked for disagrees with what will run.
+
+    Both numbers are already known here, and the two ways they can disagree
+    both cost a whole run: cores that were requested and left idle, or chains
+    started on cores that were never granted. A batch job reports neither --
+    it simply takes longer, overnight, and the next morning the only evidence
+    is a wall-clock time that looks wrong.
+    """
+    import yaml
+
+    payload = yaml.safe_load(project.read_text(encoding="utf-8")) or {}
+    generate = (payload.get("dataset") or {}).get("generate") or {}
+    training = payload.get("training") or {}
+    resources = dict(getattr(cluster, "resources", {}) or {})
+    notes: list[str] = []
+
+    requested = resources.get("cpus")
+    # Absent means one. The default is not written into the configuration, so
+    # reading it as "unknown" would skip the check in exactly the case worth
+    # catching: cores requested from the scheduler and never asked for by the
+    # run, which is what happens when nobody touches the field.
+    workers = generate.get("workers", 1) if generate else None
+    if requested and workers and not array_generation:
+        requested, workers = int(requested), int(workers)
+        if workers > requested:
+            notes.append(
+                f"the run simulates {workers} chains at once but the job asks "
+                f"for {requested} cpu(s); they will contend and the run will "
+                f"take longer than the plan says"
+            )
+        elif workers == 1 and requested > 1:
+            notes.append(
+                f"the job asks for {requested} cpus and the run uses one. "
+                f"Set 'cores to use' to {requested} to get them"
+            )
+        elif workers < requested:
+            notes.append(
+                f"the job asks for {requested} cpus and the run uses "
+                f"{workers}; {requested - workers} would sit idle"
+            )
+
+    device = str(training.get("device") or "auto")
+    gpus = int(resources.get("gpus") or 0)
+    if device == "gpu" and not gpus:
+        notes.append(
+            "the run requires a GPU but the job asks for none, so training "
+            "will fall back to the CPU"
+        )
+    elif gpus and device == "cpu":
+        notes.append(
+            f"the job asks for {gpus} GPU(s) and the run is set to force the "
+            f"CPU, so they would be reserved and unused"
+        )
+    return notes
+
+
 def cluster_script(config_path: str | Path) -> dict[str, Any]:
     """The batch script that would be submitted for one project.
 
@@ -1605,20 +1688,21 @@ def cluster_script(config_path: str | Path) -> dict[str, Any]:
     from ..cluster import (
         ClusterConfig,
         make_portable,
-        project_command,
-        render_job_script,
+        project_job_scripts,
     )
 
     cluster = ClusterConfig.from_file(_cluster_config_path())
     project = Path(config_path).expanduser().resolve()
     portable = make_portable(project)
-    command = project_command(cluster, project.name)
+    scripts = project_job_scripts(cluster, project)
     return {
-        "script": render_job_script(
-            cluster, command, job_name=project.parent.name
-        ),
+        **scripts,
         "project_dir": str(project.parent),
         "remote_dir": cluster.remote_dir,
+        "results_dir": _remote_results_dir(cluster.remote_dir, project),
+        "mismatches": _resource_mismatches(
+            cluster, project, array_generation=scripts["submission_mode"] == "array_then_train"
+        ),
         "host": cluster.host or "this machine",
         "scheduler": cluster.scheduler.name,
         "portable": portable["portable"],
@@ -1634,14 +1718,41 @@ def submit_to_cluster(config_path: str | Path) -> dict[str, Any]:
     session = ClusterSession(cluster)
     prepared = cluster_script(config_path)
     directory = Path(prepared["project_dir"])
+    if prepared["submission_mode"] == "array_then_train":
+        # Before copying anything: an array of one-chain tasks calls a
+        # subcommand that older installations do not have, and finding that
+        # out from the scheduler means every task failing identically with an
+        # argparse message nobody reads until the morning.
+        toolkit = session.check_toolkit()
+        if toolkit["available"] and not toolkit["array_ready"]:
+            raise RuntimeError(toolkit["array_hint"])
     print(f"copying {directory} to {cluster.host or 'the working directory'}")
     session.stage(directory).raise_for_status("copying the project")
-    print("submitting")
-    submitted = session.submit(prepared["script"])
+    if prepared["submission_mode"] == "array_then_train":
+        print(f"submitting {prepared['array_tasks']} generation array task(s)")
+        generation = session.submit(
+            prepared["generation_script"], script_name="hamlet-generate-array.sh"
+        )
+        print(
+            f"generation array {generation['job_id']} submitted; "
+            "training will wait for every task"
+        )
+        submitted = session.submit(
+            prepared["training_script"],
+            script_name="hamlet-train.sh",
+            dependency_job_id=generation["job_id"],
+        )
+    else:
+        print("submitting")
+        generation = None
+        submitted = session.submit(prepared["training_script"])
     print(f"job {submitted['job_id']} submitted with {submitted['scheduler']}")
     return {
         "kind": "cluster",
         **submitted,
+        "submission_mode": prepared["submission_mode"],
+        "array_tasks": prepared["array_tasks"],
+        "generation_job_id": generation["job_id"] if generation else None,
         "host": cluster.host or "this machine",
         "project_dir": str(directory),
     }
@@ -1667,8 +1778,34 @@ def fetch_from_cluster(project_dir: str | Path) -> dict[str, Any]:
     cluster = ClusterConfig.from_file(_cluster_config_path())
     result = ClusterSession(cluster).fetch(Path(project_dir))
     result.raise_for_status("fetching results")
-    return {"kind": "fetch", "project_dir": str(project_dir),
-            "output": result.stdout.strip()}
+    payload: dict[str, Any] = {
+        "kind": "fetch",
+        "project_dir": str(project_dir),
+        "output": result.stdout.strip(),
+    }
+    manifests = list(Path(project_dir).glob("run-*/artifact/manifest.json"))
+    if manifests:
+        newest = max(manifests, key=lambda path: path.stat().st_mtime)
+        try:
+            manifest = json.loads(newest.read_text(encoding="utf-8"))
+            metrics = manifest.get("metrics") or {}
+            test = metrics.get("test") or {}
+            payload["training_evaluation"] = {
+                "artifact_path": str(newest.parent),
+                "validation_mae_mev": (
+                    (metrics.get("validation") or {}).get("ensemble") or {}
+                ).get("mae"),
+                "test_mae_mev": (test.get("ensemble") or {}).get("mae"),
+                "held_out_evaluation": test,
+                "test_groups": (metrics.get("split") or {}).get("test_groups"),
+                "target_names": list(manifest.get("target_names") or []),
+                "evaluation_path": str(newest.parent / "held_out_evaluation.json"),
+            }
+        except (OSError, json.JSONDecodeError, TypeError):
+            # Fetch still succeeded. A partial/old artifact simply has no
+            # performance card to show yet.
+            pass
+    return payload
 
 
 # --- applying a model to a measurement --------------------------------------
@@ -2789,6 +2926,10 @@ def build_project_config(form: dict[str, Any], *, workspace: Path | None = None)
         "output_quantity": "didv",
         "backend": "dmrgpy",
         "seed": int(form.get("seed", 42)),
+        # The cluster path maps one scheduler-array task to one chain. Local
+        # execution can still run several one-chain checkpoints concurrently,
+        # and the final dataset is independent of where those tasks ran.
+        "checkpoint_every": 1,
     }
     if form["observable"] == "total_spin":
         generate["observable_weights"] = [

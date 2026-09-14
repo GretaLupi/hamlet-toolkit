@@ -53,6 +53,11 @@ def test_guided_training_artifact_round_trip(tmp_path):
     )
     assert run.metrics["test"]["unit"] == "meV"
     assert run.metrics["test"]["ensemble"]["mae"] >= 0
+    assert 0 <= run.metrics["test"]["ensemble"]["correlation_fidelity"] <= 1
+    assert [row["name"] for row in run.metrics["test"]["per_target"]] == [
+        "J_left", "J_right"
+    ]
+    assert all("skill" in row for row in run.metrics["test"]["per_target"])
 
     artifact_path = run.save(tmp_path / "ridge-artifact")
     manifest = json.loads((artifact_path / "manifest.json").read_text())
@@ -64,6 +69,10 @@ def test_guided_training_artifact_round_trip(tmp_path):
     assert manifest["ensemble_aggregation"]["method"] in {
         "mean", "median", "validation_weighted"
     }
+    evaluation = json.loads((artifact_path / "held_out_evaluation.json").read_text())
+    assert evaluation["split"]["test_groups"] > 0
+    assert evaluation["test"]["ensemble"]["correlation_fidelity"] >= 0
+    assert evaluation["test"]["per_target"][0]["name"] == "J_left"
 
     loaded = TrainingRun.load(artifact_path)
     assert loaded.distribution_profile is not None

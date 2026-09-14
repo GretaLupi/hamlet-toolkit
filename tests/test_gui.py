@@ -2163,6 +2163,10 @@ def test_a_training_run_started_from_the_page_reports_its_model(server, tmp_path
     assert result["kind"] == "training"
     assert result["validation_mae_mev"] >= 0
     assert result["test_mae_mev"] >= 0
+    assert result["test_groups"] > 0
+    assert result["held_out_evaluation"]["ensemble"]["correlation_fidelity"] >= 0
+    assert result["held_out_evaluation"]["per_target"]
+    assert Path(result["evaluation_path"]).exists()
     # A search was configured, so its outcome has to reach the page too --
     # otherwise the user cannot tell a tuned run from an untuned one.
     assert result["tuning"]["backend"] in {"optuna", "random"}
@@ -2704,3 +2708,36 @@ def test_a_model_you_trained_is_labelled_by_the_name_you_gave_it(
     assert api._workspace_label(artifact) == "my first chain"
     # A directory outside the workspace keeps its own name rather than raising.
     assert api._workspace_label(tmp_path / "elsewhere") == "elsewhere"
+
+
+def test_fidelity_is_defined_where_it_is_reported():
+    """A number between 0 and 1 with no definition invites the wrong reading.
+
+    Fidelity here is a correlation, so it is blind to a constant offset and to
+    a scale factor: a model can score well on it and still be wrong by several
+    meV. The page has to say so next to the figure, not in a document nobody
+    opens -- but folded behind an (i), because the person reading their tenth
+    run already knows.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "function fidelityNote()" in script
+    note = script[script.index("function fidelityNote()"):]
+    note = note[: note.index("function trainingResult")]
+
+    assert 'class="formula"' in note, "the definition should show the formula"
+    assert "Pearson" in note
+    assert "0 to 1" in note, "the range is the first thing anyone asks"
+    assert "offset" in note and "scale" in note, "a correlation hides both"
+    # Folded away, and distinct per run: one page can list several finished
+    # runs, and a fixed id would make every (i) open the first note.
+    assert "hidden" in note
+    assert "infoSequence" in note
+
+    # It appears both where a fresh run is reported and in the model catalogue.
+    assert script.count("${fidelityNote()}") >= 2
+
+
+def test_the_fidelity_counter_exists_before_any_render_uses_it():
+    """`let` is not hoisted: a render before the declaration would throw."""
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert script.index("let infoSequence") < script.index("\nloadModels();")

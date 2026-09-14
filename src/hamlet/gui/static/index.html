@@ -347,6 +347,18 @@
 
     <li>
       <h3>6 &middot; Review and run</h3>
+      <h4>Where should it run?</h4>
+      <div id="f-run-targets" class="cards">
+        <button type="button" class="card chosen" data-run-target="local">
+          <span class="have">This machine</span>
+          <span class="does">Generate and train in a background process here.</span>
+        </button>
+        <button type="button" class="card" data-run-target="cluster">
+          <span class="have">The saved cluster</span>
+          <span class="does" id="f-cluster-target-note">Checking cluster settings…</span>
+        </button>
+      </div>
+      <p class="hint" id="f-cluster-target-help"></p>
       <div class="row">
         <label>name this run <input type="text" id="f-name" size="30" placeholder="my chain"></label>
         <button id="f-plan" class="primary">Show me what this will do</button>
@@ -354,7 +366,7 @@
       <div id="f-plan-out"></div>
       <div class="danger-zone" id="f-run-zone" hidden>
         <button id="f-run">Start the run</button>
-        <span class="hint">Generation and training take hours. It runs in the background.</span>
+        <span class="hint" id="f-run-hint">Generation and training take hours. It runs in the background.</span>
       </div>
     </li>
   </ol>
@@ -538,8 +550,8 @@ ssh you@cluster.example.edu true</pre>
 
   <h3>Send a run there</h3>
   <p class="hint">
-    Prepare the configuration under <em>Train a model</em> first. HamLeT copies
-    the project directory and converts project paths to relative paths.
+    You can select this cluster and submit directly from <b>Train a model</b>.
+    These controls remain available for inspecting or resubmitting its scripts.
   </p>
   <div class="row">
     <button id="cluster-script-btn">Show me the job script</button>

@@ -123,6 +123,9 @@ button.primary:hover { filter: brightness(1.08); }
 .card-arrow { color: var(--accent); font-size: 22px; font-weight: 400; }
 .situation-card .does { display: block; margin-bottom: 16px; }
 .situation-card .meta { display: grid; gap: 5px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); width: 100%; }
+#f-run-targets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+#f-run-targets .card { display: flex; flex-direction: column; text-align: left; }
+#f-run-targets .have, #f-run-targets .does { display: block; }
 .situation-card .meta b { margin-right: 5px; }
 .situation-card:hover { background: var(--accent-soft); }
 #sys-cards, #f-model-cards, #device-cards { grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
@@ -412,6 +415,18 @@ button.linky:hover { color: var(--accent); text-decoration: underline; }
   margin-top: 4px; max-width: 70ch;
 }
 .info-body[hidden] { display: none; }
+/* A formula is read, not skimmed: give it room and a typeface that keeps the
+   subscripts legible next to the surrounding prose. */
+.formula {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--accent-soft);
+  border-radius: 6px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-x: auto;
+}
 /* One species select per chosen site, shown under the chain it annotates. */
 .spin-rows { gap: 8px; align-items: center; font-size: 13px; margin-top: 6px; }
 .spin-rows label { display: inline-flex; align-items: center; gap: 4px; }
@@ -482,6 +497,7 @@ a { color: var(--accent); }
   .header-actions .hint { display: none; }
   main { padding: 24px 16px 56px; }
   #situations { grid-template-columns: 1fr; }
+  #f-run-targets { grid-template-columns: 1fr; }
   ol.steps > li { padding: 18px 14px; overflow-x: auto; }
   .option { grid-template-columns: 1fr; gap: 6px; }
   .option-hint { grid-column: 1; }

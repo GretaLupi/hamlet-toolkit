@@ -61,7 +61,12 @@ def _generate_chunk_to_checkpoint(task: tuple[Any, ...]) -> tuple[int, int]:
 
 
 def _save_chunk_atomic(chunk: SpectroscopyDataset, chunk_path: Path) -> None:
-    temporary = chunk_path.with_suffix(".partial.npz")
+    # Array jobs can be retried while the original task is still winding down.
+    # A process-specific temporary name keeps two identical attempts from
+    # trampling the same half-written file; the final replace is atomic.
+    temporary = chunk_path.with_name(
+        f".{chunk_path.stem}.{os.getpid()}.partial.npz"
+    )
     chunk.save(temporary)
     os.replace(temporary, chunk_path)
 
@@ -75,6 +80,101 @@ class CheckpointedGenerationResult:
     resumed_chunks: int
     generated_chunks: int
     workers_used: int = 1
+
+
+@dataclass(frozen=True)
+class CheckpointedGenerationChunkResult:
+    """One independently generated chunk, suitable for a scheduler array."""
+
+    chunk_index: int
+    chunk_path: Path
+    samples: int
+    total_chunks: int
+    cache_hit: bool
+
+
+def generate_dataset_chunk_checkpointed(
+    family: SystemFamily,
+    simulator: SpectroscopySimulator,
+    protocol: SpectroscopyProtocol,
+    *,
+    chunk_index: int,
+    n_samples: int,
+    output_path: str | Path,
+    recipe: Mapping[str, Any],
+    seed: int = 42,
+    checkpoint_every: int = 1,
+) -> CheckpointedGenerationChunkResult:
+    """Generate exactly one deterministic checkpoint for a scheduler task.
+
+    Every task writes a different file, so array jobs need no coordinator or
+    shared append operation.  A later ordinary ``generate_dataset_checkpointed``
+    call validates and joins the complete ordered set before training.
+    """
+    if n_samples < 1:
+        raise ValueError("n_samples must be positive")
+    if checkpoint_every < 1:
+        raise ValueError("checkpoint_every must be positive")
+
+    destination = Path(output_path).resolve()
+    if destination.suffix.lower() != ".npz":
+        raise ValueError("generated dataset output_path must end in .npz")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path = destination.with_suffix(".generation.json")
+    checkpoint_dir = destination.parent / f".{destination.stem}.checkpoints"
+    resolved_recipe = _jsonable(dict(recipe))
+    fingerprint = _fingerprint(resolved_recipe)
+    manifest = {
+        "toolkit": brand_manifest(),
+        "generation_schema_version": 1,
+        "fingerprint": fingerprint,
+        "recipe": resolved_recipe,
+    }
+    if manifest_path.exists():
+        _require_matching_manifest(manifest_path, fingerprint)
+    else:
+        _write_json_atomic(manifest_path, manifest)
+        # Another array task may have won the same race. Its complete file is
+        # now authoritative and must describe these exact settings.
+        _require_matching_manifest(manifest_path, fingerprint)
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    sizes = [
+        min(checkpoint_every, n_samples - start)
+        for start in range(0, n_samples, checkpoint_every)
+    ]
+    index = int(chunk_index)
+    if index < 0 or index >= len(sizes):
+        raise IndexError(
+            f"generation chunk index {index} is outside 0..{len(sizes) - 1}"
+        )
+    chunk_path = checkpoint_dir / f"chunk-{index:05d}.npz"
+    size = sizes[index]
+    if chunk_path.exists():
+        stored = SpectroscopyDataset.load(chunk_path)
+        if stored.n_samples != size:
+            raise ValueError(f"checkpoint has wrong sample count: {chunk_path}")
+        return CheckpointedGenerationChunkResult(
+            index, chunk_path, size, len(sizes), True
+        )
+
+    child_sequences = np.random.SeedSequence(seed).spawn(len(sizes))
+    chunk_seed = int(child_sequences[index].generate_state(1, dtype=np.uint32)[0])
+    # DMRGPy writes scratch state below cwd. Array tasks share the staged
+    # project directory, so each one must work in a private directory just as
+    # local worker processes do.
+    original_directory = Path.cwd()
+    scratch_root = (checkpoint_dir / "scratch" / f"array-{index:05d}").resolve()
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    try:
+        _isolate_worker(str(scratch_root))
+        chunk = generate_dataset(family, simulator, protocol, size, seed=chunk_seed)
+    finally:
+        os.chdir(original_directory)
+    _save_chunk_atomic(chunk, chunk_path)
+    return CheckpointedGenerationChunkResult(
+        index, chunk_path, size, len(sizes), False
+    )
 
 
 def generate_dataset_checkpointed(
@@ -333,7 +433,7 @@ def _fingerprint(recipe: Mapping[str, Any]) -> str:
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, Any]) -> None:
-    temporary = path.with_suffix(".partial.json")
+    temporary = path.with_name(f".{path.stem}.{os.getpid()}.partial.json")
     temporary.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     os.replace(temporary, path)
 

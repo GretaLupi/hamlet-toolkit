@@ -13,9 +13,11 @@ from .branding import brand_manifest
 from .cancellation import check_cancelled
 from .compute import DeviceRequest, configure_device
 from .data import (
+    CheckpointedGenerationChunkResult,
     CheckpointedGenerationResult,
     SpectroscopyDataset,
     generate_dataset_checkpointed,
+    generate_dataset_chunk_checkpointed,
 )
 from .experimental import ExperimentalChainResult, ExperimentalGlobalResult
 from .experiments import load_canonical_experiment
@@ -583,6 +585,61 @@ class HamiltonianLearningProject:
         if recipe is None:
             raise RuntimeError("project configuration has no dataset.generate recipe")
         self._record_resolved_config()
+        family, protocol, resolved_simulator = self._generation_components(simulator)
+        resolved_progress = progress
+        if resolved_progress is None and self.config.verbose:
+            resolved_progress = _console_progress
+        self.generation_result = generate_dataset_checkpointed(
+            family,
+            resolved_simulator,
+            protocol,
+            n_samples=recipe.n_samples,
+            output_path=recipe.output_path,
+            recipe=recipe.to_recipe(),
+            seed=recipe.seed,
+            checkpoint_every=recipe.checkpoint_every,
+            workers=_resolved_workers(recipe.workers),
+            progress=resolved_progress,
+        )
+        self.dataset = self.generation_result.dataset
+        return self.generation_result
+
+    def generate_training_dataset_chunk(
+        self,
+        chunk_index: int,
+        *,
+        simulator: SpectroscopySimulator | None = None,
+    ) -> CheckpointedGenerationChunkResult:
+        """Generate one array-task checkpoint without joining or training.
+
+        The browser's cluster configuration uses one-sample chunks, making the
+        scheduler task index the sample index.  Keeping this method chunk-aware
+        also makes retries deterministic and lets manually written projects use
+        a coarser checkpoint size if they deliberately choose one.
+        """
+        recipe = self.config.generation
+        if recipe is None:
+            raise RuntimeError("project configuration has no dataset.generate recipe")
+        family, protocol, resolved_simulator = self._generation_components(simulator)
+        return generate_dataset_chunk_checkpointed(
+            family,
+            resolved_simulator,
+            protocol,
+            chunk_index=int(chunk_index),
+            n_samples=recipe.n_samples,
+            output_path=recipe.output_path,
+            recipe=recipe.to_recipe(),
+            seed=recipe.seed,
+            checkpoint_every=recipe.checkpoint_every,
+        )
+
+    def _generation_components(
+        self, simulator: SpectroscopySimulator | None = None
+    ) -> tuple[Any, SpectroscopyProtocol, SpectroscopySimulator]:
+        """Construct the three immutable inputs shared by local and array runs."""
+        recipe = self.config.generation
+        if recipe is None:
+            raise RuntimeError("project configuration has no dataset.generate recipe")
         if recipe.system_type == "inhomogeneous_heisenberg":
             assert recipe.coupling_range_mev is not None
             family = InhomogeneousHeisenbergFamily(
@@ -620,23 +677,7 @@ class HamiltonianLearningProject:
             max_bond_dimension=recipe.max_bond_dimension,
             kpm_max_bond_dimension=recipe.kpm_max_bond_dimension,
         )
-        resolved_progress = progress
-        if resolved_progress is None and self.config.verbose:
-            resolved_progress = _console_progress
-        self.generation_result = generate_dataset_checkpointed(
-            family,
-            resolved_simulator,
-            protocol,
-            n_samples=recipe.n_samples,
-            output_path=recipe.output_path,
-            recipe=recipe.to_recipe(),
-            seed=recipe.seed,
-            checkpoint_every=recipe.checkpoint_every,
-            workers=_resolved_workers(recipe.workers),
-            progress=resolved_progress,
-        )
-        self.dataset = self.generation_result.dataset
-        return self.generation_result
+        return family, protocol, resolved_simulator
 
     def plan(self, *, seconds_per_chain: float | None = None) -> ProjectPlan:
         """Resolve what ``run`` would do, without executing or writing anything.
@@ -1315,6 +1356,12 @@ class HamiltonianLearningProject:
                 **asdict(outcome),
                 "validation_mae_mev": run.metrics["validation"]["ensemble"]["mae"],
                 "test_mae_mev": run.metrics["test"]["ensemble"]["mae"],
+                "test_correlation_fidelity": run.metrics["test"]["ensemble"][
+                    "correlation_fidelity"
+                ],
+                "held_out_evaluation": str(
+                    self.config.output_dir / "artifact" / "held_out_evaluation.json"
+                ),
             },
         )
         return outcome

@@ -67,7 +67,9 @@ The local browser interface guides the full workflow:
    length, view, cutoff, and preprocessing contract;
 4. reuse it, or generate a dataset and train ridge, random-forest, MLP, or CNN
    models from the interface;
-5. infer the couplings and export a LaTeX/PDF summary for a colleague,
+5. inspect held-out simulated-test fidelity and per-parameter errors before
+   applying a newly trained model;
+6. infer the couplings and export a LaTeX/PDF summary for a colleague,
    an HTML report, a plot, a CSV, and a JSON result.
 
 It binds to localhost and does not upload measurements elsewhere. Long jobs run
@@ -78,9 +80,9 @@ prints the same layout from the terminal: `results/` beside a source checkout,
 `~/.hamlet/workspace/` for an installed package, or `HAMLET_WORKSPACE`.
 
 Dataset generation is the stage that costs hours, and every chain is
-independent, so set **chains at once** (`dataset.generate.workers`, or `0` for
-one per core) to shorten it. The result does not depend on it — the dataset is
-bit-identical however many run at a time. See
+independent. Local runs can use several cores; cluster runs use a scheduler
+array with one job per simulated chain and start training only after the whole
+array succeeds. The result does not depend on execution order. See
 [Making generation faster](docs/user-guide.md#making-generation-faster),
 which also covers why a GPU makes this stage *slower*.
 
