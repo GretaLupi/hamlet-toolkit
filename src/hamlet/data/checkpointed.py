@@ -413,6 +413,61 @@ def _combine_chunks(
     )
 
 
+def generation_state_conflict(
+    output_path: str | Path, recipe: Mapping[str, Any]
+) -> str | None:
+    """Why this recipe cannot reuse the dataset state already at ``output_path``.
+
+    The same question generation answers when it starts, asked early enough to
+    be useful. A scheduler array asks it once per task: a hundred tasks fail
+    on the same sentence, none of them says which of the two recipes is the
+    one worth keeping, and the queue has already been spent. Answering it
+    before anything is submitted costs one file read.
+
+    Returns ``None`` when there is no conflict -- either nothing is there, or
+    what is there was generated from exactly these settings and will be reused.
+    """
+    destination = Path(output_path).expanduser()
+    manifest_path = destination.with_suffix(".generation.json")
+    if not manifest_path.exists():
+        if destination.exists():
+            return (
+                f"{destination} exists but {manifest_path.name} does not, so "
+                "there is no way to tell what settings produced it. Move it "
+                "aside, or point this run at a new output path."
+            )
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return (
+            f"{manifest_path} cannot be read, so the dataset beside it cannot "
+            "be reused. Move both aside, or point this run at a new output path."
+        )
+
+    current = _jsonable(dict(recipe))
+    if manifest.get("fingerprint") == _fingerprint(current):
+        return None
+
+    stored = manifest.get("recipe") or {}
+    differences = [
+        f"{key} {stored.get(key, 'unset')!r} -> {current.get(key, 'unset')!r}"
+        for key in sorted(set(stored) | set(current))
+        if stored.get(key) != current.get(key)
+    ]
+    # Naming the settings that moved is the difference between a message that
+    # explains the refusal and one that only announces it.
+    detail = "; ".join(differences[:4]) if differences else "the settings differ"
+    if len(differences) > 4:
+        detail += f"; and {len(differences) - 4} more"
+    return (
+        f"{destination} was generated from different settings ({detail}). "
+        "Generation never overwrites a dataset: either delete "
+        f"{destination.name} and {manifest_path.name} if that one is finished "
+        "with, or give this run a new output path."
+    )
+
+
 def _require_matching_manifest(path: Path, fingerprint: str) -> None:
     if not path.exists():
         raise FileExistsError(
@@ -422,8 +477,10 @@ def _require_matching_manifest(path: Path, fingerprint: str) -> None:
     manifest = json.loads(path.read_text(encoding="utf-8"))
     if manifest.get("fingerprint") != fingerprint:
         raise FileExistsError(
-            f"generation recipe does not match existing state at {path}; "
-            "choose a new output path"
+            f"generation recipe does not match existing state at {path}. "
+            "Delete that file and the dataset beside it if the earlier run is "
+            "finished with, or give this run a new output path. "
+            "`hamlet run --dry-run` reports this before a job is submitted."
         )
 
 

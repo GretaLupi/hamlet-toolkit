@@ -5,6 +5,7 @@ from .checkpointed import (
     CheckpointedGenerationResult,
     generate_dataset_checkpointed,
     generate_dataset_chunk_checkpointed,
+    generation_state_conflict,
 )
 from .supervised import SupervisedDataset, as_supervised
 
@@ -18,4 +19,5 @@ __all__ = [
     "generate_dataset",
     "generate_dataset_checkpointed",
     "generate_dataset_chunk_checkpointed",
+    "generation_state_conflict",
 ]

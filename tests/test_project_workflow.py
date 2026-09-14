@@ -603,3 +603,100 @@ def test_preparation_is_not_repeated_once_it_has_happened(tmp_path):
     project = HamiltonianLearningProject(config)
     first = project.prepare_training_data_without_experiment()
     assert project._ensure_prepared() is first
+
+
+def test_a_changed_recipe_is_refused_by_the_plan_not_by_every_array_task(tmp_path):
+    """The refusal is knowable before anything is submitted.
+
+    Generation never overwrites a dataset, which is right: the settings that
+    produced the one on disk are gone otherwise. But on a cluster the run is
+    an array, so leaving the check to the run means every task raises the
+    same error after the queue has been spent -- and the message arrives a
+    hundred times without ever saying which settings moved.
+    """
+    def write_config(n_samples):
+        path = tmp_path / "generate.yaml"
+        path.write_text(
+            f"""
+name: array demo
+system_type: inhomogeneous_heisenberg
+output_dir: output
+dataset:
+  generate:
+    system: inhomogeneous_heisenberg
+    output: generated/train.npz
+    n_sites: 6
+    n_samples: {n_samples}
+    coupling_range_mev: [30, 45]
+    bias_range_mev: [0, 60]
+    bias_points: 13
+    broadening_mev: 0.5
+    output_quantity: didv
+    backend: dmrgpy
+    seed: 4
+    checkpoint_every: 1
+"""
+        )
+        return path
+
+    project = HamiltonianLearningProject(ProjectConfig.from_file(write_config(4)))
+    project.generate_training_dataset(simulator=LightweightSimulator())
+
+    # The same settings: a cache hit, and nothing to warn about.
+    unchanged = HamiltonianLearningProject(
+        ProjectConfig.from_file(write_config(4))
+    ).plan()
+    assert unchanged.blocking_issues == ()
+    assert unchanged.would_refuse is False
+
+    changed = HamiltonianLearningProject(
+        ProjectConfig.from_file(write_config(6))
+    ).plan()
+    assert changed.would_refuse is True
+    issue = "\n".join(changed.blocking_issues)
+    assert "n_samples" in issue, "the message has to name what moved"
+    assert "4" in issue and "6" in issue
+    assert "new output path" in issue, "and say what to do about it"
+
+
+def test_the_plan_check_agrees_with_what_generation_actually_does(tmp_path):
+    """A check that disagreed with the run would be worse than none at all."""
+    from hamlet.data import generation_state_conflict
+
+    config_path = tmp_path / "generate.yaml"
+    config_path.write_text(
+        """
+name: agreement
+system_type: inhomogeneous_heisenberg
+output_dir: output
+dataset:
+  generate:
+    system: inhomogeneous_heisenberg
+    output: generated/train.npz
+    n_sites: 6
+    n_samples: 3
+    coupling_range_mev: [30, 45]
+    bias_range_mev: [0, 60]
+    bias_points: 13
+    broadening_mev: 0.5
+    output_quantity: didv
+    backend: dmrgpy
+    seed: 4
+    checkpoint_every: 1
+"""
+    )
+    config = ProjectConfig.from_file(config_path)
+    recipe = config.generation
+
+    # Nothing generated yet: no conflict, and the run proceeds.
+    assert generation_state_conflict(recipe.output_path, recipe.to_recipe()) is None
+    HamiltonianLearningProject(config).generate_training_dataset(
+        simulator=LightweightSimulator()
+    )
+    # Generated from these settings: still no conflict, and the run is a
+    # cache hit rather than a refusal.
+    assert generation_state_conflict(recipe.output_path, recipe.to_recipe()) is None
+    reused = HamiltonianLearningProject(config).generate_training_dataset(
+        simulator=LightweightSimulator()
+    )
+    assert reused.cache_hit

@@ -18,6 +18,7 @@ from .data import (
     SpectroscopyDataset,
     generate_dataset_checkpointed,
     generate_dataset_chunk_checkpointed,
+    generation_state_conflict,
 )
 from .experimental import ExperimentalChainResult, ExperimentalGlobalResult
 from .experiments import load_canonical_experiment
@@ -765,11 +766,19 @@ class HamiltonianLearningProject:
                 "recipe fingerprint sidecar",
                 blocks=False,
             )
-            if already_generated:
+            # Asked here rather than left to the run: on a cluster the run is
+            # an array, and an array discovers this once per task, after the
+            # queue has been spent.
+            conflict = generation_state_conflict(
+                recipe.output_path, recipe.to_recipe()
+            )
+            if conflict is not None:
+                blocking.append(conflict)
+            elif already_generated:
                 notes.append(
-                    f"{recipe.output_path} already exists; an identical recipe is a cache "
-                    "hit and costs nothing, while a changed recipe is refused rather than "
-                    "overwritten. The generation estimate below assumes a full run."
+                    f"{recipe.output_path} already exists and was generated from these "
+                    "exact settings, so it will be reused and generation costs nothing. "
+                    "The estimate below assumes a full run."
                 )
             stages.append("generate simulations")
             if recipe.n_sites < 3 and config.view == "local_bonds":
