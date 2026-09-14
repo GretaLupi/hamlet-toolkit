@@ -782,3 +782,82 @@ def test_the_imaginary_residue_tolerance_follows_the_solver():
     assert strict.imaginary_residue_tolerance == 1e-9
     with pytest.raises(ValueError, match="between zero and one"):
         DmrgpySimulator(max_relative_imaginary_residue=2.0)
+
+
+def test_generation_uses_exact_diagonalisation_when_the_chain_is_small_enough(tmp_path):
+    """ED is exact and, for a short chain, also faster than an MPS solve.
+
+    Generation used DMRG for every chain regardless of size, which for an
+    eight-site spin-1/2 chain -- 256 states, well inside what ED affords --
+    meant paying for an approximation nobody needed and inheriting its
+    truncation noise.
+    """
+    from hamlet.project import HamiltonianLearningProject, ProjectConfig
+
+    def project_for(n_sites, mode="auto"):
+        path = tmp_path / f"config-{n_sites}-{mode}.yaml"
+        path.write_text(
+            f"""
+name: solver choice
+system_type: homogeneous_heisenberg
+output_dir: out-{n_sites}-{mode}
+dataset:
+  generate:
+    system: homogeneous_heisenberg
+    output: data-{n_sites}-{mode}.npz
+    n_sites: {n_sites}
+    n_samples: 2
+    coupling_ranges_mev: [[2, 8], [-1, 1]]
+    dynamics_mode: {mode}
+"""
+        )
+        return HamiltonianLearningProject(ProjectConfig.from_file(path))
+
+    _, _, small = project_for(8)._generation_components()
+    assert small.dynamics_mode == "ED"
+    # And with ED the strict residue threshold is the right one again.
+    assert small.imaginary_residue_tolerance == 1e-6
+
+    _, _, large = project_for(14)._generation_components()
+    assert large.dynamics_mode == "DMRG"
+    assert large.imaginary_residue_tolerance == 1e-3
+
+    # An explicit choice is still honoured in both directions.
+    _, _, forced = project_for(8, "DMRG")._generation_components()
+    assert forced.dynamics_mode == "DMRG"
+
+    # The plan says which solver will run, since it decides both the cost and
+    # the accuracy of every spectrum in the dataset.
+    plan = project_for(8).plan()
+    assert plan.dataset_detail["dynamics_mode"] == "ED"
+    assert any("ED" in note for note in plan.notes)
+
+
+def test_the_solver_is_part_of_the_recipe_fingerprint(tmp_path):
+    """Two solvers give different numbers, so they are different datasets."""
+    from hamlet.data.checkpointed import _fingerprint, _jsonable
+    from hamlet.project import HamiltonianLearningProject, ProjectConfig
+
+    def recipe_for(mode):
+        path = tmp_path / f"fp-{mode}.yaml"
+        path.write_text(
+            f"""
+name: fingerprint
+system_type: homogeneous_heisenberg
+output_dir: out
+dataset:
+  generate:
+    system: homogeneous_heisenberg
+    output: data.npz
+    n_sites: 8
+    n_samples: 2
+    coupling_ranges_mev: [[2, 8], [-1, 1]]
+    dynamics_mode: {mode}
+"""
+        )
+        config = ProjectConfig.from_file(path)
+        return HamiltonianLearningProject(config).config.generation.to_recipe()
+
+    assert _fingerprint(_jsonable(recipe_for("ED"))) != _fingerprint(
+        _jsonable(recipe_for("DMRG"))
+    )

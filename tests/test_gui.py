@@ -2803,5 +2803,9 @@ def test_the_models_page_can_be_refreshed_without_restarting_the_server():
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     assert 'id="models-refresh"' in html
     assert 'el("models-refresh").addEventListener' in script
-    # The delete button belongs only to models you trained.
-    assert 'm.origin === "yours" ? `<button data-delete-model=' in script
+    # The delete button belongs only to models you trained. Asserted on the
+    # condition and the attribute rather than one literal string, so adding a
+    # class to the button does not fail a test about who may delete what.
+    guarded = script[script.index("data-delete-model") - 200:]
+    guarded = guarded[: guarded.index("data-delete-model")]
+    assert 'm.origin === "yours" ?' in guarded

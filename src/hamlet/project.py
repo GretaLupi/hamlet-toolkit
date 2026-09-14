@@ -24,6 +24,7 @@ from .experimental import ExperimentalChainResult, ExperimentalGlobalResult
 from .experiments import load_canonical_experiment
 from .io import load_reference_heisenberg_datasets
 from .simulation import DmrgpySimulator, SpectroscopyProtocol, SpectroscopySimulator
+from .simulation.dmrgpy import ED_DIMENSION_LIMIT
 from .systems import (
     HomogeneousHeisenbergFamily,
     HomogeneousXXZDMIImpurityFamily,
@@ -70,6 +71,14 @@ class DatasetGenerationConfig:
     backend: str = "dmrgpy"
     max_bond_dimension: int = 20
     kpm_max_bond_dimension: int = 20
+    # Which solver simulates each chain. "auto" uses exact diagonalisation
+    # while the Hilbert space is small enough to afford it and DMRG beyond
+    # that, which is the right trade in both directions: ED is exact and has
+    # no truncation residue, and for a short chain it is also faster than an
+    # MPS solve. It is part of the recipe because it changes the numbers, and
+    # "auto" resolves deterministically from n_sites and site_spin, which are
+    # in the recipe too.
+    dynamics_mode: str = "auto"
     seed: int = 42
     checkpoint_every: int = 25
     # The spin magnitude every site of the chain carries. This *is* part of
@@ -114,6 +123,8 @@ class DatasetGenerationConfig:
             raise ValueError("broadening_mev must be positive")
         if self.max_bond_dimension < 1 or self.kpm_max_bond_dimension < 1:
             raise ValueError("DMRGPy bond dimensions must be positive")
+        if self.dynamics_mode not in {"auto", "ED", "DMRG"}:
+            raise ValueError("dynamics_mode must be 'auto', 'ED', or 'DMRG'")
         if self.backend != "dmrgpy":
             raise ValueError("the configuration interface currently supports backend: dmrgpy")
         if self.system_type != "homogeneous_xxz_j1j2j3_dmi_impurity" and (
@@ -684,6 +695,7 @@ class HamiltonianLearningProject:
         resolved_simulator = simulator or DmrgpySimulator(
             max_bond_dimension=recipe.max_bond_dimension,
             kpm_max_bond_dimension=recipe.kpm_max_bond_dimension,
+            dynamics_mode=resolve_dynamics_mode(recipe, family),
         )
         return family, protocol, resolved_simulator
 
@@ -730,6 +742,26 @@ class HamiltonianLearningProject:
             if rate is None:
                 rate = REFERENCE_SECONDS_PER_CORRELATOR_L8 * correlators
             workers = _resolved_workers(recipe.workers)
+            # Cheap, and it imports no simulation backend: the family is
+            # constructed either way, and resolving the solver only reads one
+            # sampled chain's shape. Worth reporting, because it is the single
+            # biggest determinant of both the cost and the accuracy of every
+            # spectrum the run will produce.
+            _, _, plan_simulator = self._generation_components()
+            solver = getattr(plan_simulator, "dynamics_mode", recipe.dynamics_mode)
+            if recipe.dynamics_mode == "auto":
+                notes.append(
+                    f"Chains will be simulated with {solver}"
+                    + (
+                        ", which is exact for a Hilbert space this size and "
+                        "leaves no truncation error."
+                        if solver == "ED"
+                        else f", because the Hilbert space is larger than "
+                        f"{ED_DIMENSION_LIMIT} states. DMRG is approximate; its "
+                        f"accuracy follows the bond dimension "
+                        f"({recipe.max_bond_dimension})."
+                    )
+                )
             # Divided by the workers because that is the number a user is
             # deciding with. The estimate stays a serial-rate extrapolation
             # underneath, and the division is only near-linear -- chains are
@@ -749,6 +781,7 @@ class HamiltonianLearningProject:
                 "output_path": recipe.output_path,
                 "workers": workers,
                 "site_spin": recipe.site_spin,
+                "dynamics_mode": solver,
             }
             if recipe.system_type == "homogeneous_xxz_j1j2j3_dmi_impurity":
                 dataset_detail["impurities"] = [
@@ -1513,11 +1546,29 @@ def _parse_generation_config(
         backend=str(values.get("backend", "dmrgpy")),
         max_bond_dimension=int(values.get("max_bond_dimension", 20)),
         kpm_max_bond_dimension=int(values.get("kpm_max_bond_dimension", 20)),
+        dynamics_mode=str(values.get("dynamics_mode", "auto")),
         seed=int(values.get("seed", 42)),
         checkpoint_every=int(values.get("checkpoint_every", 25)),
         workers=int(values.get("workers", 1)),
         site_spin=str(values.get("site_spin", "S=1/2")),
     )
+
+
+def resolve_dynamics_mode(recipe: DatasetGenerationConfig, family: Any) -> str:
+    """The solver a recipe will use, resolving ``"auto"`` against the system.
+
+    Every chain in a recipe shares n_sites and site_spin, so the Hilbert
+    dimension -- and therefore this answer -- is the same for all of them and
+    can be settled once, from a single sampled system.
+    """
+    if recipe.dynamics_mode != "auto":
+        return recipe.dynamics_mode
+
+    from .simulation.dmrgpy import recommended_dynamics_mode
+
+    # A sampled chain only to read its shape; the couplings do not enter the
+    # Hilbert dimension, so the seed here cannot change the answer.
+    return recommended_dynamics_mode(family.sample(np.random.default_rng(0)))
 
 
 def _resolved_workers(workers: int) -> int:

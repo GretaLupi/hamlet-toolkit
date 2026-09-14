@@ -486,7 +486,10 @@ dataset:
 ```
 
 or **cores to use** on the *Train a model* page. The plan divides its estimate
-by that number before you commit to a local run. On a supported cluster,
+by that number before you commit to a local run; when the run is going to a
+cluster it reports the time for **one array task** instead, since the tasks run
+side by side and a serial figure would overstate the wait by the number of
+chains. On a supported cluster,
 HamLeT instead requests one CPU in each one-chain array task; the scheduler
 decides how many samples run simultaneously.
 
@@ -561,6 +564,29 @@ no GPU path at all.
 
 So a GPU would make this stage slower, not faster. Cores are what help here; a
 card only helps the Keras training that follows, which takes minutes.
+
+## Which solver simulates each chain
+
+Exact diagonalisation is exact; DMRG is an approximation whose accuracy follows
+the bond dimension. HamLeT picks between them by the size of the Hilbert space:
+
+```yaml
+dataset:
+  generate:
+    dynamics_mode: auto   # ED while it is affordable, DMRG beyond it
+```
+
+`auto` is the default and uses ED up to 2048 basis states — an eight-site
+spin-1/2 chain is 256, so it qualifies comfortably — and DMRG above that. Set
+`ED` or `DMRG` explicitly to override it. The plan names the solver it will use
+before the run starts, and the choice is part of the recipe fingerprint,
+because the two give different numbers.
+
+This matters beyond accuracy. An MPS solve leaves a small imaginary residue in
+the Hermitian self-correlators, and HamLeT refuses a spectrum whose imaginary
+part is too large to be numerical noise. That threshold follows the solver —
+1e-6 for ED, 1e-3 for DMRG — because judging truncation noise by an exact
+solver's standard rejects perfectly sound chains.
 
 ## Using a GPU
 

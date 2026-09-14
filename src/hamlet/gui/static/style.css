@@ -87,7 +87,7 @@ h3 { margin: 26px 0 8px; font-size: 16px; }
 #panel-start > h2 { font-size: clamp(28px, 3vw, 38px); }
 .hint { color: var(--muted); font-size: 13px; max-width: 78ch; margin: 8px 0 0; }
 
-.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
 input[type=text], input[type=number], select, textarea {
   font: inherit; padding: 7px 9px; border: 1px solid var(--line);
   border-radius: 7px; background: var(--card); color: var(--ink);
@@ -105,6 +105,22 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 button:hover { border-color: var(--muted); }
 button.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 button.primary:hover { filter: brightness(1.08); }
+/* An action that destroys something should look like a decision rather than
+   like the paragraph above it. Outlined rather than filled: it is offered, not
+   recommended, and a filled red button reads as the way forward. */
+button.destructive {
+  border-color: var(--bad); color: var(--bad); background: var(--card); font-weight: 600;
+}
+button.destructive:hover { background: var(--bad); color: var(--on-accent); border-color: var(--bad); }
+
+/* Buttons that follow a table or a paragraph inside a result box were sitting
+   against it. They are a separate step and should read as one. */
+.box > table + button, .box > p + button, .box > ul + button,
+.box > pre + button, .box > table + .row, .box > p + .row {
+  margin-top: 14px;
+}
+.box > button + button { margin-left: 8px; }
+.box > button { margin-top: 12px; }
 
 .cards { display: grid; gap: 12px; }
 .card {
@@ -139,8 +155,8 @@ button.primary:hover { filter: brightness(1.08); }
 .verdict.warn { color: var(--warn); }
 .verdict.bad { color: var(--bad); }
 
-table { border-collapse: collapse; width: 100%; font-size: 14px; margin-top: 8px; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; margin: 10px 0 4px; }
+th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line); }
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
 th { background: var(--bg); }
 td { overflow-wrap: anywhere; }
@@ -182,7 +198,11 @@ code { background: #eceff3; padding: 1px 5px; border-radius: 3px; font-size: 13p
 .card.unavailable .does { opacity: .75; }
 
 .error { color: var(--bad); background: #fdf0f0; border: 1px solid #f0c8c8; padding: 10px 12px; border-radius: 6px; margin-top: 14px; font-size: 14px; }
-.danger-zone { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line); display: flex; gap: 12px; align-items: center; }
+.danger-zone {
+  margin-top: 20px; padding-top: 16px; border-top: 1px dashed var(--line);
+  display: flex; gap: 14px; align-items: center; flex-wrap: wrap;
+}
+.danger-zone .hint { flex: 1 1 260px; min-width: 0; }
 svg.spectra {
   display: block; width: 100%; height: auto; min-height: 250px;
   background: var(--card); border: 1px solid var(--line); border-radius: 8px;

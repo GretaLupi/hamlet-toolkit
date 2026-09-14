@@ -569,7 +569,7 @@ async function loadModels() {
           <tr><th>Must match exactly</th><td>${conditionsText(m.fixed_conditions)}</td></tr>
         </table>
         ${m.has_model_card ? `<button data-card="${esc(m.label || m.name)}">Read the model card</button>` : ""}
-        ${m.origin === "yours" ? `<button data-delete-model="${esc(m.path)}"
+        ${m.origin === "yours" ? `<button class="destructive" data-delete-model="${esc(m.path)}"
           data-model-label="${esc(m.label || m.name)}">Delete this model</button>` : ""}
       </div>`).join("");
     out.querySelectorAll("button[data-card]").forEach((b) =>
@@ -1419,6 +1419,21 @@ el("f-plan").addEventListener("click", async () => {
       : null;
     const hours = plan.estimated_generation_seconds
       ? (plan.estimated_generation_seconds / 3600) : null;
+    // An array runs its tasks side by side, so a serial figure answers the
+    // wrong question by two orders of magnitude: 50 chains at a minute each
+    // is under a minute of waiting, not an hour of it. What the scheduler
+    // will actually grant at once is the site's business and unknowable from
+    // here, so the honest estimate is per task, with the queue named as the
+    // thing that decides the rest.
+    const perTask = (builtClusterPlan
+      && builtClusterPlan.submission_mode === "array_then_train"
+      && plan.seconds_per_chain)
+      ? plan.seconds_per_chain * (builtClusterPlan.samples_per_task || 1)
+      : null;
+    const clock = (seconds) => seconds >= 3600
+      ? `${(seconds / 3600).toFixed(1)} h`
+      : seconds >= 60 ? `${Math.round(seconds / 60)} min`
+      : `${Math.round(seconds)} s`;
     out.innerHTML = `
       <div class="box">
         <div class="verdict">${esc(plan.name || builtConfig.name)}</div>
@@ -1442,8 +1457,23 @@ el("f-plan").addEventListener("click", async () => {
             <tr><th>Cluster jobs</th><td>${builtClusterPlan.submission_mode === "array_then_train"
               ? `${builtClusterPlan.array_tasks} generation array tasks (one per chain), then one dependent training job`
               : "one project job (this scheduler has no array support)"}</td></tr>` : ""}
-          ${hours ? `<tr><th>Rough compute</th><td class="num">${hours.toFixed(1)} h serial
-            <span class="hint">(at ${num(plan.seconds_per_chain, 0)} s per chain)</span></td></tr>` : ""}
+          ${perTask ? `<tr><th>Rough time</th><td>
+              <span class="num">${clock(perTask)}</span> per array task
+              <div class="hint">One chain per task, ${builtClusterPlan.array_tasks}
+                tasks queued together, so the wall-clock is roughly this plus
+                however long the queue takes to start them &mdash; not the
+                ${clock(plan.generation_chains * plan.seconds_per_chain)} the
+                same work would take back to back on one core.</div></td></tr>`
+            : hours ? `<tr><th>Rough compute</th><td class="num">${hours.toFixed(1)} h
+              <div class="hint">at ${num(plan.seconds_per_chain, 0)} s per chain,
+                across ${(plan.dataset_detail || {}).workers || 1} core(s) here</div></td></tr>`
+            : ""}
+          ${(plan.dataset_detail || {}).dynamics_mode ? `<tr><th>Solver</th>
+            <td>${esc(plan.dataset_detail.dynamics_mode)}${
+              plan.dataset_detail.dynamics_mode === "ED"
+                ? ` <span class="hint">exact for this Hilbert space</span>`
+                : ` <span class="hint">approximate; bond dimension decides accuracy</span>`
+            }</td></tr>` : ""}
         </table>
         <h3>Files it will write</h3>
         <table><tr><th>Status</th><th>Path</th><th>What</th></tr>
@@ -1457,7 +1487,7 @@ el("f-plan").addEventListener("click", async () => {
               `<li class="fail">${esc(r)}</li>`).join("")}</ul>`
           : ""}
         ${plan.replaceable_dataset ? `<div class="danger-zone">
-          <button id="f-replace-dataset">Replace that dataset</button>
+          <button id="f-replace-dataset" class="destructive">Replace that dataset</button>
           <span class="hint">Deletes
             <code>${esc(plan.replaceable_dataset)}</code> and its checkpoints,
             then plans again. Whatever it cost to simulate is not recoverable.</span>
