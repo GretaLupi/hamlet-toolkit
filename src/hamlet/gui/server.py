@@ -159,6 +159,7 @@ class _Handler(BaseHTTPRequestHandler):
                         artifact_roots=payload.get("artifact_roots"),
                         system_type=payload.get("system_type") or None,
                         view=payload.get("view") or None,
+                        conditions=payload.get("conditions") or None,
                     )
                 )
             elif route == "/api/plan":
@@ -199,6 +200,7 @@ class _Handler(BaseHTTPRequestHandler):
                         confirm_conditions=bool(
                             payload.get("confirm_conditions", False)
                         ),
+                        conditions=payload.get("conditions") or None,
                     )
                 )
             elif route == "/api/run-analysis":

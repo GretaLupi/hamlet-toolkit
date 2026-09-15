@@ -261,6 +261,170 @@ function shareChosenFile(value, except) {
   });
 }
 
+// --- what is physically in the chain you measured ---------------------------
+//
+// Nothing in a dI/dV map reveals whether the sample carried impurities, so the
+// package cannot infer it and will not guess. It is declared here once and
+// both the reuse check and the analysis run read the same declaration.
+//
+// Three states, deliberately. "not declared" is the default and is NOT the
+// same as "clean": treating silence as a clean chain would match a model on an
+// assumption the measurement never supported, which is the failure the system
+// family check used to make.
+const SPINS = ["S=1/2", "S=1", "S=3/2", "S=2", "S=5/2"];
+const sampleConditions = {
+  state: "unknown",      // unknown | clean | declared
+  nSites: 0,
+  impurities: [],        // { site, spin, axial_mev, transverse_mev, transverse_angle_rad }
+  fieldMev: 0,
+};
+
+/** The declaration in the shape a config writes, or null when undeclared. */
+function conditionsPayload() {
+  if (sampleConditions.state === "unknown") return null;
+  return {
+    impurities: sampleConditions.impurities
+      .slice()
+      .sort((a, b) => a.site - b.site)
+      .map((item) => ({
+        site: Number(item.site),
+        spin: String(item.spin || "S=1"),
+        axial_mev: Number(item.axial_mev) || 0,
+        transverse_mev: Number(item.transverse_mev) || 0,
+        transverse_angle_rad: Number(item.transverse_angle_rad) || 0,
+      })),
+    transverse_field_mev: Number(sampleConditions.fieldMev) || 0,
+  };
+}
+
+/** The chain length, asked for once and only when the editor needs to draw. */
+async function ensureSiteCount(prefix) {
+  if (sampleConditions.nSites > 0) return sampleConditions.nSites;
+  const path = (el(`${prefix}-path`).value || "").trim();
+  if (!path) return 0;
+  try {
+    const d = await api("/api/inspect", { path });
+    sampleConditions.nSites = Number(d.n_sites) || 0;
+  } catch {
+    sampleConditions.nSites = 0;
+  }
+  return sampleConditions.nSites;
+}
+
+const SAMPLE_HOSTS = [["reuse-sample", "reuse"], ["an-sample", "an"]];
+
+function renderSampleConditions() {
+  SAMPLE_HOSTS.forEach(([hostId, prefix]) => {
+    const host = el(hostId);
+    if (host) drawSampleConditions(host, prefix);
+  });
+  // The model's own list sits beside this one and its wording depends on
+  // whether a declaration exists, so it is redrawn with it.
+  if (typeof renderAnalysisConditions === "function") renderAnalysisConditions();
+}
+
+function drawSampleConditions(host, prefix) {
+  const state = sampleConditions.state;
+  const choice = (value, label) =>
+    `<label><input type="radio" name="sample-${host.id}" value="${value}"
+      ${state === value ? "checked" : ""}> ${label}</label>`;
+  const rows = sampleConditions.impurities
+    .slice()
+    .sort((a, b) => a.site - b.site)
+    .map((item) => `<tr>
+      <td class="num">${item.site}</td>
+      <td><select data-field="spin" data-site="${item.site}">${SPINS.map((spin) =>
+        `<option ${spin === item.spin ? "selected" : ""}>${spin}</option>`).join("")}</select></td>
+      <td><input type="number" step="0.1" style="width:5.5em" data-field="axial_mev"
+        data-site="${item.site}" value="${item.axial_mev}"></td>
+      <td><input type="number" step="0.1" style="width:5.5em" data-field="transverse_mev"
+        data-site="${item.site}" value="${item.transverse_mev}"></td>
+      <td><input type="number" step="0.1" style="width:5.5em" data-field="transverse_angle_rad"
+        data-site="${item.site}" value="${item.transverse_angle_rad}"></td>
+    </tr>`).join("");
+
+  host.innerHTML = `<div class="box">
+    <div class="verdict">What is in the chain you measured?</div>
+    <p class="hint">A dI/dV map does not reveal this, so it cannot be read off
+      the data. A model trained on a chain with impurities is only offered once
+      you say the sample has them &mdash; and only if they are the same ones.</p>
+    <div class="sample-choices">
+      ${choice("unknown", "not declared")}
+      ${choice("clean", "a clean chain &mdash; no impurities, no field")}
+      ${choice("declared", "impurities or a field, as below")}
+    </div>
+    ${state === "declared" ? `
+      ${sampleConditions.nSites
+        ? `<div class="sample-chain"></div>
+           <p class="hint">Click a site to add or remove an impurity there.
+             Site numbering begins at zero.</p>`
+        : `<p class="hint">Choose a measurement first, so the chain can be drawn.</p>`}
+      ${rows ? `<table>
+        <tr><th class="num">Site</th><th>Spin</th><th class="num">axial D (meV)</th>
+          <th class="num">transverse E (meV)</th><th class="num">angle (rad)</th></tr>
+        ${rows}</table>` : ""}
+      <div class="row"><label>transverse field B<sub>x</sub>
+        <input type="number" step="0.1" style="width:6em" id="sample-field-${host.id}"
+          value="${sampleConditions.fieldMev}"> meV</label></div>` : ""}
+    ${state === "unknown" ? `<p class="hint">Left undeclared, models that fix
+      impurities stay unavailable &mdash; which is the honest default, not a
+      judgement about your sample.</p>` : ""}
+  </div>`;
+
+  host.querySelectorAll(`input[name="sample-${host.id}"]`).forEach((node) =>
+    node.addEventListener("change", async () => {
+      sampleConditions.state = node.value;
+      if (node.value === "clean") sampleConditions.impurities = [];
+      if (node.value === "declared") await ensureSiteCount(prefix);
+      renderSampleConditions();
+    }));
+
+  const chainHost = host.querySelector(".sample-chain");
+  if (chainHost && sampleConditions.nSites) {
+    const bySite = new Map(sampleConditions.impurities.map((item) => [item.site, item]));
+    renderChain(chainHost, {
+      nSites: sampleConditions.nSites,
+      marked: [...bySite.keys()].filter((site) => site >= 0 && site < sampleConditions.nSites),
+      labelFor: (site) => (bySite.get(site) || {}).spin || "",
+      onToggle: (site) => {
+        sampleConditions.impurities = bySite.has(site)
+          ? sampleConditions.impurities.filter((item) => item.site !== site)
+          : [...sampleConditions.impurities,
+             { site, spin: "S=1", axial_mev: 0, transverse_mev: 2, transverse_angle_rad: 0 }];
+        renderSampleConditions();
+      },
+    });
+  }
+
+  host.querySelectorAll("[data-field]").forEach((node) =>
+    node.addEventListener("change", () => {
+      const site = Number(node.dataset.site);
+      const entry = sampleConditions.impurities.find((item) => item.site === site);
+      if (!entry) return;
+      entry[node.dataset.field] =
+        node.dataset.field === "spin" ? node.value : Number(node.value) || 0;
+      renderSampleConditions();
+    }));
+
+  const field = el(`sample-field-${host.id}`);
+  if (field) {
+    field.addEventListener("change", () => {
+      sampleConditions.fieldMev = Number(field.value) || 0;
+      renderSampleConditions();
+    });
+  }
+}
+
+// A different measurement is a different chain, so its declaration cannot
+// carry over: the site count and the impurities both belong to the old sample.
+function resetSampleConditions() {
+  sampleConditions.state = "unknown";
+  sampleConditions.nSites = 0;
+  sampleConditions.impurities = [];
+  sampleConditions.fieldMev = 0;
+  renderSampleConditions();
+}
+
 // --- the server-side file browser -------------------------------------------
 
 let browserTarget = null;
@@ -408,9 +572,9 @@ function spectraSvg(plot, { cutoffMev = null, compact = false } = {}) {
   </div>`;
 }
 
-attachFileField({ prefix: "data" });
-attachFileField({ prefix: "reuse" });
-attachFileField({ prefix: "an" });
+attachFileField({ prefix: "data", onPicked: resetSampleConditions });
+attachFileField({ prefix: "reuse", onPicked: resetSampleConditions });
+attachFileField({ prefix: "an", onPicked: resetSampleConditions });
 
 el("data-go").addEventListener("click", async () => {
   const out = el("data-out");
@@ -506,7 +670,11 @@ el("reuse-go").addEventListener("click", async () => {
   if (!path) { showError(out, new Error("choose a measurement first")); return; }
   busy(out, "Checking model compatibility…");
   try {
-    const d = await api("/api/advise", { path, cutoff_mev: el("reuse-cutoff").value });
+    const d = await api("/api/advise", {
+      path,
+      cutoff_mev: el("reuse-cutoff").value,
+      conditions: conditionsPayload(),
+    });
     shareChosenFile(d.path, "reuse");
     const klass = d.can_use_existing_model ? "good" : "warn";
     const usable = d.artifacts.filter((a) => a.compatible);
@@ -655,6 +823,7 @@ function renderAnalysisModels() {
       renderAnalysisModels();
     }));
   renderAnalysisConditions();
+  renderSampleConditions();
 }
 
 /** Some models only describe a chain that was physically built a certain way.
@@ -693,10 +862,13 @@ function renderAnalysisConditions() {
       ${rows}</table>` : ""}
     <p>Transverse field:
       <b>${num(conditions.transverse_field_mev ?? 0, 3)} meV</b></p>
-    <label><input type="checkbox" id="an-confirm-conditions">
-      my sample has exactly these impurities</label>
-    <p class="hint">If it does not, this model does not describe it, and the
-      honest answer is to train one for the sample you actually have.</p>
+    ${sampleConditions.state === "unknown" ? `
+      <label><input type="checkbox" id="an-confirm-conditions">
+        my sample has exactly these impurities</label>
+      <p class="hint">Or describe the measured chain yourself above, which is
+        the same declaration the reuse check reads.</p>`
+      : `<p class="hint">Your declaration above is what this run will be built
+        from; it has to match the list here or the run is refused.</p>`}
   </div>`;
 }
 
@@ -714,6 +886,7 @@ el("an-go").addEventListener("click", async () => {
       name: el("an-name").value.trim(),
       allow_development_artifacts: el("an-allow-dev").checked,
       confirm_conditions: Boolean(confirm && confirm.checked),
+      conditions: conditionsPayload(),
     });
     const job = await api("/api/run-analysis", { config_path: built.config_path });
     out.innerHTML = `<div class="box">

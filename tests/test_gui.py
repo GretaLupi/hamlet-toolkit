@@ -2998,3 +2998,98 @@ def test_the_compatibility_table_names_models_readably(tmp_path, monkeypatch):
     script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
     assert "a.label || a.path.split" in script
     assert "Treats the chain as" in script, "the family each model assumes has to be shown"
+
+
+def _impurity_declaration(sites=(1, 4, 6)):
+    return {
+        "impurities": [
+            {
+                "site": site,
+                "spin": "S=1",
+                "axial_mev": 0.0,
+                "transverse_mev": 2.0,
+                "transverse_angle_rad": 0.0,
+            }
+            for site in sites
+        ],
+        "transverse_field_mev": 0.0,
+    }
+
+
+def test_declaring_the_sample_makes_an_impurity_model_findable(measurement_csv):
+    """The reuse check had no way to say what is in the measured chain.
+
+    A model trained with impurities was therefore refused there every time,
+    with a reason the page gave no means of answering -- so the shipped DMI
+    model could never be recommended by the page whose job is recommending
+    models. The declaration is the user's answer to that.
+    """
+    measurement = measurement_csv
+    model = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+
+    undeclared = api.advise_for_experiment(measurement, cutoff_mev=20.0)
+    refused = [a for a in undeclared["artifacts"] if model in a["label"]][0]
+    assert not refused["compatible"]
+    assert any("has not declared" in reason for reason in refused["reasons"])
+
+    declared = api.advise_for_experiment(
+        measurement, cutoff_mev=20.0, conditions=_impurity_declaration()
+    )
+    offered = [a for a in declared["artifacts"] if model in a["label"]][0]
+    assert offered["compatible"], offered["reasons"]
+
+    # And a declaration that does not match is refused with the difference,
+    # rather than being quietly accepted as "close enough".
+    wrong = api.advise_for_experiment(
+        measurement, cutoff_mev=20.0, conditions=_impurity_declaration(sites=(2,))
+    )
+    mismatched = [a for a in wrong["artifacts"] if model in a["label"]][0]
+    assert not mismatched["compatible"]
+    assert any("fixed-condition mismatch" in r for r in mismatched["reasons"])
+
+
+def test_an_analysis_is_built_from_the_declaration_not_a_confirmation(
+    measurement_csv, tmp_path
+):
+    """Describing your own sample beats ticking someone else's list."""
+    import yaml
+
+    measurement = measurement_csv
+    model = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+
+    built = api.build_analysis_config(
+        measurement, model, conditions=_impurity_declaration(), workspace=tmp_path
+    )
+    payload = yaml.safe_load(Path(built["config_path"]).read_text(encoding="utf-8"))
+    sites = [item["site"] for item in payload["experiment"]["conditions"]["impurities"]]
+    assert sites == [1, 4, 6]
+
+    # A declaration that contradicts the model stops the run being built at all.
+    with pytest.raises(ValueError, match="does not describe a sample"):
+        api.build_analysis_config(
+            measurement,
+            model,
+            conditions=_impurity_declaration(sites=(2,)),
+            workspace=tmp_path,
+        )
+
+
+def test_the_declaration_is_offered_on_both_pages_and_defaults_to_undeclared():
+    """Silence must not be read as "a clean chain".
+
+    Treating an undeclared sample as impurity-free would match models on an
+    assumption the measurement never supported -- the same mistake the system
+    family default used to make.
+    """
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="reuse-sample"' in html and 'id="an-sample"' in html
+    assert 'state: "unknown"' in script, "the default has to be undeclared"
+    assert '"clean"' in script and '"declared"' in script
+    # Undeclared sends nothing, so the compatibility check keeps refusing.
+    assert 'if (sampleConditions.state === "unknown") return null;' in script
+    # Both requests carry it.
+    assert script.count("conditions: conditionsPayload()") == 2
+    # A different measurement is a different chain.
+    assert "onPicked: resetSampleConditions" in script

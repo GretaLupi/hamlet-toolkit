@@ -920,6 +920,7 @@ def advise_for_experiment(
     artifact_roots: list[str] | None = None,
     system_type: str | None = None,
     view: str | None = None,
+    conditions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Reuse / retrain / regenerate, with the reason for every rejection.
 
@@ -938,6 +939,7 @@ def advise_for_experiment(
         artifact_roots=[r for r in roots if Path(r).exists()],
         system_type=system_type,
         view=view,
+        experiment_conditions=conditions,
     )
     return {
         "action": decision.action,
@@ -1996,6 +1998,7 @@ def build_analysis_config(
     name: str | None = None,
     allow_development_artifacts: bool = False,
     confirm_conditions: bool = False,
+    conditions: Mapping[str, Any] | None = None,
     workspace: Path | None = None,
 ) -> dict[str, Any]:
     """Assemble a project that applies one saved model to one measurement.
@@ -2040,14 +2043,34 @@ def build_analysis_config(
     # the only one who knows, so the confirmation is theirs to give, and it
     # copies the artifact's own record rather than asking anyone to retype
     # five numbers per impurity correctly.
-    declared_conditions = _artifact_conditions(manifest)
-    if declared_conditions and not confirm_conditions:
+    model_conditions = _artifact_conditions(manifest)
+    # What the user says is in their own sample takes precedence over
+    # confirming the model's list: describing the chain you measured is the
+    # honest question, and the same declaration drives the reuse check.
+    declared_conditions = dict(conditions) if conditions else None
+    if declared_conditions is not None:
+        from ..workflow import _canonical_fixed_conditions, _describe_conditions
+
+        if _canonical_fixed_conditions(declared_conditions) != _canonical_fixed_conditions(
+            model_conditions
+        ):
+            raise ValueError(
+                "this model was trained for a chain with "
+                f"[{_describe_conditions(_canonical_fixed_conditions(model_conditions))}], "
+                "but the measured sample is declared as "
+                f"[{_describe_conditions(_canonical_fixed_conditions(declared_conditions))}]. "
+                "A model does not describe a sample it was not trained for; "
+                "train one for the chain you actually have."
+            )
+    elif model_conditions and not confirm_conditions:
         raise ValueError(
             "this model was trained for a chain with specific impurities "
-            f"({_conditions_sentence(declared_conditions)}). Confirm that the "
-            "measured sample has exactly those before applying it; if it does "
-            "not, this model does not describe it."
+            f"({_conditions_sentence(model_conditions)}). Declare what is in "
+            "the measured sample before applying it; if it is a different "
+            "chain, this model does not describe it."
         )
+    elif model_conditions:
+        declared_conditions = model_conditions
 
     measurement, _ = prepare_measurement_input(measurement_path)
 
