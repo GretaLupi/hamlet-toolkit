@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, is_dataclass
 import json
 from pathlib import Path
+from itertools import takewhile
 from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
@@ -143,9 +144,22 @@ class TrainingRun:
                 # keep loading.
                 joblib.dump(model, destination / filename, compress=3)
                 model_format = "joblib"
-            model_records.append(
-                {"seed": self.preset.seeds[index], "file": filename, "format": model_format}
-            )
+            record = {
+                "seed": self.preset.seeds[index],
+                "file": filename,
+                "format": model_format,
+            }
+            if model_format == "keras":
+                # Recorded because a Keras file is not portable backwards: a
+                # newer Keras writes layer configs an older one refuses, and
+                # the refusal arrives as a hundred lines of nested
+                # deserialisation errors that name every layer except the
+                # version. Training on a cluster and applying the model on a
+                # laptop is the ordinary way to meet this.
+                import keras
+
+                record["keras_version"] = str(keras.__version__)
+            model_records.append(record)
 
         manifest = {
             "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
@@ -207,7 +221,12 @@ class TrainingRun:
                     import keras
                 except ImportError as exc:  # pragma: no cover
                     raise ImportError("loading this artifact requires the ml dependency") from exc
-                models.append(keras.saving.load_model(source / record["file"]))
+                try:
+                    models.append(keras.saving.load_model(source / record["file"]))
+                except Exception as exc:
+                    raise _keras_load_error(
+                        record, keras.__version__, exc, source / record["file"]
+                    ) from exc
             elif record["format"] == "joblib":
                 import joblib
 
@@ -252,6 +271,75 @@ class TrainingRun:
             distribution_profile=distribution_profile,
             aggregation=EnsembleAggregation(**aggregation_record),
         )
+
+
+def _keras_version_of(path: Path) -> str:
+    """The Keras that wrote a .keras file, read from the file itself.
+
+    A .keras file is a zip carrying a metadata.json with the version in it.
+    Reading it means an artifact written before HamLeT recorded the version in
+    its manifest still gets a message naming both sides, which is every
+    artifact anyone already has.
+    """
+    import json as _json
+    import zipfile
+
+    try:
+        with zipfile.ZipFile(path) as archive:
+            return str(_json.loads(archive.read("metadata.json")).get("keras_version") or "")
+    except (OSError, KeyError, ValueError, zipfile.BadZipFile):
+        return ""
+
+
+def _keras_load_error(
+    record: Mapping[str, Any], running_version: str, cause: Exception, path: Path | None = None
+) -> Exception:
+    """Turn a wall of deserialisation output into the one sentence that helps.
+
+    Keras files are not portable backwards. A model saved by a newer Keras
+    carries layer configuration keys an older one rejects, and the failure
+    surfaces as nested "could not be deserialized properly" blocks naming
+    every layer and initializer involved -- ending, dozens of lines down, in
+    something like `GlorotUniform.__init__() got an unexpected keyword
+    argument 'input_axes'`. Nothing in that text says "version", and the two
+    versions are the whole story. Training on a cluster and applying the model
+    on a laptop is the ordinary way to arrive here.
+    """
+    written = str(record.get("keras_version") or "")
+    if not written and path is not None:
+        written = _keras_version_of(path)
+    if not written:
+        return RuntimeError(
+            f"{record.get('file')} could not be loaded by Keras {running_version}, "
+            "and the version that wrote it could not be read. A Keras version "
+            "difference is the usual cause: a file saved by a newer Keras "
+            "cannot be read by an older one. Upgrade Keras in this "
+            f"environment, or retrain the model here.\n\nKeras said: {cause}"
+        )
+
+    def parts(version: str) -> tuple[int, ...]:
+        numbers = []
+        for piece in version.split("."):
+            digits = "".join(takewhile(str.isdigit, piece))
+            if not digits:
+                break
+            numbers.append(int(digits))
+        return tuple(numbers)
+
+    older_here = parts(running_version) < parts(written)
+    remedy = (
+        f'`pip install "keras>={written}"` in this environment, or retrain the '
+        "model here"
+        if older_here
+        else "retrain the model in this environment, or install the Keras it "
+        "was written with"
+    )
+    return RuntimeError(
+        f"{record.get('file')} was saved by Keras {written} and this "
+        f"environment has Keras {running_version}. A Keras file is not "
+        "portable to an older Keras, so it cannot be read here. "
+        f"To use it: {remedy}.\n\nKeras said: {cause}"
+    )
 
 
 def train_supervised(

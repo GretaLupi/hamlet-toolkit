@@ -103,3 +103,100 @@ def test_global_run_creates_fixed_length_homogeneous_analyzer():
         analyzer.analyze(
             prepared.dataset.spectra[0, :-1], prepared.dataset.bias_mev
         )
+
+
+def test_a_newer_keras_artifact_is_diagnosed_rather_than_dumped():
+    """Training on a cluster and applying the model on a laptop is ordinary.
+
+    A .keras file is not portable backwards: a newer Keras writes layer
+    configuration an older one rejects. What arrives is nested "could not be
+    deserialized properly" blocks naming every layer and initializer, ending
+    dozens of lines down in an unexpected keyword argument. Nothing in that
+    text says "version", and the two versions are the entire story.
+    """
+    from hamlet.training.guided import _keras_load_error
+
+    cause = TypeError("GlorotUniform.__init__() got an unexpected keyword 'input_axes'")
+    error = _keras_load_error(
+        {"file": "model_seed_42.keras", "keras_version": "3.15.1"}, "3.11.3", cause
+    )
+    message = str(error)
+    assert "3.15.1" in message and "3.11.3" in message
+    assert 'pip install "keras>=3.15.1"' in message
+    assert "retrain the model here" in message
+    # The original is kept: it is the evidence, just no longer the headline.
+    assert "input_axes" in message
+
+
+def test_the_direction_of_the_mismatch_changes_the_advice():
+    """Upgrading cannot fix a file written by an older Keras."""
+    from hamlet.training.guided import _keras_load_error
+
+    older_file = _keras_load_error(
+        {"file": "m.keras", "keras_version": "3.2.0"}, "3.11.3", ValueError("boom")
+    )
+    assert "pip install" not in str(older_file)
+    assert "retrain the model in this environment" in str(older_file)
+
+
+def test_the_writing_keras_version_is_read_from_the_file_when_absent(tmp_path):
+    """Every artifact that already exists predates the manifest field."""
+    import json
+    import zipfile
+
+    from hamlet.training.guided import _keras_load_error, _keras_version_of
+
+    path = tmp_path / "model_seed_42.keras"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("metadata.json", json.dumps({"keras_version": "3.15.1"}))
+    assert _keras_version_of(path) == "3.15.1"
+
+    error = _keras_load_error({"file": path.name}, "3.11.3", ValueError("boom"), path)
+    assert "3.15.1" in str(error), "the file itself carries the answer"
+
+    # And a file that cannot be read at all still gets a usable sentence.
+    unreadable = tmp_path / "broken.keras"
+    unreadable.write_bytes(b"not a zip")
+    assert _keras_version_of(unreadable) == ""
+    fallback = _keras_load_error(
+        {"file": "broken.keras"}, "3.11.3", ValueError("boom"), unreadable
+    )
+    assert "could not be read" in str(fallback)
+
+
+def test_a_saved_keras_artifact_records_the_version_that_wrote_it(tmp_path):
+    """So the next person does not have to open the zip to find out.
+
+    Trained rather than mocked: what matters is that the real save path adds
+    the field, and the smallest honest network is cheap.
+    """
+    keras = pytest.importorskip("keras")
+    import json
+
+    import numpy as np
+
+    from hamlet.training.preprocessing import TrainingPreprocessingConfig
+
+    rng = np.random.default_rng(0)
+    bias = np.linspace(0.0, 20.0, 16)
+    targets = rng.uniform(5.0, 15.0, size=(12, 2)).astype(np.float32)
+    spectra = np.stack([
+        np.stack([np.exp(-((bias - t) ** 2)) for t in row]) for row in targets
+    ]).astype(np.float32)
+    dataset = SpectroscopyDataset(
+        spectra=spectra, targets_mev=targets, bias_mev=bias,
+        target_names=("J1", "J2"), system_type="homogeneous_heisenberg",
+        metadata={},
+    )
+    prepared = prepare_training_dataset(
+        dataset, TrainingPreprocessingConfig(bias_cutoff_mev=20.0, output_points=16)
+    )
+    run = train_supervised(
+        prepared, view="global", model="keras_mlp", preset="quick",
+        model_options={"hidden_units": [4]}, verbose=0,
+    )
+    run.save(tmp_path / "artifact")
+    manifest = json.loads((tmp_path / "artifact" / "manifest.json").read_text())
+    keras_records = [r for r in manifest["models"] if r["format"] == "keras"]
+    assert keras_records, "keras_mlp should store keras models"
+    assert all(r.get("keras_version") == keras.__version__ for r in keras_records)

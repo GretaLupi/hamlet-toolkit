@@ -565,6 +565,29 @@ no GPU path at all.
 So a GPU would make this stage slower, not faster. Cores are what help here; a
 card only helps the Keras training that follows, which takes minutes.
 
+## Moving a trained model between machines
+
+A model you train on a cluster and apply on a laptop has to survive the trip.
+The scikit-learn artifacts (ridge, random forest) are portable. The Keras ones
+are **not portable backwards**: a `.keras` file written by a newer Keras cannot
+be read by an older one, and what surfaces is a page of nested
+"could not be deserialized properly" blocks ending in something like
+`GlorotUniform.__init__() got an unexpected keyword argument 'input_axes'`.
+
+HamLeT records the writing version in the artifact manifest and reads it back
+out of the file itself for older artifacts, so the failure is reported as what
+it is:
+
+> `model_seed_42.keras` was saved by Keras 3.15.1 and this environment has
+> Keras 3.11.3. A Keras file is not portable to an older Keras, so it cannot be
+> read here. To use it: `pip install "keras>=3.15.1"` in this environment, or
+> retrain the model here.
+
+Upgrading is usually the right answer — TensorFlow does not pin an upper bound
+on Keras — and the alternative is retraining in the environment you want to use
+the model in. The simplest way to avoid it entirely is to keep the same Keras
+version on both machines.
+
 ## Which solver simulates each chain
 
 For the physics these solvers are approximating — the Hamiltonians, the
