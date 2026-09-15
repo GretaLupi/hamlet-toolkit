@@ -2946,3 +2946,28 @@ def test_every_quote_names_a_line_and_a_place_in_a_play():
         assert ", " in source.group(1), f"no act/scene in {source.group(1)!r}"
         assert text.lower() not in seen, f"duplicated quote: {text}"
         seen.add(text.lower())
+
+
+def test_a_chosen_measurement_is_named_by_what_was_picked():
+    """An upload is copied into the workspace under a generated name.
+
+    Showing that stored path named a folder nobody chose --
+    "test_chain-1789479405367-1kfcyw0" under the package's own results
+    directory -- so moving the files somewhere tidier changed nothing, and
+    every screenshot of the page carried the user's home directory. The page
+    shows what was picked; the real path stays on hover.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    announce = script[script.index("function announce(value, detail"):]
+    announce = announce[:announce.index("\n  }")]
+    assert "label = null" in announce
+    assert "const shown = label || value;" in announce
+    assert 'title="${esc(value)}"' in announce, "the real path has to stay reachable"
+    assert "path.value = value" in announce, "the rest of the page still reads the path"
+
+    # Both upload routes name what was picked, not where it landed.
+    assert "{ label: file.name }" in script
+    assert "label: `${stored.folderName}/`" in script
+    # And carrying a measurement to the next page carries its name with it.
+    assert "source.value === value ? source.label : null" in script

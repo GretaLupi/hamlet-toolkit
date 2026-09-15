@@ -170,11 +170,21 @@ function attachFileField({ prefix, onPicked }) {
   const folderPicker = el(`${prefix}-folder-upload`);
   const field = { prefix, autofilled: false };
 
-  function announce(value, detail, { autofilled = false } = {}) {
+  // `label` is what the person picked. An upload is copied into the workspace
+  // under a generated name, so the stored path names a folder they never chose
+  // and would not recognise -- and it puts their home directory on screen in
+  // any screenshot. The page shows the label and keeps the real path on hover,
+  // which is where it is wanted: when something needs to be found on disk.
+  function announce(value, detail, { autofilled = false, label = null } = {}) {
     path.value = value;
     field.autofilled = autofilled;
+    field.value = value;
+    field.label = label;
     chosen.hidden = false;
-    chosen.innerHTML = `<b>Selected:</b> <code>${esc(value)}</code>${detail ? ` <span class="hint">${esc(detail)}</span>` : ""}`;
+    const shown = label || value;
+    const title = label ? ` title="${esc(value)}"` : "";
+    chosen.innerHTML = `<b>Selected:</b> <code${title}>${esc(shown)}</code>`
+      + (detail ? ` <span class="hint">${esc(detail)}</span>` : "");
     if (onPicked) onPicked(value);
   }
 
@@ -183,7 +193,8 @@ function attachFileField({ prefix, onPicked }) {
     chosen.textContent = `Uploading ${file.name}…`;
     try {
       const stored = await upload(file);
-      announce(stored.path, `${humanSize(stored.size_bytes)}; copied to the workspace`);
+      announce(stored.path, `${humanSize(stored.size_bytes)}; copied to the workspace`,
+        { label: file.name });
     } catch (e) {
       chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
     }
@@ -199,6 +210,7 @@ function attachFileField({ prefix, onPicked }) {
       announce(
         stored.path,
         `${stored.count} per-site STS files copied to the workspace`,
+        { label: `${stored.folderName}/` },
       );
     } catch (e) {
       chosen.innerHTML = `<span class="failtext">${esc(e.message)}</span>`;
@@ -238,10 +250,14 @@ function attachFileField({ prefix, onPicked }) {
 // user chose for themselves is left alone; one that was carried over before is
 // updated, so re-inspecting a second file does not leave the first behind.
 function shareChosenFile(value, except) {
+  // Carry the label too, or a measurement that reads "test_chain/" on the page
+  // it was chosen on turns back into a workspace path on the next one.
+  const source = fileFields.find((field) => field.prefix === except);
+  const label = source && source.value === value ? source.label : null;
   fileFields.forEach((field) => {
     if (field.prefix === except) return;
     if (el(`${field.prefix}-path`).value && !field.autofilled) return;
-    field.announce(value, "selected in the previous step", { autofilled: true });
+    field.announce(value, "selected in the previous step", { autofilled: true, label });
   });
 }
 
