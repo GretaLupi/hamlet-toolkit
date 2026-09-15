@@ -401,3 +401,32 @@ def test_the_release_date_is_stated_once():
     assert re.search(rf"^date-released: {entry.group(1)}$", citation, re.M), (
         f"CITATION.cff and CHANGELOG.md disagree on the {version} release date"
     )
+
+
+def test_the_readme_has_no_relative_links():
+    """PyPI renders this README without the repository around it.
+
+    A relative link works on GitHub and 404s on the project page, which is the
+    first page most people will ever see. Images were already absolute; the
+    links were not.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    text = (root / "README.md").read_text(encoding="utf-8")
+    relative = re.findall(r"\]\((?!https?://|mailto:|#)([^)]+)\)", text)
+    assert not relative, (
+        "README links must be absolute so they work on PyPI: " + ", ".join(relative)
+    )
+    # And the absolute ones must point at files that exist here, so they do
+    # not rot silently.
+    repo = "https://github.com/GretaLupi/hamlet-toolkit/"
+    missing = []
+    for url in re.findall(r"\]\((https://github\.com/GretaLupi/hamlet-toolkit/[^)]+)\)", text):
+        target = url[len(repo):].split("#")[0]
+        for prefix in ("blob/main/", "tree/main/"):
+            if target.startswith(prefix):
+                candidate = root / target[len(prefix):]
+                if not candidate.exists():
+                    missing.append(url)
+    assert not missing, "README links to paths that do not exist: " + ", ".join(missing)

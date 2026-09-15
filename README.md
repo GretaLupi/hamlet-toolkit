@@ -6,7 +6,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg)](https://pypi.org/project/hamlet-toolkit/)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-087f8c.svg)](https://www.python.org/downloads/)
-[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-087f8c.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-087f8c.svg)](https://github.com/GretaLupi/hamlet-toolkit/blob/main/LICENSE)
 
 HamLeT (Hamiltonian Learning Toolkit) is an experimental-facing framework for
 inferring Hamiltonians and physical parameters from scanning tunnelling
@@ -86,7 +86,7 @@ Dataset generation is the stage that costs hours, and every chain is
 independent. Local runs can use several cores; cluster runs use a scheduler
 array with one job per simulated chain and start training only after the whole
 array succeeds. The result does not depend on execution order. See
-[Making generation faster](docs/user-guide.md#making-generation-faster),
+[Making generation faster](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/user-guide.md#making-generation-faster),
 which also covers why a GPU makes this stage *slower*.
 
 ## Installation options
@@ -106,7 +106,7 @@ python -m pip install "hamlet-toolkit[gpu]"         # CUDA TensorFlow, Linux onl
 the CUDA wheels are several gigabytes, only the Keras models can use a card,
 and dataset generation — the long stage — is CPU-bound and gains nothing from
 one. `hamlet compute` reports what this machine will actually use for each
-stage, and why. See [Using a GPU](docs/user-guide.md#using-a-gpu).
+stage, and why. See [Using a GPU](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/user-guide.md#using-a-gpu).
 
 For development from a clone:
 
@@ -129,7 +129,7 @@ compatible. HamLeT reports a mismatch instead of padding spectra or silently
 changing the cutoff.
 
 Each shipped artifact has a model card under
-[`src/hamlet/resources/models`](src/hamlet/resources/models) documenting its
+[`src/hamlet/resources/models`](https://github.com/GretaLupi/hamlet-toolkit/tree/main/src/hamlet/resources/models) documenting its
 training distribution, expected observable, accuracy, and limitations.
 
 The pretrained bond-inhomogeneous model is the model developed for:
@@ -140,7 +140,7 @@ The pretrained bond-inhomogeneous model is the model developed for:
 > [arXiv:2606.29281](https://arxiv.org/abs/2606.29281).
 
 Please cite that work when using this model. Its
-[model card](src/hamlet/resources/models/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
+[model card](https://github.com/GretaLupi/hamlet-toolkit/blob/main/src/hamlet/resources/models/inhomogeneous_heisenberg_l12_keras_mlp_standard_v1/MODEL_CARD.md)
 contains the full author list, BibTeX entry, training provenance, and validity
 range.
 
@@ -161,7 +161,7 @@ parameters that are otherwise hidden come from:
 HamLeT implements the same families of Hamiltonians and the same measurement
 logic, so you can generate a dataset and train an equivalent model yourself,
 but any pretrained artifact shipped here is listed under
-[`src/hamlet/resources/models`](src/hamlet/resources/models) and is not one of
+[`src/hamlet/resources/models`](https://github.com/GretaLupi/hamlet-toolkit/tree/main/src/hamlet/resources/models) and is not one of
 theirs. Please cite these papers if you use the impurity route or the uniform
 chain families; the estimators you train are your own.
 
@@ -176,16 +176,16 @@ hamlet run examples/quickstart_l8.yaml --dry-run
 hamlet run examples/quickstart_l8.yaml
 ```
 
-See the [user guide](docs/user-guide.md) for raw-file import, cutoff selection,
+See the [user guide](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/user-guide.md) for raw-file import, cutoff selection,
 dataset generation, model tuning, cluster execution, inference, and reports,
-and [the theory notes](docs/theory.md) for the Hamiltonians, the measurement
+and [the theory notes](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/theory.md) for the Hamiltonians, the measurement
 model, and what the reported scores mean.
-The small [L=8 notebook](notebooks/04_l8_three_mode_workflow.ipynb) is the
+The small [L=8 notebook](https://github.com/GretaLupi/hamlet-toolkit/blob/main/notebooks/04_l8_three_mode_workflow.ipynb) is the
 reproducible Python example; notebooks are tutorials, not the test suite.
 
 ## Scientific scope
 
-The [theory notes](docs/theory.md) state the Hamiltonians, the correlator and
+The [theory notes](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/theory.md) state the Hamiltonians, the correlator and
 dI/dV relation, the metric definitions, and the assumptions behind all of them.
 
 Reference-model scores describe held-out simulated data unless a model card
@@ -197,16 +197,16 @@ interpretable.
 Uniform z-directed DMI cannot be identified from the supported on-site
 autocorrelator in a symmetry-preserving chain. HamLeT therefore exposes the
 impurity-assisted design route instead of offering a misleading ordinary DMI
-model. See the [DMI experiment specification](docs/dmi-experiment-spec.md).
+model. See the [DMI experiment specification](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/dmi-experiment-spec.md).
 
 ## Project information
 
-- Theory and assumptions: [docs/theory.md](docs/theory.md)
-- Changes: [CHANGELOG.md](CHANGELOG.md)
-- Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Releasing: [docs/releasing.md](docs/releasing.md)
-- Security reports: [SECURITY.md](SECURITY.md)
-- Citation metadata: [CITATION.cff](CITATION.cff)
+- Theory and assumptions: [docs/theory.md](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/theory.md)
+- Changes: [CHANGELOG.md](https://github.com/GretaLupi/hamlet-toolkit/blob/main/CHANGELOG.md)
+- Contributing: [CONTRIBUTING.md](https://github.com/GretaLupi/hamlet-toolkit/blob/main/CONTRIBUTING.md)
+- Releasing: [docs/releasing.md](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/releasing.md)
+- Security reports: [SECURITY.md](https://github.com/GretaLupi/hamlet-toolkit/blob/main/SECURITY.md)
+- Citation metadata: [CITATION.cff](https://github.com/GretaLupi/hamlet-toolkit/blob/main/CITATION.cff)
 
 HamLeT is distributed under the [GNU General Public License v3.0 or
-later](LICENSE).
+later](https://github.com/GretaLupi/hamlet-toolkit/blob/main/LICENSE).
