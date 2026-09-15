@@ -8,7 +8,7 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Nothing yet.
 
-## [0.1.0] - 2026-09-15
+## [0.1.0] - 2026-09-16
 
 First public release. HamLeT infers spin-chain Hamiltonians from scanning
 tunnelling spectroscopy by simulating spectra for known couplings, training a
@@ -34,9 +34,14 @@ it, including the internal 0.1.0 milestone, is in the git history.
   CSV of site/bias/dI-dV, or a canonical NPZ; site-resolved plots, and a bias
   cutoff chosen against the data rather than assumed.
 - **A reuse advisor.** Before training anything, HamLeT checks a measurement
-  against every model it can see -- system, chain length, view, exact cutoff,
+  against every model it can see -- chain length, view, exact cutoff,
   observable, preprocessing -- and reports a mismatch instead of padding
-  spectra or silently changing the cutoff.
+  spectra or silently changing the cutoff. Which family of Hamiltonian to
+  assume is left to you, since spectra do not decide it; what a model requires
+  of the *sample* is not, so a model trained with impurities at given sites
+  stays refused until the measured chain is declared to have them. That
+  declaration is made once, on a chain diagram, and both the reuse check and
+  the inference run read it.
 - **Dataset generation** through DMRGPy, choosing exact diagonalisation or DMRG
   by Hilbert dimension. Checkpointed per chunk, so an interrupted run resumes,
   and fingerprinted by recipe, so an existing dataset is reused only when it
