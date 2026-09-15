@@ -346,6 +346,13 @@ svg.spectra.compact { min-height: 205px; }
   .result-status.warn { background: #382d1c; }
 }
 
+.required-chain { margin: 6px 0 10px; overflow-x: auto; }
+.required-chain svg { max-width: 100%; height: auto; max-height: 150px; }
+table.required-sample { margin: 6px 0; }
+table.required-sample .pass { color: var(--good); font-weight: 700; }
+table.required-sample .fail { color: var(--bad); font-weight: 700; }
+.needs-sample { color: var(--warn); }
+
 .sample-conditions { margin: 16px 0; }
 .sample-conditions:empty { margin: 0; }
 .sample-choices { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 12px 0 4px; }

@@ -910,6 +910,7 @@ def _artifact_family(path: Path) -> dict[str, Any]:
         "label": label,
         "system_type": manifest.get("system_type"),
         "view": manifest.get("view"),
+        "declared_conditions": _artifact_conditions(manifest),
     }
 
 
@@ -960,9 +961,10 @@ def advise_for_experiment(
                 "path": str(item.path),
                 "compatible": bool(item.compatible),
                 "reasons": list(item.reasons),
-                # The family and view a model was trained for. The measurement
-                # does not fix either, so the page shows what each model
-                # assumes rather than pretending the data chose one.
+                # The family and view a model was trained for, and the sample
+                # it needs. The measurement fixes none of these, so the page
+                # shows what each model assumes rather than pretending the
+                # data chose for you.
                 **_artifact_family(item.path),
             }
             for item in decision.artifact_assessments

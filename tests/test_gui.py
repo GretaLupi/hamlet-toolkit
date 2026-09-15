@@ -3093,3 +3093,57 @@ def test_the_declaration_is_offered_on_both_pages_and_defaults_to_undeclared():
     assert script.count("conditions: conditionsPayload()") == 2
     # A different measurement is a different chain.
     assert "onPicked: resetSampleConditions" in script
+
+
+def test_a_models_required_sample_is_shown_as_a_chain_not_as_json():
+    """Choosing a model means comparing what it needs against what you have.
+
+    The models page printed the training recipe as a JSON dump
+    (``impurities = [{"site": 1, "spin": "S=1", ...}]``), which nobody can
+    check against a sample at a glance. It is drawn as the chain it describes,
+    with a row per impurity, and -- once the measured sample is declared --
+    each row says whether it matches.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+
+    assert "conditionsText" not in script, "the JSON dump has to be gone"
+    assert "function requiredSampleBlock" in script
+    assert "function requiredSampleSummary" in script
+    # It draws the chain, using the same diagram the design page uses.
+    block = script[script.index("function requiredSampleBlock"):]
+    block = block[:block.index("\n}\n")]
+    assert "chainSvg(" in block
+    assert "axial D (meV)" in block and "transverse E (meV)" in block
+    assert "angle (rad)" in block
+    assert "Transverse field" in block
+    # With a declaration to compare against, every row is marked.
+    assert "compare" in block and "yours" in block
+
+    # Shown before selection too: on the model cards and in the reuse table.
+    assert "Needs a sample with:" in script
+    assert "needs ${requiredSampleSummary(a.declared_conditions)}" in script
+
+
+def test_the_reuse_rows_carry_the_sample_each_model_needs():
+    """The one-line summary needs the conditions to reach the page."""
+    published = api._published_root()
+    impurity = next(
+        path.parent
+        for path in sorted(published.glob("*/manifest.json"))
+        if "dmi_impurity" in path.parent.name
+    )
+    family = api._artifact_family(impurity)
+    conditions = family["declared_conditions"]
+    assert conditions, "an impurity model must report what it needs"
+    assert [item["site"] for item in conditions["impurities"]] == [1, 4, 6]
+    assert conditions["impurities"][0]["spin"] == "S=1"
+    assert conditions["impurities"][0]["transverse_mev"] == 2.0
+    assert "transverse_field_mev" in conditions
+
+    # A model that needs nothing of the sample says so by omission.
+    plain = next(
+        path.parent
+        for path in sorted(published.glob("*/manifest.json"))
+        if "dmi_impurity" not in path.parent.name
+    )
+    assert api._artifact_family(plain)["declared_conditions"] is None

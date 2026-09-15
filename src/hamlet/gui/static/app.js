@@ -703,7 +703,10 @@ el("reuse-go").addEventListener("click", async () => {
           <tr><th>Model</th><th>Treats the chain as</th><th>Usable</th><th>Reason</th></tr>
           ${d.artifacts.map((a) => `<tr>
             <td><code>${esc(a.label || a.path.split("/").pop())}</code></td>
-            <td>${a.system_type ? `${esc(a.system_type)}<br><span class="hint">${esc((a.view || "").replace(/_/g, " "))}</span>` : "—"}</td>
+            <td>${a.system_type ? `${esc(a.system_type)}<br><span class="hint">${esc((a.view || "").replace(/_/g, " "))}</span>${
+              requiredSampleSummary(a.declared_conditions)
+                ? `<br><span class="hint needs-sample">needs ${requiredSampleSummary(a.declared_conditions)}</span>`
+                : ""}` : "—"}</td>
             <td>${a.compatible ? "<b style='color:var(--good)'>yes</b>" : "no"}</td>
             <td>${a.reasons.length ? a.reasons.map(esc).join("<br>") : "—"}</td>
           </tr>`).join("")}
@@ -725,10 +728,103 @@ el("reuse-go").addEventListener("click", async () => {
 
 let knownModels = [];
 
-function conditionsText(conditions) {
-  const keys = Object.keys(conditions || {});
-  if (!keys.length) return "none beyond the system itself";
-  return keys.map((k) => `${esc(k)} = ${esc(JSON.stringify(conditions[k]))}`).join("<br>");
+/** The impurities a model requires, listed the way a person reads a sample. */
+function impurityList(conditions) {
+  const listed = (conditions && conditions.impurities) || [];
+  return listed
+    .map((item) => ({
+      site: Number(item.site),
+      spin: String(item.spin || "S=1"),
+      axial_mev: Number(item.axial_mev) || 0,
+      transverse_mev: Number(item.transverse_mev) || 0,
+      transverse_angle_rad: Number(item.transverse_angle_rad) || 0,
+    }))
+    .sort((a, b) => a.site - b.site);
+}
+
+/** One line: what a model needs of the sample, short enough for a card. */
+function requiredSampleSummary(conditions) {
+  const impurities = impurityList(conditions);
+  const field = Number((conditions || {}).transverse_field_mev) || 0;
+  if (!impurities.length && !field) return "";
+  const parts = [];
+  if (impurities.length) {
+    const spins = [...new Set(impurities.map((i) => i.spin))].join("/");
+    parts.push(`${impurities.length} ${spins} impurit${impurities.length === 1 ? "y" : "ies"}
+      at site${impurities.length === 1 ? "" : "s"} ${impurities.map((i) => i.site).join(", ")}`);
+  }
+  if (field) parts.push(`B<sub>x</sub> = ${num(field, 2)} meV`);
+  return parts.join(" · ");
+}
+
+/** The sample a model was trained for, drawn as the chain it describes.
+ *
+ * `compare` is the user's own declaration. Given one, every row says whether
+ * it matches, because choosing between models is exactly the comparison of
+ * "what this needs" against "what I have" -- which a JSON dump of the recipe
+ * made nobody able to do at a glance.
+ */
+function requiredSampleBlock(conditions, { nSites = 0, compare = null } = {}) {
+  const impurities = impurityList(conditions);
+  const field = Number((conditions || {}).transverse_field_mev) || 0;
+  if (!impurities.length && !field) {
+    return `<span class="hint">none beyond the system itself &mdash; this model
+      does not require impurities or a field</span>`;
+  }
+  const mine = compare ? impurityList(compare) : null;
+  const mineBySite = new Map((mine || []).map((item) => [item.site, item]));
+  const same = (a, b) =>
+    b && a.spin === b.spin
+    && Math.abs(a.axial_mev - b.axial_mev) < 1e-9
+    && Math.abs(a.transverse_mev - b.transverse_mev) < 1e-9
+    && Math.abs(a.transverse_angle_rad - b.transverse_angle_rad) < 1e-9;
+
+  const sites = impurities.map((item) => item.site);
+  const width = nSites || (Math.max(...sites, 0) + 2);
+  const bySite = new Map(impurities.map((item) => [item.site, item]));
+  const diagram = width
+    ? `<div class="required-chain">${chainSvg(
+        width,
+        sites.filter((site) => site >= 0 && site < width),
+        (site) => (bySite.get(site) || {}).spin || "",
+      )}</div>`
+    : "";
+
+  const rows = impurities.map((item) => {
+    const match = mine ? same(item, mineBySite.get(item.site)) : null;
+    const mark = match === null ? ""
+      : match ? `<td class="pass">&#10003; yours</td>`
+      : `<td class="fail">&#10007; ${mineBySite.has(item.site)
+          ? "differs" : "not in yours"}</td>`;
+    return `<tr>
+      <td class="num">${item.site}</td><td>${esc(item.spin)}</td>
+      <td class="num">${num(item.axial_mev, 2)}</td>
+      <td class="num">${num(item.transverse_mev, 2)}</td>
+      <td class="num">${num(item.transverse_angle_rad, 2)}</td>${mark}</tr>`;
+  }).join("");
+
+  const extra = mine
+    ? mine.filter((item) => !bySite.has(item.site))
+        .map((item) => `<tr><td class="num">${item.site}</td><td>${esc(item.spin)}</td>
+          <td class="num">${num(item.axial_mev, 2)}</td>
+          <td class="num">${num(item.transverse_mev, 2)}</td>
+          <td class="num">${num(item.transverse_angle_rad, 2)}</td>
+          <td class="fail">&#10007; only in yours</td></tr>`).join("")
+    : "";
+
+  const myField = compare ? Number(compare.transverse_field_mev) || 0 : null;
+  return `${diagram}
+    <table class="required-sample">
+      <tr><th class="num">Site</th><th>Spin</th><th class="num">axial D (meV)</th>
+        <th class="num">transverse E (meV)</th><th class="num">angle (rad)</th>
+        ${mine ? "<th>your sample</th>" : ""}</tr>
+      ${rows}${extra}
+    </table>
+    <p class="hint">Transverse field <b>B<sub>x</sub> = ${num(field, 2)} meV</b>${
+      myField === null ? ""
+        : Math.abs(myField - field) < 1e-9
+          ? ` <span class="pass">&#10003; yours too</span>`
+          : ` <span class="fail">&#10007; yours is ${num(myField, 2)} meV</span>`}</p>`;
 }
 
 async function loadModels() {
@@ -760,7 +856,8 @@ async function loadModels() {
           </td></tr>
           <tr><th>Couplings</th><td>${m.parameters.map((p) =>
             `${esc(p.name)}${p.trained_range_mev ? ` <span class="hint">[${p.trained_range_mev.join(", ")}]</span>` : ""}`).join(" · ")}</td></tr>
-          <tr><th>Must match exactly</th><td>${conditionsText(m.fixed_conditions)}</td></tr>
+          <tr><th>Sample it needs</th><td>${requiredSampleBlock(m.declared_conditions, {
+            nSites: m.n_sites, compare: conditionsPayload() })}</td></tr>
         </table>
         ${m.has_model_card ? `<button data-card="${esc(m.label || m.name)}">Read the model card</button>` : ""}
         ${m.origin === "yours" ? `<button class="destructive" data-delete-model="${esc(m.path)}"
@@ -816,6 +913,9 @@ function renderAnalysisModels() {
         ${esc(m.observable)} &nbsp;·&nbsp; <b>Held-out MAE:</b> ${num(m.test_mae_mev)} meV
         &nbsp;·&nbsp; <b>fidelity:</b> ${num(m.test_correlation_fidelity)}
         &nbsp;·&nbsp; ${esc(m.preset || "")} preset</div>
+      ${requiredSampleSummary(m.declared_conditions)
+        ? `<div class="meta needs-sample"><b>Needs a sample with:</b>
+            ${requiredSampleSummary(m.declared_conditions)}</div>` : ""}
     </div>`).join("");
   box.querySelectorAll(".card").forEach((c) =>
     c.addEventListener("click", () => {
@@ -842,33 +942,22 @@ function renderAnalysisConditions() {
     return;
   }
   box.hidden = false;
-  const impurities = conditions.impurities || [];
-  const rows = impurities.map((imp) => `<tr>
-      <td class="num">${esc(imp.site)}</td>
-      <td>${esc(imp.spin || "S=1")}</td>
-      <td class="num">${num(imp.axial_mev ?? 0, 3)}</td>
-      <td class="num">${num(imp.transverse_mev ?? 0, 3)}</td>
-      <td class="num">${num(imp.transverse_angle_rad ?? 0, 3)}</td>
-    </tr>`).join("");
+  const declared = conditionsPayload();
   box.innerHTML = `<div class="box">
     <div class="verdict">This model describes one particular kind of sample</div>
-    <p>It was trained on a chain built with the impurities below, and the
-      spectra of a chain without them are different. Nothing in a measurement
-      reveals which chain it came from, so this is the one thing the interface
-      has to ask you.</p>
-    ${rows ? `<table>
-      <tr><th class="num">Site</th><th>Spin</th><th class="num">D (meV)</th>
-        <th class="num">E (meV)</th><th class="num">angle (rad)</th></tr>
-      ${rows}</table>` : ""}
-    <p>Transverse field:
-      <b>${num(conditions.transverse_field_mev ?? 0, 3)} meV</b></p>
+    <p>It was trained on the chain below, and the spectra of a chain without
+      those impurities are different. Nothing in a measurement reveals which
+      chain it came from, so this is the one thing the interface has to ask
+      you.</p>
+    ${requiredSampleBlock(conditions, { nSites: model.n_sites, compare: declared })}
     ${sampleConditions.state === "unknown" ? `
       <label><input type="checkbox" id="an-confirm-conditions">
         my sample has exactly these impurities</label>
       <p class="hint">Or describe the measured chain yourself above, which is
-        the same declaration the reuse check reads.</p>`
+        the same declaration the reuse check reads, and every row here will say
+        whether it matches.</p>`
       : `<p class="hint">Your declaration above is what this run will be built
-        from; it has to match the list here or the run is refused.</p>`}
+        from; it has to match this sample or the run is refused.</p>`}
   </div>`;
 }
 
