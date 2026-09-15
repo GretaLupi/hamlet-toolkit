@@ -8,7 +8,7 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Nothing yet.
 
-## [0.1.0] - 2026-09-14
+## [0.1.0] - 2026-09-15
 
 First public release. HamLeT infers spin-chain Hamiltonians from scanning
 tunnelling spectroscopy by simulating spectra for known couplings, training a
@@ -62,9 +62,19 @@ it, including the internal 0.1.0 milestone, is in the git history.
   a warning when the symmetry count is optimistic because one global rotation
   can undo the impurities.
 - **Cluster submission** over your own ssh, with Slurm, PBS, LSF and Grid
-  Engine. Key-based access is required and checked, the run directory can be
-  browsed rather than typed, and the connection test confirms that the cluster
-  can actually import HamLeT before a job is queued.
+  Engine, chosen and sent from the training page itself. Generation goes as a
+  scheduler array -- one task per simulated chain, each in its own scratch
+  directory -- and a dependent job joins the checkpoints and trains only if
+  every task succeeded. Key-based access is required and checked, the run
+  directory can be browsed rather than typed, job logs are collected in
+  `logs/`, and the connection test confirms the cluster can import a HamLeT
+  new enough to run the array before anything is copied.
+- **Held-out evaluation before a model is used.** Training reserves whole
+  simulated chains from both fitting and selection, then reports MAE, RMSE,
+  fidelity and skill against the training mean -- overall and per learned
+  parameter -- in the interface, in `held_out_evaluation.json`, and in the
+  PDF report, which also flags any estimate that falls outside the range the
+  model was trained on.
 - **`hamlet compute`**, which reports the cores and accelerators available and
   says which stage each affects -- generation is CPU-bound and cannot use a
   GPU; only the Keras models can.
@@ -75,6 +85,10 @@ it, including the internal 0.1.0 milestone, is in the git history.
   `inspect-experiment`, `advise`, `generate`, `run`, `screen-dmi`, `compute`,
   `where`, `cluster`, and `gui`. A configuration written by the form is a file
   the command line re-runs unchanged.
+- **Theory notes** ([docs/theory.md](docs/theory.md)) setting out the
+  Hamiltonians as implemented, the correlator and its relation to dI/dV, the
+  DMI identifiability argument, the metric definitions, and the assumptions
+  behind all of them.
 - **Optional extras**: `ml` (TensorFlow), `simulation` (DMRGPy), `tune`
   (Optuna), `gpu` (CUDA TensorFlow on Linux), and `all`.
 - **A line of Shakespeare while a job runs.** The package is called HamLeT and

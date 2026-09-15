@@ -1,8 +1,18 @@
 """Build the README pipeline figure from real package data.
 
-Nothing here is drawn by hand: the heatmap and the dI/dV traces are one
-simulated chain out of the dataset shipped for the quickstart, and the
-recovered couplings come from a ridge model trained on the others.
+Nothing here is drawn by hand. The dI/dV traces are one simulated chain out of
+the dataset shipped for the quickstart, the recovered couplings come from a
+ridge model trained on the others, and the heatmap is that same chain's
+dynamical correlator, re-simulated here by exact diagonalisation.
+
+The correlator is re-simulated rather than read from the dataset because the
+dataset stores dI/dV -- the correlator already integrated over bias. Drawing
+that as the first panel showed the middle panel's quantity twice and called it
+something else. The two panels now show the two different things they claim
+to, and the script checks that the first integrates to the second before it
+draws anything.
+
+Needs the simulation extra: pip install "hamlet-toolkit[simulation]"
 """
 import matplotlib
 matplotlib.use("Agg")
@@ -11,6 +21,9 @@ import numpy as np
 from pathlib import Path
 
 from hamlet.data import SpectroscopyDataset
+from hamlet.simulation import DmrgpySimulator, SpectroscopyProtocol
+from hamlet.simulation.dmrgpy import DMRGPY_ENERGY_UNIT_MEV
+from hamlet.systems.heisenberg import HomogeneousXXZLongRangeChain
 from hamlet.training import prepare_training_dataset, train_supervised
 from hamlet.training.preprocessing import TrainingPreprocessingConfig
 
@@ -53,17 +66,51 @@ sample = data.spectra[held]
 print("true      :", np.round(truth, 2))
 print("recovered :", np.round(predicted, 2))
 
+# --- the correlator behind that spectrum -----------------------------------
+# The same chain, the same protocol, stopped one step earlier: the spectral
+# function before it is integrated into dI/dV. L = 8 spin-1/2 is 256 states,
+# so this is exact diagonalisation and takes seconds.
+protocol_meta = data.metadata["protocol"]
+correlator_protocol = SpectroscopyProtocol(
+    bias_mev=bias,
+    broadening_mev=float(protocol_meta["broadening_mev"]),
+    observable=str(protocol_meta["observable"]),
+    observable_weights=tuple(protocol_meta["observable_contract"]["weights"]),
+    output_quantity="spectral_function",
+)
+correlator = np.asarray(
+    DmrgpySimulator(dynamics_mode="ED").simulate(
+        HomogeneousXXZLongRangeChain(n_sites=sample.shape[0], parameters_mev=truth),
+        correlator_protocol,
+    ).spectral_map
+)
+
+# The claim the figure makes is that panel 2 is panel 1 integrated. Checked
+# rather than asserted in a caption: integration happens in DMRGPy energy
+# units, so a figure drawn without this check could show two unrelated things
+# and look entirely plausible.
+steps = np.diff(bias / DMRGPY_ENERGY_UNIT_MEV)
+increments = 0.5 * (correlator[:, 1:] + correlator[:, :-1]) * steps[None, :]
+integrated = np.concatenate(
+    [np.zeros((correlator.shape[0], 1)), np.cumsum(increments, axis=1)], axis=1
+)
+residual = np.max(np.abs(integrated - sample)) / np.max(np.abs(sample))
+assert residual < 1e-5, f"the correlator does not integrate to the dataset: {residual:.2e}"
+print(f"correlator integrates to the stored dI/dV to {residual:.1e}")
+
 # --- the figure ------------------------------------------------------------
 fig, axes = plt.subplots(1, 3, figsize=(12.6, 3.5), constrained_layout=True)
 
-# 1. what the simulator produces: the site-resolved dynamical correlator.
+# 1. what the simulator produces: the site-resolved dynamical correlator,
+# before any integration.
 ax = axes[0]
-mesh = ax.pcolormesh(bias, np.arange(sample.shape[0]), sample, cmap="magma",
+mesh = ax.pcolormesh(bias, np.arange(correlator.shape[0]), correlator, cmap="magma",
                      shading="gouraud")
 ax.set_title("1.  Simulate", loc="left")
 ax.set_xlabel("bias [meV]"); ax.set_ylabel("site along the chain")
-ax.set_yticks(range(sample.shape[0]))
-cb = fig.colorbar(mesh, ax=ax, pad=0.02); cb.set_label("spectral weight", fontsize=8)
+ax.set_yticks(range(correlator.shape[0]))
+cb = fig.colorbar(mesh, ax=ax, pad=0.02)
+cb.set_label(r"$S_{ii}(\omega)$", fontsize=8)
 cb.ax.tick_params(labelsize=7)
 ax.text(0.5, -0.34, "a known Hamiltonian $\\rightarrow$ its dynamical correlator",
         transform=ax.transAxes, ha="center", fontsize=8.5, color=MUTED)
@@ -76,11 +123,12 @@ for site in range(sample.shape[0]):
     ax.text(bias[-1], site * offset + 0.12 * offset, f" {site}", fontsize=7, color=MUTED,
             va="center", ha="left", clip_on=False)
 ax.set_title("2.  Measure", loc="left")
-ax.set_xlabel("bias [meV]"); ax.set_ylabel("d$I$/d$V$  (offset per site)")
+ax.set_xlabel("bias [meV]")
+ax.set_ylabel("d$I$/d$V$ $\\propto \\int^{eV}\\! S_{ii}$  (offset per site)")
 ax.set_yticks([]); ax.set_xlim(bias[0], bias[-1] * 1.04)
 for side in ("top", "right", "left"):
     ax.spines[side].set_visible(False)
-ax.text(0.5, -0.34, "one spectrum per site, the STM measurement",
+ax.text(0.5, -0.34, "the correlator integrated over bias: one spectrum per site",
         transform=ax.transAxes, ha="center", fontsize=8.5, color=MUTED)
 
 # 3. the answer: couplings recovered from that spectrum alone.

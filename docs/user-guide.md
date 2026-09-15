@@ -567,6 +567,10 @@ card only helps the Keras training that follows, which takes minutes.
 
 ## Which solver simulates each chain
 
+For the physics these solvers are approximating — the Hamiltonians, the
+correlator, and how dI/dV follows from it — see
+[the theory notes](theory.md).
+
 Exact diagonalisation is exact; DMRG is an approximation whose accuracy follows
 the bond dimension. HamLeT picks between them by the size of the Hilbert space:
 

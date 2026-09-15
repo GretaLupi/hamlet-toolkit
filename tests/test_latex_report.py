@@ -176,3 +176,143 @@ def test_every_hamiltonian_compiles(tmp_path, system_type):
         artifact_manifest={"system_type": system_type},
     )
     assert outcome["compiled"], f"{system_type}: {outcome['detail']}"
+
+
+def _manifest_with(**overrides):
+    """A manifest shaped like a real artifact's, for the report blocks."""
+    manifest = {
+        "model_name": "ridge",
+        "system_type": "homogeneous_heisenberg",
+        "target_names": ["J1", "J2"],
+        "coupling_unit": "meV",
+        "preprocessing": {"bias_cutoff_mev": 50.0, "output_points": 61},
+        "dataset_metadata": {
+            "generation_recipe": {
+                "coupling_ranges_mev": [[30.0, 45.0], [0.0, 10.0]],
+                "dynamics_mode": "ED",
+            }
+        },
+        "metrics": {
+            "split": {"test_groups": 300},
+            "test": {
+                "ensemble": {
+                    "mae": 0.11395712,
+                    "rmse": 0.16384,
+                    "correlation_fidelity": 0.99987,
+                    "skill": 0.62,
+                },
+                "per_target": [
+                    {"name": "J1", "mae": 0.09, "correlation_fidelity": 0.999, "skill": 0.7},
+                    {"name": "J2", "mae": 0.14, "correlation_fidelity": 0.97, "skill": 0.4},
+                ],
+            },
+        },
+    }
+    manifest.update(overrides)
+    return manifest
+
+
+def test_the_report_says_how_accurate_the_model_is():
+    """An inferred number a reader cannot weigh is not a result.
+
+    It is the first question anyone asks of an inference, and the answer is
+    already in the manifest, so leaving it out of the document that gets sent
+    to a colleague was the omission worth fixing.
+    """
+    from hamlet.experimental.latex_report import _accuracy_block
+
+    block = _accuracy_block(_manifest_with())
+    assert "300 simulated chains" in block
+    # Four significant figures, not whatever the float happened to be.
+    assert "0.114 meV" in block and "0.113957" not in block
+    assert "0.9999" in block, "fidelity needs enough digits to distinguish models"
+    # The per-parameter breakdown, because an overall figure hides a coupling
+    # the model never learned.
+    assert "J1" in block and "J2" in block
+    assert "sigma_\\text{pred}" in block or "\\sigma_\\text{pred}" in block
+    assert "blind to a constant offset" in block
+    assert "simulated" in block
+
+
+def test_an_artifact_without_an_evaluation_says_so_rather_than_implying_one():
+    from hamlet.experimental.latex_report import _accuracy_block
+
+    block = _accuracy_block(_manifest_with(metrics={}))
+    assert "no held-out evaluation" in block
+    assert "model card" in block
+
+
+def test_an_estimate_outside_the_trained_range_is_flagged_as_extrapolation():
+    """A regression model returns a number everywhere, trained or not."""
+    import numpy as np
+
+    from hamlet.experimental import ExperimentalGlobalResult
+    from hamlet.experimental.latex_report import _validity_block
+
+    class Diagnostics:
+        warnings = ()
+        status = "ok"
+        aggregation_method = "median"
+        n_members = 3
+
+    def result_for(values):
+        bias = np.linspace(0, 50, 5)
+        return ExperimentalGlobalResult(
+            source="demo.csv", raw_bias_mev=bias, raw_spectra=np.zeros((4, 5)),
+            processed_bias_mev=bias, processed_spectra=np.zeros((4, 5)),
+            parameter_names=("J1", "J2"),
+            coupling_mean=np.asarray(values), coupling_std=np.asarray([0.5, 0.5]),
+            per_model_couplings=np.zeros((3, 2)), coupling_unit="meV",
+            diagnostics=Diagnostics(),
+        )
+
+    inside = _validity_block(result_for([36.0, 4.0]), _manifest_with())
+    assert "none of them is an extrapolation" in inside
+    assert "outside" not in inside.replace("\\textbf{outside}", "")
+
+    beyond = _validity_block(result_for([36.0, 900.0]), _manifest_with())
+    assert "\\textbf{outside}" in beyond
+    assert "J2" in beyond
+    assert "indicative at best" in beyond
+
+
+def test_an_unrecorded_range_is_admitted_rather_than_assumed_safe():
+    import numpy as np
+
+    from hamlet.experimental import ExperimentalGlobalResult
+    from hamlet.experimental.latex_report import _validity_block
+
+    class Diagnostics:
+        warnings = ()
+        status = "ok"
+        aggregation_method = "median"
+        n_members = 1
+
+    bias = np.linspace(0, 50, 5)
+    result = ExperimentalGlobalResult(
+        source="demo.csv", raw_bias_mev=bias, raw_spectra=np.zeros((4, 5)),
+        processed_bias_mev=bias, processed_spectra=np.zeros((4, 5)),
+        parameter_names=("J1", "J2"),
+        coupling_mean=np.asarray([36.0, 4.0]), coupling_std=np.asarray([0.5, 0.5]),
+        per_model_couplings=np.zeros((1, 2)), coupling_unit="meV",
+        diagnostics=Diagnostics(),
+    )
+    block = _validity_block(result, _manifest_with(dataset_metadata={}))
+    assert "not recorded" in block
+    assert "cannot be checked automatically" in block
+
+
+def test_the_impurity_hamiltonian_matches_the_one_that_is_simulated():
+    """The report's formula and the code had drifted apart.
+
+    The in-plane anisotropy axes sit at an angle the design can choose, and
+    the transverse field is an independent way to break the same symmetry.
+    A report that omits both describes a special case as if it were the model.
+    """
+    from hamlet.experimental.latex_report import hamiltonian_for
+
+    block = hamiltonian_for("homogeneous_xxz_j1j2j3_dmi_impurity")
+    equation = block["equation"]
+    assert r"\cos 2\varphi" in equation and r"\sin 2\varphi" in equation
+    assert "B_{x}" in equation, "the optional transverse field is part of it"
+    assert "Two impurities at distinct sites" in block["reading"]

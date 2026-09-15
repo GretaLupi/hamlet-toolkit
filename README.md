@@ -32,13 +32,16 @@ Physical energies are expressed in meV; at the DMRGPy simulator boundary,
   <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/pipeline.png" alt="Simulate, measure, infer: a dynamical correlator becomes per-site dI/dV, and a model reads the couplings back out" width="100%">
 </p>
 
-**Simulate.** For a spin chain whose couplings you choose, DMRG or exact
-diagonalisation gives the site-resolved dynamical correlator — the left panel
-is one such chain, sites up the axis and bias across it.
+**Simulate.** For a spin chain whose couplings you choose, exact
+diagonalisation or DMRG gives the site-resolved dynamical spin correlator
+S<sub>ii</sub>(ω) — the left panel, sites up the axis and bias across it. Each
+bright band is an excitation of the chain, and where it sits and how much
+weight it carries at each site is what the couplings determine.
 
-**Measure.** That correlator is what an STM sees as d*I*/d*V*: one spectrum per
-site, each step marking an excitation. This is the form your own data arrives
-in, and the form the simulated dataset is built to match.
+**Measure.** An STM integrates that correlator: d*I*/d*V* at bias *V* collects
+every excitation below *eV*, so each band in the left panel becomes a step in
+the middle one. This is the form your own data arrives in, and the form the
+simulated dataset is built to match.
 
 **Infer.** A model trained on thousands of such simulated chains reads the
 couplings back out of a single measured spectrum. The right panel recovers
@@ -174,11 +177,16 @@ hamlet run examples/quickstart_l8.yaml
 ```
 
 See the [user guide](docs/user-guide.md) for raw-file import, cutoff selection,
-dataset generation, model tuning, cluster execution, inference, and reports.
+dataset generation, model tuning, cluster execution, inference, and reports,
+and [the theory notes](docs/theory.md) for the Hamiltonians, the measurement
+model, and what the reported scores mean.
 The small [L=8 notebook](notebooks/04_l8_three_mode_workflow.ipynb) is the
 reproducible Python example; notebooks are tutorials, not the test suite.
 
 ## Scientific scope
+
+The [theory notes](docs/theory.md) state the Hamiltonians, the correlator and
+dI/dV relation, the metric definitions, and the assumptions behind all of them.
 
 Reference-model scores describe held-out simulated data unless a model card
 explicitly says otherwise. Ensemble spread measures disagreement between
@@ -193,6 +201,7 @@ model. See the [DMI experiment specification](docs/dmi-experiment-spec.md).
 
 ## Project information
 
+- Theory and assumptions: [docs/theory.md](docs/theory.md)
 - Changes: [CHANGELOG.md](CHANGELOG.md)
 - Contributing: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Releasing: [docs/releasing.md](docs/releasing.md)

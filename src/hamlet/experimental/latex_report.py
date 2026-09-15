@@ -118,14 +118,23 @@ HAMILTONIANS: dict[str, dict[str, str]] = {
     \hat{\mathbf{S}}_{i}\cdot\hat{\mathbf{S}}_{i+d}
   + \sum_{a \in \text{imp}} \Big[
       D^{a}_{\parallel}\big(\hat{S}^{z}_{a}\big)^{2}
-    + E^{a}\big(\hat{S}^{x}_{a}{}^{2} - \hat{S}^{y}_{a}{}^{2}\big) \Big]""",
+    + E^{a}\big(\cos 2\varphi_{a}\,
+        \big[(\hat{S}^{x}_{a})^{2} - (\hat{S}^{y}_{a})^{2}\big]
+      + \sin 2\varphi_{a}\,
+        \big[\hat{S}^{x}_{a}\hat{S}^{y}_{a} + \hat{S}^{y}_{a}\hat{S}^{x}_{a}\big]
+      \big) \Big]
+  - B_{x}\sum_{i=1}^{N}\hat{S}^{x}_{i}""",
         "reading": (
             "The impurity terms are what make $D_z$ measurable. The axial term "
             "$D_\\parallel$ commutes with the total $\\hat{S}^z$ and cannot "
-            "expose it; the transverse term $E$ changes $S^z$ by two and "
-            "breaks the U(1) symmetry that would otherwise let a collinear DM "
-            "vector be rotated away. Two impurities at distinct sites are "
-            "required."
+            "expose it; the transverse term $E$, whose in-plane axes sit at "
+            "$\\varphi_a$ from $x$, changes $S^z$ by two and breaks the U(1) "
+            "symmetry that would otherwise let a collinear DM vector be "
+            "rotated away. Two impurities at distinct sites are required: a "
+            "single one has its in-plane axis turned by one angle, which a "
+            "global rotation about $z$ undoes. $B_x$ is an optional transverse "
+            "field, an independent way to break the same symmetry; it is zero "
+            "unless the design asks for it."
         ),
     },
 }
@@ -208,13 +217,30 @@ def _provenance_rows(manifest: Mapping[str, Any]) -> str:
             "Ensemble aggregation",
             _field(manifest.get("ensemble_aggregation"), "method"),
         ),
-        ("Held-out MAE", _with_unit(test.get("mae"), "meV")),
+        ("Held-out MAE", _metric(test.get("mae"))),
+        ("Simulation solver", _solver(manifest)),
         ("Energy convention", _energy_convention(manifest.get("energy_convention"))),
     ]
     return "".join(
         f"{tex_escape(label)} & {tex_escape(value if value not in (None, '') else 'not recorded')} \\\\\n"
         for label, value in entries
     )
+
+
+def _solver(manifest: Mapping[str, Any]) -> str:
+    """Which solver produced the training spectra, said as a word.
+
+    ED and DMRG are not the same calculation, and a reader comparing two
+    models should not have to open the dataset to find out which one they are
+    looking at.
+    """
+    recipe = (manifest.get("dataset_metadata") or {}).get("generation_recipe") or {}
+    mode = str(recipe.get("dynamics_mode") or "")
+    return {
+        "ED": "exact diagonalisation",
+        "DMRG": "DMRG",
+        "auto": "chosen automatically from the Hilbert space size",
+    }.get(mode, mode)
 
 
 def _named(value: Any) -> Any:
@@ -247,6 +273,249 @@ def _with_unit(value: Any, unit: str) -> str:
         return f"{float(value):g} {unit}"
     except (TypeError, ValueError):
         return str(value)
+
+
+def _trained_ranges(manifest: Mapping[str, Any]) -> dict[str, tuple[float, float]]:
+    """The sampled range of each learned parameter, keyed by name.
+
+    Read from the generation recipe, because that is the statement of what the
+    model was actually shown. Outside it a prediction is an extrapolation, and
+    saying so is the difference between a number and a number a reader can act
+    on.
+    """
+    recipe = (manifest.get("dataset_metadata") or {}).get("generation_recipe") or {}
+    ranges = recipe.get("coupling_ranges_mev") or []
+    single = _shared_range(manifest)
+    names = list(manifest.get("target_names") or [])
+    out: dict[str, tuple[float, float]] = {}
+    for index, name in enumerate(names):
+        span = None
+        if index < len(ranges) and isinstance(ranges[index], (list, tuple)):
+            span = ranges[index]
+        elif isinstance(single, (list, tuple)) and len(single) == 2:
+            # One range shared by every bond, as the inhomogeneous family
+            # records it.
+            span = single
+        if span and len(span) == 2:
+            try:
+                out[str(name)] = (float(span[0]), float(span[1]))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def _shared_range(manifest: Mapping[str, Any]) -> tuple[float, float] | None:
+    """One range covering every bond, as the inhomogeneous family records it.
+
+    A bond-resolved model learns many couplings from a single sampled range,
+    so there is nothing to key by name: the same interval applies to all of
+    them.
+    """
+    recipe = (manifest.get("dataset_metadata") or {}).get("generation_recipe") or {}
+    span = recipe.get("coupling_range_mev")
+    if isinstance(span, (list, tuple)) and len(span) == 2:
+        try:
+            return float(span[0]), float(span[1])
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _accuracy_block(manifest: Mapping[str, Any]) -> str:
+    """How well the model recovered couplings it had never seen.
+
+    Without this a reader has the estimate and no way to weigh it. It is the
+    first question anyone sensible asks of an inferred number, and it is
+    already in the manifest.
+    """
+    metrics = manifest.get("metrics") or {}
+    test = metrics.get("test") or {}
+    ensemble = test.get("ensemble") or {}
+    if not ensemble:
+        return (
+            "This artifact records no held-out evaluation, so the accuracy of "
+            "the inverse map it implements cannot be quoted here. Check the "
+            "model card.\n"
+        )
+
+    split = metrics.get("split") or {}
+    chains = split.get("test_groups") or test.get("n_examples")
+    scope = (
+        f"on {tex_escape(chains)} simulated chains withheld from both fitting "
+        "and model selection"
+        if chains
+        else "on simulated data withheld from both fitting and model selection"
+    )
+
+    summary = [
+        ("Mean absolute error", _metric(ensemble.get("mae"))),
+        ("Root mean square error", _metric(ensemble.get("rmse"))),
+        ("Fidelity", _rounded(ensemble.get("correlation_fidelity"))),
+        ("Skill over the training mean", _rounded(ensemble.get("skill"))),
+    ]
+    rows = "".join(
+        f"{tex_escape(label)} & {tex_escape(value or 'not recorded')} \\\\\n"
+        for label, value in summary
+    )
+
+    per_target = test.get("per_target") or []
+    if per_target:
+        body = "".join(
+            f"\\texttt{{{tex_escape(entry.get('name'))}}} & "
+            f"{tex_escape(_metric(entry.get('mae'), ''))} & "
+            f"{tex_escape(_rounded(entry.get('correlation_fidelity')))} & "
+            f"{tex_escape(_rounded(entry.get('skill')))} \\\\\n"
+            for entry in per_target
+        )
+        detail = (
+            "\n\\begin{center}\n\\begin{tabular}{l r r r}\n\\hline\n"
+            "Parameter & MAE (meV) & Fidelity & Skill \\\\\n\\hline\n"
+            f"{body}\\hline\n\\end{{tabular}}\n\\end{{center}}\n"
+            "\nA model can recover one coupling well and another hardly at "
+            "all, which an overall figure hides; the per-parameter breakdown "
+            "is the one to read.\n"
+        )
+    else:
+        detail = ""
+
+    return (
+        f"Measured {scope}:\n\n"
+        "\\begin{center}\n\\begin{tabular}{l r}\n\\hline\n"
+        f"{rows}\\hline\n\\end{{tabular}}\n\\end{{center}}\n"
+        f"{detail}"
+        "\nFidelity is the absolute Pearson correlation between predicted and "
+        "true values,\n"
+        "\\begin{equation*}\n"
+        "F = \\frac{\\big|\\langle (J_\\text{pred} - \\langle J_\\text{pred}\\rangle)"
+        "(J_\\text{true} - \\langle J_\\text{true}\\rangle)\\rangle\\big|}"
+        "{\\sigma_\\text{pred}\\,\\sigma_\\text{true}},\n"
+        "\\end{equation*}\n"
+        "running from 0 to 1. Being a correlation it is blind to a constant "
+        "offset and to a scale factor, so it should be read next to the mean "
+        "absolute error rather than instead of it. Skill is "
+        "$1 - \\text{MAE}/\\text{MAE}_\\text{baseline}$ against always "
+        "returning the training mean: zero means the spectrum contributed "
+        "nothing.\n\n"
+        "These scores describe \\emph{simulated} spectra from the same "
+        "generator that produced the training set. They quantify the inverse "
+        "problem, not whether the model Hamiltonian describes this material.\n"
+    )
+
+
+def _validity_block(
+    result: ExperimentalChainResult | ExperimentalGlobalResult,
+    manifest: Mapping[str, Any],
+) -> str:
+    """Whether each estimate landed inside the range the model was trained on.
+
+    A regression model returns a number everywhere, including well outside the
+    data it saw. Checking it here means a reader does not have to hold the
+    training range in their head while looking at the results table.
+    """
+    ranges = _trained_ranges(manifest)
+    shared = _shared_range(manifest)
+    if not ranges and shared is None:
+        return (
+            "The sampled parameter range is not recorded in this artifact's "
+            "manifest, so whether the estimates below are interpolations "
+            "cannot be checked automatically. The model card states the range "
+            "the model was trained for.\n"
+        )
+
+    rows, outside = [], []
+    for name, estimate in _estimates(result):
+        span = ranges.get(name, shared)
+        if span is None:
+            continue
+        low, high = min(span), max(span)
+        beyond = estimate < low or estimate > high
+        if beyond:
+            outside.append(name)
+        # Built outside the f-string: a backslash in an f-string expression
+        # is a syntax error before Python 3.12, and this package supports 3.10.
+        verdict_cell = "\\textbf{outside}" if beyond else "inside"
+        rows.append(
+            f"\\texttt{{{tex_escape(name)}}} & {estimate:.3g} & "
+            f"[{low:.3g}, {high:.3g}] & {verdict_cell} \\\\\n"
+        )
+    if not rows:
+        return ""
+
+    verdict = (
+        "Every estimate lies inside the range the model was trained on, so "
+        "none of them is an extrapolation."
+        if not outside
+        else "\\textbf{"
+        + tex_escape(", ".join(outside))
+        + "} lies outside the range the model was trained on. A regression "
+        "model returns a number there too, but it was never shown data of "
+        "that kind, and the accuracy above does not cover it. Treat those "
+        "entries as indicative at best."
+    )
+    return (
+        "\\begin{center}\n\\begin{tabular}{l r c l}\n\\hline\n"
+        "Parameter & Estimate (meV) & Trained range (meV) & \\\\\n\\hline\n"
+        + "".join(rows)
+        + "\\hline\n\\end{tabular}\n\\end{center}\n\n"
+        + verdict
+        + "\n"
+    )
+
+
+def _estimates(
+    result: ExperimentalChainResult | ExperimentalGlobalResult,
+) -> list[tuple[str, float]]:
+    """(name, value) for whatever shape of result this is."""
+    pairs: list[tuple[str, float]] = []
+    if isinstance(result, ExperimentalGlobalResult):
+        for name, value in zip(result.parameter_names, result.coupling_mean):
+            try:
+                pairs.append((str(name), float(value)))
+            except (TypeError, ValueError):
+                continue
+        return pairs
+
+    # A chain result is one estimate per bond of the same coupling, so the
+    # range check is about the extremes: if the softest and the stiffest bond
+    # both sit inside the sampled range, so does everything between them.
+    values = [float(value) for value in result.coupling_mean]
+    if not values:
+        return pairs
+    names = list(getattr(result, "parameter_names", None) or ())
+    name = str(names[0]) if names else "J"
+    pairs.append((name, min(values)))
+    if max(values) != min(values):
+        pairs.append((name, max(values)))
+    return pairs
+
+
+def _rounded(value: Any) -> str:
+    """A bounded score, to four decimals.
+
+    Fidelity sits close to one for a model worth using, so three decimals
+    round several genuinely different models to "1.000".
+    """
+    if value is None:
+        return ""
+    try:
+        return f"{float(value):.4f}"
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _metric(value: Any, unit: str = "meV") -> str:
+    """An error in physical units, to four significant figures.
+
+    `%g` prints whatever the float happens to be -- 0.113957 meV states a
+    precision the number does not have and that nobody asked for.
+    """
+    if value is None:
+        return ""
+    try:
+        number = f"{float(value):.4g}"
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{number} {unit}".strip()
 
 
 def build_latex_document(
@@ -291,6 +560,8 @@ def build_latex_document(
         if figure_name
         else ""
     )
+    accuracy_block = _accuracy_block(manifest)
+    validity_block = _validity_block(result, manifest)
     n_members = getattr(result.diagnostics, "n_members", None)
     members_sentence = (
         f"The estimate is the {tex_escape(result.diagnostics.aggregation_method)} "
@@ -358,6 +629,12 @@ narrow spread is not by itself evidence that the estimate is correct.
 \\end{{center}}
 
 {figure_block}
+\\section*{{Is this inside what the model knows?}}
+
+{validity_block}
+\\section*{{How accurate is this model?}}
+
+{accuracy_block}
 \\section*{{Automatic checks}}
 
 {warning_block}
@@ -372,11 +649,21 @@ Field & Value \\\\
 \\end{{tabular}}
 \\end{{center}}
 
+\\section*{{Citing this}}
+
+If this analysis appears in published work, please cite the HamLeT package
+together with the reference given in the model card of the artifact used
+above. The package implements the Hamiltonian families and measurement logic
+of the published impurity-tomography and nanographene spin-chain work; a model
+you trained yourself is your own, but the method is theirs.
+
 \\vfill
 \\footnotesize
-Reference-model scores describe held-out simulated data unless the model card
-says otherwise. A measurement must satisfy the artifact contract before its
-predictions are physically interpretable.
+Energies are in meV. Scores quoted here describe held-out simulated data
+unless the model card says otherwise. A measurement must satisfy the artifact
+contract before its predictions are physically interpretable. The Hamiltonians,
+the correlator-to-dI/dV relation, and the metric definitions are set out in the
+package's theory notes.
 
 \\end{{document}}
 """

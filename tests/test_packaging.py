@@ -327,3 +327,77 @@ def test_gui_serves_only_from_its_static_directory():
     assert (STATIC_ROOT / "index.html").is_file()
     escaped = (STATIC_ROOT / "../../project.py").resolve()
     assert STATIC_ROOT not in escaped.parents
+
+
+def test_the_public_docs_do_not_point_at_files_that_are_not_published():
+    """A link that works locally and 404s on GitHub is worse than no link.
+
+    Most of this repository's documentation is untracked working notes, so a
+    reference from a published file into that set reads as a broken promise to
+    anyone who arrives from PyPI.
+    """
+    import re
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    tracked = set(
+        subprocess.run(
+            ["git", "ls-files"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.split()
+    )
+    broken = []
+    for name in sorted(f for f in tracked if f.endswith(".md")):
+        text = (root / name).read_text(encoding="utf-8")
+        for match in re.finditer(r"\[[^\]]*\]\(([^)]+)\)", text):
+            target = match.group(1).split("#")[0].strip()
+            if not target or target.startswith(("http://", "https://", "mailto:")):
+                continue
+            resolved = ((root / name).parent / target).resolve()
+            try:
+                relative = resolved.relative_to(root).as_posix()
+            except ValueError:
+                broken.append(f"{name} -> {target} (outside the repository)")
+                continue
+            published = relative in tracked or any(
+                item.startswith(relative + "/") for item in tracked
+            )
+            if not resolved.exists():
+                broken.append(f"{name} -> {target} (missing)")
+            elif not published:
+                broken.append(f"{name} -> {target} (not tracked by git)")
+    assert not broken, "published documentation links into unpublished files:\n" + "\n".join(broken)
+
+
+def test_the_theory_notes_are_published_and_linked():
+    """The physics a reader needs in order to read the numbers."""
+    root = Path(__file__).resolve().parents[1]
+    theory = root / "docs" / "theory.md"
+    assert theory.exists()
+    text = theory.read_text(encoding="utf-8")
+    # The three things it exists to state.
+    assert "\\hat{H}" in text, "the Hamiltonians"
+    assert "S_{ii}(\\omega)" in text, "the correlator"
+    assert "mathrm{d}I}{\\mathrm{d}V" in text, "how dI/dV follows from it"
+    assert "theory.md" in (root / "README.md").read_text(encoding="utf-8")
+
+
+def test_the_release_date_is_stated_once():
+    """Three files carry it, and a reader who finds two answers trusts none."""
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    citation = (root / "CITATION.cff").read_text(encoding="utf-8")
+
+    version = re.search(r"^version = \"([^\"]+)\"", (root / "pyproject.toml").read_text(
+        encoding="utf-8"), re.M).group(1)
+    entry = re.search(rf"^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})",
+                      changelog, re.M)
+    assert entry, f"CHANGELOG.md has no dated entry for {version}"
+
+    assert re.search(rf"^version: {re.escape(version)}$", citation, re.M), (
+        "CITATION.cff states a different version from pyproject.toml"
+    )
+    assert re.search(rf"^date-released: {entry.group(1)}$", citation, re.M), (
+        f"CITATION.cff and CHANGELOG.md disagree on the {version} release date"
+    )
