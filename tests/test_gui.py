@@ -455,9 +455,11 @@ def test_every_quote_carries_its_attribution():
     assert len(sources) >= 20
     for source in sources:
         # "Play, act.scene", or the Induction that The Shrew has instead of a
-        # first act. A reader who wants to check a line has to be able to.
+        # first act, or the Epilogue Prospero speaks. A reader who wants to
+        # check a line has to be able to. Play names carry their own curly
+        # apostrophe as an entity, and the histories carry a part number.
         assert re.fullmatch(
-            r"[A-Za-z' ]+, (?:[IVX]+\.[ivx]+|Induction [ivx]+)", source
+            r"[A-Za-z0-9&;' ]+, (?:[IVX]+\.[ivx]+|Induction [ivx]+|Epilogue)", source
         ), source
 
 
@@ -2920,3 +2922,27 @@ def test_a_coupling_number_is_never_drawn_on_top_of_its_error_bar():
     value_text = value_text[:value_text.index("</text>")]
     assert 'x="${plotRight + 14}"' in value_text
     assert "valueX" not in value_text, "the number must not follow the bar end again"
+
+
+def test_every_quote_names_a_line_and_a_place_in_a_play():
+    """The bank is generated, so it is worth checking it is well formed.
+
+    Each entry has to parse, carry a source of the form "Play, locus", and be
+    unique -- a duplicated line reads as the rotation having stuck.
+    """
+    quotes = (STATIC_ROOT / "quotes.js").read_text(encoding="utf-8")
+    bank = quotes[quotes.index("const SHAKESPEARE_QUOTES") : quotes.index("const showing")]
+
+    entries = re.findall(r"\{\s*(line:.*?)\n?\s*\},", bank, re.S)
+    assert len(entries) > 200, f"the bank has shrunk to {len(entries)} lines"
+
+    seen = set()
+    for block in entries:
+        line = re.search(r'line:\s*(".*?")(?=,\s*\n?\s*source:)', block, re.S)
+        source = re.search(r'source:\s*"(.*?)"', block)
+        assert line and source, f"unparseable entry: {block[:60]}"
+        text = "".join(re.findall(r'"(.*?)"', line.group(1), re.S))
+        assert text.strip(), "an empty line would render as empty quotation marks"
+        assert ", " in source.group(1), f"no act/scene in {source.group(1)!r}"
+        assert text.lower() not in seen, f"duplicated quote: {text}"
+        seen.add(text.lower())

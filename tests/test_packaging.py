@@ -430,3 +430,27 @@ def test_the_readme_has_no_relative_links():
                 if not candidate.exists():
                     missing.append(url)
     assert not missing, "README links to paths that do not exist: " + ", ".join(missing)
+
+
+def test_markdown_formulas_avoid_spacing_macros():
+    """GitHub prints \\, and \; in a formula as a comma and a semicolon.
+
+    They are thin spaces in LaTeX proper, and the PDF report uses them
+    correctly, but the markdown renderer on the page most readers see puts
+    the punctuation right into the Hamiltonian -- so the DM term read
+    "-, B_x sum" and the correlator came out strewn with commas.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    offenders = []
+    for document in root.glob("**/*.md"):
+        if any(part in {".git", "build", "dist", ".venv"} for part in document.parts):
+            continue
+        for number, line in enumerate(document.read_text(encoding="utf-8").splitlines(), 1):
+            if "$" in line and re.search(r"\\[,;!:]", line):
+                offenders.append(f"{document.relative_to(root)}:{number}")
+    assert not offenders, (
+        "spacing macros inside markdown math render as punctuation: "
+        + ", ".join(offenders)
+    )

@@ -37,7 +37,7 @@ All chains are open (no periodic boundary) with *N* sites, each carrying spin
 
 ### Bond-inhomogeneous Heisenberg
 
-$$\hat{H} = \sum_{i=1}^{N-1} J_i\, \hat{\mathbf{S}}_i \cdot \hat{\mathbf{S}}_{i+1}$$
+$$\hat{H} = \sum_{i=1}^{N-1} J_i \hat{\mathbf{S}}_i \cdot \hat{\mathbf{S}}_{i+1}$$
 
 One independent isotropic coupling per bond. The inferred quantity is the
 list *J*<sub>1</sub> … *J*<sub>*N*−1</sub>. This is the family of the
@@ -52,7 +52,7 @@ chain. With *d* ∈ {1, 2} this is the *J*<sub>1</sub>–*J*<sub>2</sub> model.
 
 ### XXZ with isotropic *J*<sub>2</sub>, *J*<sub>3</sub>
 
-$$\hat{H} = \sum_{i=1}^{N-1}\Big[ J_1^{xy}\big(\hat{S}^x_i \hat{S}^x_{i+1} + \hat{S}^y_i \hat{S}^y_{i+1}\big) + J^z\, \hat{S}^z_i \hat{S}^z_{i+1} \Big] + \sum_{d=2,3} J_d \sum_{i=1}^{N-d} \hat{\mathbf{S}}_i \cdot \hat{\mathbf{S}}_{i+d}$$
+$$\hat{H} = \sum_{i=1}^{N-1}\Big[ J_1^{xy}\big(\hat{S}^x_i \hat{S}^x_{i+1} + \hat{S}^y_i \hat{S}^y_{i+1}\big) + J^z \hat{S}^z_i \hat{S}^z_{i+1} \Big] + \sum_{d=2,3} J_d \sum_{i=1}^{N-d} \hat{\mathbf{S}}_i \cdot \hat{\mathbf{S}}_{i+d}$$
 
 Nearest neighbours are anisotropic — *J*<sub>1</sub><sup>*xy*</sup> and
 *J*<sup>*z*</sup> are independent — while the second- and third-neighbour
@@ -77,7 +77,7 @@ $$\sum_{a} \Big[ D^a_\parallel \big(\hat{S}^z_a\big)^2 + E^a\Big(\cos 2\varphi_a
 and an optional uniform transverse field, which is a second, independent way
 to break the same symmetry:
 
-$$-\, B_x \sum_{i=1}^{N} \hat{S}^x_i$$
+$$- B_x \sum_{i=1}^{N} \hat{S}^x_i$$
 
 The field is along *x*, transverse to the DM vector along *z*. A field along
 *z* would be invariant under the very rotation that removes a uniform
@@ -88,7 +88,7 @@ The field is along *x*, transverse to the DM vector along *z*. A field along
 **The observable.** HamLeT computes the on-site dynamical spin correlator at
 each site *i*, a sum over spin components with weights *w*<sub>α</sub>:
 
-$$S_{ii}(\omega) = \sum_{\alpha \in \{x,y,z\}} w_\alpha \, \big\langle \hat{S}^\alpha_i \,\big|\, \delta(\omega - \hat{H} + E_0) \,\big|\, \hat{S}^\alpha_i \big\rangle$$
+$$S_{ii}(\omega) = \sum_{\alpha \in \{x,y,z\}} w_\alpha \big\langle \hat{S}^\alpha_i \big| \delta(\omega - \hat{H} + E_0) \big| \hat{S}^\alpha_i \big\rangle$$
 
 evaluated with a Lorentzian broadening δ (`broadening_mev`). Two choices are
 exposed: `Sz` uses *w* = (0, 0, 1), and `total_spin` uses *w* = (1, 1, 1).
@@ -99,7 +99,7 @@ the residue guard in §6 checks.
 **The measurement model.** An STM at bias *V* collects every excitation below
 *eV*, so the simulated dI/dV is the correlator integrated over bias:
 
-$$\frac{\mathrm{d}I}{\mathrm{d}V}(V) \;\propto\; \int_0^{eV} S_{ii}(\omega)\, \mathrm{d}\omega$$
+$$\frac{\mathrm{d}I}{\mathrm{d}V}(V) \propto \int_0^{eV} S_{ii}(\omega) \mathrm{d}\omega$$
 
 implemented as a cumulative trapezoid. **Each peak in the correlator becomes a
 step in dI/dV** — which is the relationship the two left panels of the README
@@ -165,7 +165,7 @@ before the model may be applied to a measurement.
 | fidelity | \|Pearson *r*\| between predicted and true | 0 to 1, 1 perfect |
 | skill | 1 − MAE<sub>model</sub> / MAE<sub>baseline</sub> | 0 = no better than guessing the training mean |
 
-$$F = \frac{\big| \langle (J_{\text{pred}} - \langle J_{\text{pred}} \rangle)(J_{\text{true}} - \langle J_{\text{true}} \rangle) \rangle \big|}{\sigma_{\text{pred}}\, \sigma_{\text{true}}}$$
+$$F = \frac{\big| \langle (J_{\text{pred}} - \langle J_{\text{pred}} \rangle)(J_{\text{true}} - \langle J_{\text{true}} \rangle) \rangle \big|}{\sigma_{\text{pred}} \sigma_{\text{true}}}$$
 
 Each is reported overall **and per learned parameter**, because a model can
 recover one coupling well and another not at all, and an aggregate hides it.
