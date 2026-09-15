@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import shutil
 
 import numpy as np
 import pandas as pd
@@ -562,3 +563,90 @@ def test_systems_without_fixed_conditions_are_unaffected():
     assert _canonical_fixed_conditions({"system_type": "homogeneous_heisenberg"}) is None
     assert _canonical_fixed_conditions({"impurities": [], "transverse_field_mev": 0.0}) is None
     assert _canonical_fixed_conditions(None) is None
+
+
+def test_an_undeclared_system_does_not_exclude_another_family(
+    workflow_resources, tmp_path
+):
+    """A measurement does not say which family of Hamiltonian produced it.
+
+    The advisor used to default to ``inhomogeneous_heisenberg`` and then reject
+    every homogeneous model for a "system mismatch" the data had never
+    asserted -- while inference itself ran those same models happily. Whether a
+    chain is treated as homogeneous or bond-inhomogeneous is a modelling
+    choice: homogeneous is the special case where every bond is equal, and both
+    are legitimate for one set of spectra.
+    """
+    _, _, artifact, experiment = workflow_resources
+    homogeneous = tmp_path / "homogeneous-global"
+    shutil.copytree(artifact, homogeneous)
+    manifest = json.loads((artifact / "manifest.json").read_text())
+    manifest.update(
+        {"system_type": "homogeneous_heisenberg", "view": "global", "n_sites": 5}
+    )
+    (homogeneous / "manifest.json").write_text(json.dumps(manifest))
+
+    decision = advise_experiment(
+        experiment, manual_cutoff_mev=50.0, artifact_roots=[homogeneous]
+    )
+    assert decision.system_type is None, "a measurement does not fix the family"
+    assert decision.view is None
+    assert decision.artifact_assessments[0].compatible, (
+        decision.artifact_assessments[0].reasons
+    )
+    assert decision.action == "use_existing_model"
+
+    # The reports must survive an unconstrained family rather than crash on it.
+    decision.save_json(tmp_path / "decision.json")
+    decision.save_html(tmp_path / "decision.html")
+
+    # Naming a family still narrows the search, for a caller that knows one.
+    constrained = advise_experiment(
+        experiment,
+        manual_cutoff_mev=50.0,
+        artifact_roots=[homogeneous],
+        system_type="inhomogeneous_heisenberg",
+    )
+    assert not constrained.artifact_assessments[0].compatible
+    assert any(
+        "system mismatch" in reason
+        for reason in constrained.artifact_assessments[0].reasons
+    )
+
+
+def test_a_model_that_fixes_conditions_is_still_refused_without_them(
+    workflow_resources, tmp_path
+):
+    """Dropping the family assumption must not drop the physical requirement.
+
+    An impurity model asserts impurities at named sites. That is a fact about
+    the sample, not a modelling choice, so it stays refused until the sample is
+    declared to have them -- which is what separates it from the homogeneous
+    model that is now offered.
+    """
+    _, _, artifact, experiment = workflow_resources
+    impurity = tmp_path / "impurity-global"
+    shutil.copytree(artifact, impurity)
+    manifest = json.loads((artifact / "manifest.json").read_text())
+    manifest.update(
+        {
+            "system_type": "homogeneous_xxz_j1j2j3_dmi_impurity",
+            "view": "global",
+            "n_sites": 5,
+        }
+    )
+    manifest.setdefault("dataset_metadata", {})["generation_recipe"] = {
+        "impurities": [{"site": 1, "site_spin": 1.0, "axial_d_mev": 0.0,
+                        "transverse_e_mev": 2.0, "in_plane_angle_deg": 0.0}],
+        "transverse_field_mev": 0.0,
+    }
+    (impurity / "manifest.json").write_text(json.dumps(manifest))
+
+    decision = advise_experiment(
+        experiment, manual_cutoff_mev=50.0, artifact_roots=[impurity]
+    )
+    assert not decision.artifact_assessments[0].compatible
+    assert any(
+        "fixes physical conditions" in reason
+        for reason in decision.artifact_assessments[0].reasons
+    )

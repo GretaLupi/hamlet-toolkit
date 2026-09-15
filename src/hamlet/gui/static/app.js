@@ -515,8 +515,12 @@ el("reuse-go").addEventListener("click", async () => {
         <div class="verdict ${klass}">${esc(d.action.replace(/_/g, " "))}</div>
         <p>${esc(d.summary)}</p>
         <table>
-          <tr><th>System</th><td>${esc(d.system_type)}</td></tr>
-          <tr><th>View</th><td>${esc(d.view)}</td></tr>
+          <tr><th>System</th><td>${d.system_type
+            ? esc(d.system_type)
+            : "<span class='hint'>not fixed by the measurement &mdash; every family is considered</span>"}</td></tr>
+          <tr><th>View</th><td>${d.view
+            ? esc(d.view)
+            : "<span class='hint'>each model is checked against the view it was trained for</span>"}</td></tr>
           <tr><th>Sites</th><td class="num">${d.n_sites}</td></tr>
           <tr><th>Chosen cutoff</th><td class="num">${num(d.manual_cutoff_mev, 1)} meV</td></tr>
         </table>
@@ -528,13 +532,19 @@ el("reuse-go").addEventListener("click", async () => {
       <div class="box">
         <h3>Model compatibility</h3>
         ${d.artifacts.length ? `<table>
-          <tr><th>Model</th><th>Usable</th><th>Reason</th></tr>
+          <tr><th>Model</th><th>Treats the chain as</th><th>Usable</th><th>Reason</th></tr>
           ${d.artifacts.map((a) => `<tr>
-            <td><code>${esc(a.path.split("/").pop())}</code></td>
+            <td><code>${esc(a.label || a.path.split("/").pop())}</code></td>
+            <td>${a.system_type ? `${esc(a.system_type)}<br><span class="hint">${esc((a.view || "").replace(/_/g, " "))}</span>` : "—"}</td>
             <td>${a.compatible ? "<b style='color:var(--good)'>yes</b>" : "no"}</td>
             <td>${a.reasons.length ? a.reasons.map(esc).join("<br>") : "—"}</td>
           </tr>`).join("")}
-        </table>` : "<p class='hint'>No models were found to compare against.</p>"}
+        </table>
+        <p class="hint">Which family to assume is a modelling choice, not something
+          the spectra decide: a homogeneous model is the special case where every
+          bond is equal. What a model genuinely requires of the sample &mdash;
+          impurities at given sites, a transverse field &mdash; is listed as a
+          reason above.</p>` : "<p class='hint'>No models were found to compare against.</p>"}
       </div>
       ${usable.length ? `<div class="box"><b>Next:</b> open <em>Get my couplings</em>.
         The measurement is already selected.</div>` : ""}

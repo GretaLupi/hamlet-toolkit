@@ -454,3 +454,36 @@ def test_markdown_formulas_avoid_spacing_macros():
         "spacing macros inside markdown math render as punctuation: "
         + ", ".join(offenders)
     )
+
+
+def test_every_referenced_figure_exists_in_the_repository():
+    """A figure is referenced by raw URL, which no link check would catch.
+
+    The README and the docs point at raw.githubusercontent.com so the images
+    render on PyPI as well as on GitHub. Nothing in that URL is verified at
+    build time, so a renamed or forgotten file becomes a broken image on the
+    page most readers see first.
+    """
+    import re
+
+    root = Path(__file__).resolve().parents[1]
+    prefix = "https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/"
+    missing = []
+    referenced = set()
+    for document in [root / "README.md", *sorted((root / "docs").glob("*.md"))]:
+        text = document.read_text(encoding="utf-8")
+        for url in re.findall(rf'src="{re.escape(prefix)}([^"]+)"', text):
+            referenced.add(url)
+            if not (root / url).exists():
+                missing.append(f"{document.name} -> {url}")
+    assert not missing, "referenced figures that do not exist: " + ", ".join(missing)
+    assert referenced, "no figures are referenced at all"
+
+    # And every figure that ships is actually used, so the package does not
+    # carry megabytes of screenshots nothing points at.
+    unused = [
+        str(path.relative_to(root))
+        for path in sorted((root / "assets" / "figures").glob("*.png"))
+        if str(path.relative_to(root)) not in referenced
+    ]
+    assert not unused, "figures in assets that nothing references: " + ", ".join(unused)

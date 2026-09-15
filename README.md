@@ -78,6 +78,33 @@ The local browser interface guides the full workflow:
 It binds to localhost and does not upload measurements elsewhere. Long jobs run
 in the background. Close it with the **Stop server** button or `Ctrl+C`.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/interface-overview.png" alt="The HamLeT interface: six cards, each naming what it needs and how long it takes" width="88%">
+</p>
+
+Every page says what it needs and how long it will take before you start, so a
+run that costs hours is never a surprise.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/interface-model-match.png" alt="The compatibility check: each model with the family it assumes, whether it is usable, and the reason it was refused" width="88%">
+</p>
+
+**A model is refused with a reason, not silently applied.** Each one is listed
+with the family of Hamiltonian it assumes and what it needs of the sample: the
+wrong bias cutoff, a chain length it was never trained on, or — for a model
+trained with impurities at specific sites — a sample that has not been declared
+to have them. Which family to assume is yours to choose, since spectra do not
+decide it; what a model requires of the sample is not.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/interface-results.png" alt="Inferred couplings for an eight-site chain: bond values with model spread, the chain diagram, and the coupling table" width="88%">
+</p>
+
+The couplings come back with the spread across ensemble members, a table you
+can export, and the analysis window and chain length the model was applied
+under. Read that spread as disagreement between trained members, not as a
+calibrated error bar — [the theory notes](https://github.com/GretaLupi/hamlet-toolkit/blob/main/docs/theory.md#5-what-a-trained-models-numbers-mean) say why.
+
 The *Start here* page lists every folder it writes to, and `hamlet where`
 prints the same layout from the terminal: `results/` beside a source checkout,
 `~/.hamlet/workspace/` for an installed package, or `HAMLET_WORKSPACE`.

@@ -40,8 +40,10 @@ class WorkflowDecision:
     summary: str
     experiment_source: str
     manual_cutoff_mev: float
-    system_type: str
-    view: str
+    # None where the measurement declares no family or view: the reuse check
+    # then constrains neither, and reports what each model itself requires.
+    system_type: str | None
+    view: str | None
     n_sites: int
     bias_min_mev: float
     bias_max_mev: float
@@ -88,6 +90,12 @@ class WorkflowDecision:
         artifact_rows = _assessment_rows(self.artifact_assessments)
         dataset_rows = _assessment_rows(self.dataset_assessments)
         checks = "".join(f"<li>{html.escape(item)}</li>" for item in self.experiment_checks)
+        shown_system = html.escape(
+            self.system_type or "not declared \u2014 every family considered"
+        )
+        shown_view = html.escape(
+            self.view or "not declared \u2014 each model checked against its own"
+        )
         steps = "".join(f"<li>{html.escape(item)}</li>" for item in self.next_steps)
         document = f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>HamLeT workflow decision</title>
@@ -98,7 +106,7 @@ code{{background:#eef;padding:.1rem .25rem}}small{{color:#586873}}</style></head
 <h1>HamLeT workflow decision</h1><p class="{status_class}">{html.escape(self.action)}</p>
 <p>{html.escape(self.summary)}</p>
 <p>Manual cutoff: <strong>{self.manual_cutoff_mev:g} meV</strong>; system:
-<code>{html.escape(self.system_type)}</code>; view: <code>{html.escape(self.view)}</code>.</p>
+<code>{shown_system}</code>; view: <code>{shown_view}</code>.</p>
 <p>Experiment: {self.n_sites} sites, {self.bias_min_mev:g}–{self.bias_max_mev:g} meV.</p>
 <h2>Experiment checks</h2><ul>{checks}</ul>
 <h2>Artifact assessments</h2>{_assessment_table(artifact_rows)}
@@ -148,11 +156,19 @@ def advise_experiment(
         raise ValueError(
             f"requested view {view!r} conflicts with experiment manifest view {declared_view!r}"
         )
-    system_type = system_type or declared_system or "inhomogeneous_heisenberg"
-    view = view or declared_view or (
-        "global" if system_type == "homogeneous_heisenberg" else "local_bonds"
-    )
-    if view not in {"local_bonds", "global"}:
+    # A measurement does not say which family of Hamiltonian produced it.
+    # Whether an eight-site chain is treated as homogeneous or as
+    # bond-inhomogeneous is a modelling choice, and both are legitimate for the
+    # same spectra -- homogeneous is the special case where every bond is
+    # equal. Defaulting to one silently rejected every model from the other
+    # family for a "system mismatch" the measurement had never asserted, while
+    # inference itself happily ran those models. Left unset it stays
+    # unconstrained, and each artifact is judged on its own terms; what a model
+    # genuinely requires of the sample -- impurities at given sites, a
+    # transverse field -- is enforced separately, through fixed conditions.
+    system_type = system_type or declared_system
+    view = view or declared_view
+    if view is not None and view not in {"local_bonds", "global"}:
         raise ValueError("view must be local_bonds or global")
     # Structural failures should become an actionable workflow decision rather
     # than an importer-shaped exception. Artifact preprocessing still requires
@@ -168,7 +184,12 @@ def advise_experiment(
         experiment_valid = False
     else:
         checks.append("PASS: canonical bias axis is in meV")
-    if view == "local_bonds" and n_sites < 3:
+    if view is None:
+        checks.append(
+            f"PASS: the measurement has {n_sites} sites; each model is checked "
+            "against the view it was trained for"
+        )
+    elif view == "local_bonds" and n_sites < 3:
         checks.append("FAIL: local-bond inference requires at least three sites")
         experiment_valid = False
     else:
@@ -391,8 +412,8 @@ def _assess_artifact(
     path: Path,
     measurement: Measurement,
     cutoff: float,
-    system_type: str,
-    view: str,
+    system_type: str | None,
+    view: str | None,
     allow_development: bool,
     max_validation_mae: float | None,
     max_test_mae: float | None,
@@ -410,13 +431,22 @@ def _assess_artifact(
         return ResourceAssessment(path, "artifact", False, (f"cannot read manifest: {exc}",))
     if manifest.get("artifact_schema_version") != ARTIFACT_SCHEMA_VERSION:
         reasons.append("unsupported artifact schema")
-    if manifest.get("system_type") != system_type:
+    if system_type is not None and manifest.get("system_type") != system_type:
         reasons.append(
             f"system mismatch: artifact={manifest.get('system_type')!r}, requested={system_type!r}"
         )
-    if manifest.get("view") != view:
+    if view is not None and manifest.get("view") != view:
         reasons.append(f"view mismatch: artifact={manifest.get('view')!r}, requested={view!r}")
-    if view == "global":
+    # With no view demanded, the artifact's own view decides what the
+    # measurement has to satisfy: a global model is tied to one chain length, a
+    # local-bond model needs a window's worth of sites.
+    effective_view = view if view is not None else manifest.get("view")
+    if effective_view == "local_bonds" and int(measurement.shape[0]) < 3:
+        reasons.append(
+            f"local-bond model needs at least three measured sites, "
+            f"experiment={int(measurement.shape[0])}"
+        )
+    if effective_view == "global":
         try:
             trained_sites = int(manifest["n_sites"])
         except (KeyError, TypeError, ValueError):
@@ -552,8 +582,8 @@ def _assess_dataset(
     path: Path,
     measurement: Measurement,
     cutoff: float,
-    system_type: str,
-    view: str,
+    system_type: str | None,
+    view: str | None,
 ) -> ResourceAssessment:
     reasons: list[str] = []
     warnings: list[str] = []
@@ -561,7 +591,7 @@ def _assess_dataset(
         dataset = SpectroscopyDataset.load(path)
     except Exception as exc:
         return ResourceAssessment(path, "dataset", False, (f"cannot load dataset: {exc}",))
-    if dataset.system_type != system_type:
+    if system_type is not None and dataset.system_type != system_type:
         reasons.append(
             f"system mismatch: dataset={dataset.system_type!r}, requested={system_type!r}"
         )
@@ -570,13 +600,25 @@ def _assess_dataset(
             f"dataset covers {float(dataset.bias_mev.min()):g}–"
             f"{float(dataset.bias_mev.max()):g} meV, not 0–{cutoff:g} meV"
         )
+    supports_local = (
+        dataset.targets_mev.shape[1] == dataset.n_sites - 1 and dataset.n_sites >= 3
+    )
+    supports_global = dataset.n_sites == measurement.shape[0]
     if view == "local_bonds":
-        if dataset.targets_mev.shape[1] != dataset.n_sites - 1 or dataset.n_sites < 3:
+        if not supports_local:
             reasons.append("dataset does not satisfy the local one-target-per-bond contract")
-    elif dataset.n_sites != measurement.shape[0]:
+    elif view == "global":
+        if not supports_global:
+            reasons.append(
+                f"global view requires the experiment and dataset to have the same site count "
+                f"({measurement.shape[0]} vs {dataset.n_sites})"
+            )
+    # No view demanded: the dataset is usable if it can train either kind.
+    elif not supports_local and not supports_global:
         reasons.append(
-            f"global view requires the experiment and dataset to have the same site count "
-            f"({measurement.shape[0]} vs {dataset.n_sites})"
+            f"dataset has {dataset.n_sites} sites with {dataset.targets_mev.shape[1]} targets, "
+            f"which trains neither a local-bond model nor a global model for a "
+            f"{measurement.shape[0]}-site measurement"
         )
     protocol = dataset.metadata.get("protocol", {})
     quantity = protocol.get("output_quantity") if isinstance(protocol, dict) else None

@@ -2971,3 +2971,30 @@ def test_a_chosen_measurement_is_named_by_what_was_picked():
     assert "label: `${stored.folderName}/`" in script
     # And carrying a measurement to the next page carries its name with it.
     assert "source.value === value ? source.label : null" in script
+
+
+def test_the_compatibility_table_names_models_readably(tmp_path, monkeypatch):
+    """Every model trained here lives in a directory called "artifact".
+
+    Naming each row by its folder listed several rows as "artifact", which
+    tells the reader nothing about which model was refused and why. The reuse
+    check reuses the label the models page already builds from the project
+    name the user typed.
+    """
+    workspace = tmp_path / "workspace"
+    (workspace / "my_project" / "run-abc" / "artifact").mkdir(parents=True)
+    monkeypatch.setattr(api, "_workspace_root", lambda: workspace)
+
+    family = api._artifact_family(workspace / "my_project" / "run-abc" / "artifact")
+    assert family["label"] == "my_project", "a row must not be called 'artifact'"
+
+    # A published model keeps its own directory name, which is its identity.
+    published = api._published_root()
+    if published.exists():
+        for directory in sorted(published.glob("*/manifest.json")):
+            assert api._artifact_family(directory.parent)["label"] == directory.parent.name
+            break
+
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert "a.label || a.path.split" in script
+    assert "Treats the chain as" in script, "the family each model assumes has to be shown"

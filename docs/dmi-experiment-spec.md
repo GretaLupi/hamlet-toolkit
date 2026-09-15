@@ -110,6 +110,20 @@ separate that pair cannot yield `D_z`, whatever model is trained on it.
 
 Two simulations per candidate, against thousands of chains for a training set.
 
+The **DMI sample design** page in `hamlet gui` does this without a
+configuration file. Lay out the chain, place candidate impurities on it, and
+each arrangement is judged as you build it:
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/interface-dmi-design.png" alt="Two candidate arrangements: one impurity, refused because the gauge rotation absorbs it; two impurities at distinct sites, accepted" width="92%">
+</p>
+
+The verdict under each card is the symmetry argument of §2 and §3, applied
+before anything is simulated: one impurity is refused because a global rotation
+about *z* undoes the single angle it fixes, while two at distinct sites are
+turned by different angles and cannot both be undone. The spectral comparison
+follows for the arrangements that survive it.
+
 ### From a configuration file
 
 No Python needed. Declare the chain, the measurement, and the candidates:

@@ -891,6 +891,28 @@ def inspect_experiment(path: str | Path, *, max_points: int = 400) -> dict[str, 
     }
 
 
+def _artifact_family(path: Path) -> dict[str, Any]:
+    """How a model should be named and what it assumes, for the reuse check.
+
+    Every model trained through the interface lives in a directory called
+    "artifact", so naming a row by its folder listed several of them as
+    "artifact" and told the reader nothing. The models page already solves
+    this; the same label is used here.
+    """
+    directory = Path(path)
+    published = directory.parent == _published_root()
+    label = directory.name if published else _workspace_label(directory)
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"label": label, "system_type": None, "view": None}
+    return {
+        "label": label,
+        "system_type": manifest.get("system_type"),
+        "view": manifest.get("view"),
+    }
+
+
 def advise_for_experiment(
     path: str | Path,
     cutoff_mev: float,
@@ -936,6 +958,10 @@ def advise_for_experiment(
                 "path": str(item.path),
                 "compatible": bool(item.compatible),
                 "reasons": list(item.reasons),
+                # The family and view a model was trained for. The measurement
+                # does not fix either, so the page shows what each model
+                # assumes rather than pretending the data chose one.
+                **_artifact_family(item.path),
             }
             for item in decision.artifact_assessments
         ],
