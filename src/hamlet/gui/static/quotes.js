@@ -97,7 +97,11 @@ const SHAKESPEARE_QUOTES = [
   { line: "I am but mad north-north-west.", source: "Hamlet, II.ii" },
   { line: "Purpose is but the slave to memory.", source: "Hamlet, III.ii" },
   { line: "Our wills and fates do so contrary run.", source: "Hamlet, III.ii" },
-  { line: "Use every man after his desert, and who should scape whipping.", source: "Hamlet, II.ii" },
+  {
+    line: "Use every man after his desert, and who should &rsquo;scape "
+      + "whipping?",
+    source: "Hamlet, II.ii",
+  },
   { line: "Stand and unfold yourself.", source: "Hamlet, I.i" },
   { line: "Not a mouse stirring.", source: "Hamlet, I.i" },
   { line: "Let me not burst in ignorance!", source: "Hamlet, I.iv" },
@@ -119,8 +123,9 @@ const SHAKESPEARE_QUOTES = [
     source: "As You Like It, V.i",
   },
   {
-    line: "Finds tongues in trees, books in the running brooks, sermons in "
-      + "stones, and good in everything.",
+    line: "And this our life, exempt from public haunt, finds tongues in "
+      + "trees, books in the running brooks, sermons in stones, and good "
+      + "in everything.",
     source: "As You Like It, II.i",
   },
   { line: "Sweet are the uses of adversity.", source: "As You Like It, II.i" },
@@ -187,7 +192,11 @@ const SHAKESPEARE_QUOTES = [
   { line: "O, reason not the need!", source: "King Lear, II.iv" },
   { line: "Mend your speech a little, lest you may mar your fortunes.", source: "King Lear, I.i" },
   { line: "The wheel is come full circle.", source: "King Lear, V.iii" },
-  { line: "The worst is not so long as we can say This is the worst.", source: "King Lear, IV.i" },
+  {
+    line: "The worst is not so long as we can say &lsquo;This is the "
+      + "worst.&rsquo;",
+    source: "King Lear, IV.i",
+  },
   {
     line: "Men must endure their going hence, even as their coming hither.",
     source: "King Lear, V.ii",
