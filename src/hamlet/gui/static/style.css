@@ -232,10 +232,11 @@ svg.spectra.compact { min-height: 205px; }
 .plot-channel-switch small { display: block; margin-top: 1px; font-size: 10px; font-weight: 500; }
 .plot-grid { stroke: var(--line); stroke-width: 1; }
 .plot-axis { stroke: var(--muted); stroke-width: 1.2; }
-.plot-tick, .plot-axis-label, .coupling-label, .coupling-value {
+.plot-tick, .plot-axis-label, .coupling-label, .coupling-value, .plot-column-heading {
   fill: var(--muted); font: 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 .plot-axis-label { font-weight: 600; }
+.plot-column-heading { font-size: 10px; font-weight: 600; letter-spacing: .06em; }
 .outside-window { fill: var(--muted); opacity: .09; }
 .cutoff-line { stroke: var(--warn); stroke-width: 2; stroke-dasharray: 5 4; }
 .cutoff-label { fill: var(--warn); font: 700 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }

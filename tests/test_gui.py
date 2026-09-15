@@ -2888,3 +2888,35 @@ def test_the_page_asks_before_it_lets_such_a_model_run():
     assert "renderAnalysisConditions" in script
     assert "an-confirm-conditions" in script
     assert "confirm_conditions:" in script
+
+
+def test_a_coupling_number_is_never_drawn_on_top_of_its_error_bar():
+    """The numbers used to sit at the end of the bar, where the whisker is.
+
+    A whisker reaches value + uncertainty, which is further right than the
+    bar end whenever there is any spread at all, so the two collided every
+    time. The fix is structural rather than a nudge: the axis stops at
+    ``plotRight`` and the numbers start past it, in a column of their own.
+    Since ``x()`` maps the whole data range onto ``[labelWidth, plotRight]``
+    and the range is built to contain every whisker end, no whisker can
+    reach the column.
+    """
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    chart = script[script.index("function parameterCouplingChart"):
+                   script.index("function couplingChart")]
+
+    # The drawing area ends short of the right edge, by the width of the column.
+    assert "const plotRight = w - right - column;" in chart
+    assert "(plotRight - labelWidth)" in chart, "x() must map onto the plot area"
+
+    # Every whisker is placed by x(), so it lands inside that area.
+    for end in ("errorLo = x(row.value - row.uncertainty)", "errorHi = x(row.value + row.uncertainty)"):
+        assert end in chart
+    assert "row.value - row.uncertainty, row.value + row.uncertainty" in chart, \
+        "the axis range has to contain the whiskers, or one could overhang"
+
+    # And the number is anchored to the column, not to the bar it labels.
+    value_text = chart[chart.index('<text class="coupling-value"'):]
+    value_text = value_text[:value_text.index("</text>")]
+    assert 'x="${plotRight + 14}"' in value_text
+    assert "valueX" not in value_text, "the number must not follow the bar end again"

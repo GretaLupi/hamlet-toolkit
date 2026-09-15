@@ -729,7 +729,8 @@ function couplingRows(table) {
     left: leftIndex >= 0 ? Number(row[leftIndex]) : null,
     right: rightIndex >= 0 ? Number(row[rightIndex]) : null,
     value: Number(row[valueIndex]),
-    uncertainty: uncertaintyIndex >= 0 ? Math.abs(Number(row[uncertaintyIndex])) : 0,
+    uncertainty: uncertaintyIndex >= 0 && Number.isFinite(Number(row[uncertaintyIndex]))
+      ? Math.abs(Number(row[uncertaintyIndex])) : 0,
   })).filter((row) => Number.isFinite(row.value));
 }
 
@@ -822,9 +823,19 @@ function parameterCouplingChart(rows) {
   const bounds = rows.flatMap((row) => [row.value - row.uncertainty, row.value + row.uncertainty, 0]);
   let lo = Math.min(...bounds), hi = Math.max(...bounds);
   if (lo === hi) { lo -= 1; hi += 1; }
-  const w = 880, labelWidth = 118, right = 32, top = 28, rowHeight = 35, bottom = 38;
+  const breathing = (hi - lo) * .05;
+  lo -= breathing; hi += breathing;
+  const spread = rows.some((row) => row.uncertainty > 0);
+  const readouts = rows.map((row) => spread
+    ? `${row.value.toFixed(2)} ± ${row.uncertainty.toFixed(2)}`
+    : row.value.toFixed(2));
+  const heading = spread ? "ESTIMATE ± SPREAD" : "ESTIMATE";
+  // The numbers live in their own column past the longest whisker, never on top of one.
+  const column = 14 + 7.3 * Math.max(heading.length, ...readouts.map((text) => text.length));
+  const w = 880, labelWidth = 118, right = 24, top = 36, rowHeight = 38, bottom = 38;
+  const plotRight = w - right - column;
   const h = top + rows.length * rowHeight + bottom;
-  const x = (value) => labelWidth + ((value - lo) / (hi - lo)) * (w - labelWidth - right);
+  const x = (value) => labelWidth + ((value - lo) / (hi - lo)) * (plotRight - labelWidth);
   const zero = x(0);
   const ticks = [0, .25, .5, .75, 1].map((fraction) => {
     const value = lo + fraction * (hi - lo), px = x(value);
@@ -832,19 +843,24 @@ function parameterCouplingChart(rows) {
       <text class="plot-tick" x="${px}" y="${h - 13}" text-anchor="middle">${value.toFixed(1)}</text>`;
   }).join("");
   const bars = rows.map((row, index) => {
-    const y = top + index * rowHeight + 6;
+    const y = top + index * rowHeight + 8;
     const valueX = x(row.value), errorLo = x(row.value - row.uncertainty), errorHi = x(row.value + row.uncertainty);
-    return `<text class="coupling-label" x="${labelWidth - 10}" y="${y + 13}" text-anchor="end">${esc(row.label)}</text>
+    return `<text class="coupling-label" x="${labelWidth - 12}" y="${y + 13}" text-anchor="end">${esc(row.label)}</text>
       <rect class="coupling-bar" x="${Math.min(zero, valueX)}" y="${y}" width="${Math.max(2, Math.abs(valueX - zero))}" height="18" rx="4"/>
       ${row.uncertainty ? `<line class="error-bar" x1="${errorLo}" x2="${errorHi}" y1="${y + 9}" y2="${y + 9}"/>
-        <line class="error-bar" x1="${errorLo}" x2="${errorLo}" y1="${y + 4}" y2="${y + 14}"/>
-        <line class="error-bar" x1="${errorHi}" x2="${errorHi}" y1="${y + 4}" y2="${y + 14}"/>` : ""}
-      <text class="coupling-value" x="${Math.min(w - right, Math.max(labelWidth, valueX))}" y="${y + 14}" dx="${valueX >= zero ? 7 : -7}" text-anchor="${valueX >= zero ? "start" : "end"}">${row.value.toFixed(2)}</text>`;
+        <line class="error-bar" x1="${errorLo}" x2="${errorLo}" y1="${y + 3}" y2="${y + 15}"/>
+        <line class="error-bar" x1="${errorHi}" x2="${errorHi}" y1="${y + 3}" y2="${y + 15}"/>` : ""}
+      <text class="coupling-value" x="${plotRight + 14}" y="${y + 14}" text-anchor="start">${esc(readouts[index])}</text>`;
   }).join("");
   return `<div class="coupling-chart"><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Inferred couplings in meV">
     ${ticks}<line class="zero-line" x1="${zero}" x2="${zero}" y1="${top - 8}" y2="${h - bottom}"/>${bars}
-    <text class="plot-axis-label" x="${(labelWidth + w - right) / 2}" y="${h - 1}" text-anchor="middle">Coupling [meV]</text>
-  </svg></div>`;
+    <line class="plot-grid" x1="${plotRight + 4}" x2="${plotRight + 4}" y1="${top - 8}" y2="${h - bottom}"/>
+    <text class="plot-column-heading" x="${plotRight + 14}" y="${top - 14}">${heading}</text>
+    <text class="plot-axis-label" x="${(labelWidth + plotRight) / 2}" y="${h - 1}" text-anchor="middle">Coupling [meV]</text>
+  </svg>
+  <p class="chart-explanation">Bars run from zero to the estimate${spread
+    ? "; whiskers span one spread either side of it. The numbers repeat in the right-hand column, clear of the whiskers."
+    : ". The numbers repeat in the right-hand column."}</p></div>`;
 }
 
 function couplingChart(table) {
