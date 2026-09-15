@@ -567,26 +567,35 @@ card only helps the Keras training that follows, which takes minutes.
 
 ## Moving a trained model between machines
 
-A model you train on a cluster and apply on a laptop has to survive the trip.
-The scikit-learn artifacts (ridge, random forest) are portable. The Keras ones
-are **not portable backwards**: a `.keras` file written by a newer Keras cannot
-be read by an older one, and what surfaces is a page of nested
-"could not be deserialized properly" blocks ending in something like
-`GlorotUniform.__init__() got an unexpected keyword argument 'input_axes'`.
+**Train on the cluster, use the model here. That works, and it does not depend
+on the two machines having the same library versions.**
 
-HamLeT records the writing version in the artifact manifest and reads it back
-out of the file itself for older artifacts, so the failure is reported as what
-it is:
+The scikit-learn artifacts (ridge, random forest) are portable as they are. A
+Keras `.keras` file is not: it is a zip of metadata, an architecture
+description, and the weights, and the architecture description is tied to the
+Keras version that wrote it. A file saved by a newer Keras cannot be read by an
+older one, which is the ordinary situation when a cluster is newer than a
+laptop.
 
-> `model_seed_42.keras` was saved by Keras 3.15.1 and this environment has
-> Keras 3.11.3. A Keras file is not portable to an older Keras, so it cannot be
-> read here. To use it: `pip install "keras>=3.15.1"` in this environment, or
-> retrain the model here.
+Only that middle part is fragile, and HamLeT wrote the architecture in the
+first place. So when Keras refuses its own file, HamLeT rebuilds the same
+network from the options recorded in the artifact manifest and loads the
+weights into it — weights are plain arrays and belong to no version. The run
+says so and continues:
 
-Upgrading is usually the right answer — TensorFlow does not pin an upper bound
-on Keras — and the alternative is retraining in the environment you want to use
-the model in. The simplest way to avoid it entirely is to keep the same Keras
-version on both machines.
+> `model_seed_42.keras` was written by a different Keras, so it was rebuilt
+> from the manifest and its weights loaded
+
+The reconstruction is the same network, not an approximation: the test suite
+trains a model, then checks that predictions from the rebuilt model are
+identical to the original's, for both the MLP and the CNN.
+
+The optimizer state is not restored, which matters only if you meant to resume
+training rather than make predictions. And if the rebuild cannot be done — an
+artifact from a future version with options this one does not know — the error
+names both Keras versions and suggests `pip install "keras>=<the writing
+version>"`, which is compatible, since TensorFlow sets no upper bound on
+Keras.
 
 ## Which solver simulates each chain
 

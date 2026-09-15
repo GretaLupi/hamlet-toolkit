@@ -221,12 +221,27 @@ class TrainingRun:
                     import keras
                 except ImportError as exc:  # pragma: no cover
                     raise ImportError("loading this artifact requires the ml dependency") from exc
+                stored = source / record["file"]
                 try:
-                    models.append(keras.saving.load_model(source / record["file"]))
+                    models.append(keras.saving.load_model(stored))
                 except Exception as exc:
-                    raise _keras_load_error(
-                        record, keras.__version__, exc, source / record["file"]
-                    ) from exc
+                    # Keras could not read its own file, which for a model
+                    # trained on a cluster and applied on a laptop means one
+                    # thing: a newer Keras wrote it. Only the architecture
+                    # description is version-fragile, and this package wrote
+                    # that architecture in the first place -- so rebuild it
+                    # from the manifest and take only the weights, which are
+                    # plain arrays and have no version at all.
+                    try:
+                        models.append(_rebuild_keras_model(manifest, record, stored))
+                    except Exception as rebuild_failure:
+                        raise _keras_load_error(
+                            record, keras.__version__, exc, stored, rebuild_failure
+                        ) from exc
+                    print(
+                        f"{record['file']} was written by a different Keras, so it "
+                        "was rebuilt from the manifest and its weights loaded"
+                    )
             elif record["format"] == "joblib":
                 import joblib
 
@@ -273,6 +288,49 @@ class TrainingRun:
         )
 
 
+def _rebuild_keras_model(
+    manifest: Mapping[str, Any], record: Mapping[str, Any], stored: Path
+) -> Any:
+    """Reconstruct a stored Keras model without reading its architecture JSON.
+
+    A ``.keras`` file is a zip of three things: metadata, a config describing
+    the architecture, and the weights. Only the config is tied to a Keras
+    version. This package built that architecture from the options in the
+    manifest, so it can build the identical one again and load the weights
+    into it -- and weights are arrays, portable to any version.
+
+    The optimizer state is not restored, which matters only for resuming
+    training. An artifact is loaded here to make predictions.
+    """
+    import tempfile
+    import zipfile
+
+    from ..models.supervised import create_supervised_model
+
+    options = dict(manifest.get("model_options") or {})
+    points = int((manifest.get("preprocessing") or {})["output_points"])
+    # The same rule training used: a local-window model sees three sites,
+    # a global one sees the whole chain.
+    window_sites = 3 if manifest.get("view") == "local_bonds" else int(manifest["n_sites"])
+    model_name = str(manifest["model_name"])
+    if model_name == "keras_cnn":
+        options["spectrum_shape"] = (window_sites, points)
+    model = create_supervised_model(
+        model_name,
+        input_dim=window_sites * points,
+        output_dim=len(manifest["target_names"]),
+        **options,
+    )
+    with zipfile.ZipFile(stored) as archive:
+        weights = archive.read("model.weights.h5")
+    with tempfile.TemporaryDirectory() as directory:
+        # The suffix is load_weights' way of recognising the format.
+        extracted = Path(directory) / "model.weights.h5"
+        extracted.write_bytes(weights)
+        model.load_weights(extracted)
+    return model
+
+
 def _keras_version_of(path: Path) -> str:
     """The Keras that wrote a .keras file, read from the file itself.
 
@@ -292,7 +350,11 @@ def _keras_version_of(path: Path) -> str:
 
 
 def _keras_load_error(
-    record: Mapping[str, Any], running_version: str, cause: Exception, path: Path | None = None
+    record: Mapping[str, Any],
+    running_version: str,
+    cause: Exception,
+    path: Path | None = None,
+    rebuild_failure: Exception | None = None,
 ) -> Exception:
     """Turn a wall of deserialisation output into the one sentence that helps.
 
@@ -327,6 +389,12 @@ def _keras_load_error(
         return tuple(numbers)
 
     older_here = parts(running_version) < parts(written)
+    rebuild_note = (
+        f"\n\nRebuilding it from the manifest was tried first and also failed: "
+        f"{rebuild_failure}"
+        if rebuild_failure is not None
+        else ""
+    )
     remedy = (
         f'`pip install "keras>={written}"` in this environment, or retrain the '
         "model here"
@@ -338,7 +406,7 @@ def _keras_load_error(
         f"{record.get('file')} was saved by Keras {written} and this "
         f"environment has Keras {running_version}. A Keras file is not "
         "portable to an older Keras, so it cannot be read here. "
-        f"To use it: {remedy}.\n\nKeras said: {cause}"
+        f"To use it: {remedy}.{rebuild_note}\n\nKeras said: {cause}"
     )
 
 

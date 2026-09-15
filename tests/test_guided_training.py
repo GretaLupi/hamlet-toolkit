@@ -200,3 +200,114 @@ def test_a_saved_keras_artifact_records_the_version_that_wrote_it(tmp_path):
     keras_records = [r for r in manifest["models"] if r["format"] == "keras"]
     assert keras_records, "keras_mlp should store keras models"
     assert all(r.get("keras_version") == keras.__version__ for r in keras_records)
+
+
+def _tiny_keras_artifact(tmp_path, model="keras_mlp", **options):
+    """A trained, saved Keras artifact, small enough to be a test fixture."""
+    import numpy as np
+
+    from hamlet.training.preprocessing import TrainingPreprocessingConfig
+
+    rng = np.random.default_rng(0)
+    bias = np.linspace(0.0, 20.0, 12)
+    targets = rng.uniform(5.0, 15.0, size=(12, 2)).astype(np.float32)
+    spectra = np.stack([
+        np.stack([np.exp(-((bias - t) ** 2)) for t in row]) for row in targets
+    ]).astype(np.float32)
+    dataset = SpectroscopyDataset(
+        spectra=spectra, targets_mev=targets, bias_mev=bias,
+        target_names=("J1", "J2"), system_type="homogeneous_heisenberg", metadata={},
+    )
+    prepared = prepare_training_dataset(
+        dataset, TrainingPreprocessingConfig(bias_cutoff_mev=20.0, output_points=12)
+    )
+    run = train_supervised(
+        prepared, view="global", model=model, preset="quick",
+        model_options=options, verbose=0,
+    )
+    destination = tmp_path / "artifact"
+    run.save(destination)
+    return run, destination, prepared
+
+
+@pytest.mark.parametrize(
+    ("model", "options"),
+    [("keras_mlp", {"hidden_units": [4]}), ("keras_cnn", {"filters": [4], "dense_units": [4]})],
+)
+def test_rebuilding_from_the_manifest_reproduces_the_saved_model_exactly(
+    tmp_path, model, options
+):
+    """The rescue path has to give the same answers, or it is not a rescue.
+
+    A model trained on a cluster with a newer Keras cannot be read by an older
+    one, so HamLeT rebuilds the architecture from the manifest -- which it
+    wrote in the first place -- and loads the weights, which are plain arrays.
+    That is only legitimate if the reconstruction is the same network. Here
+    both paths are available, so they can be compared directly.
+    """
+    pytest.importorskip("keras")
+    import json
+
+    import keras
+    import numpy as np
+
+    from hamlet.training.guided import _rebuild_keras_model
+
+    _, destination, prepared = _tiny_keras_artifact(tmp_path, model=model, **options)
+    manifest = json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+    record = next(r for r in manifest["models"] if r["format"] == "keras")
+    stored = destination / record["file"]
+
+    original = keras.saving.load_model(stored)
+    rebuilt = _rebuild_keras_model(manifest, record, stored)
+
+    rng = np.random.default_rng(1)
+    probe = rng.normal(size=(5, original.input_shape[1])).astype("float32")
+    np.testing.assert_array_equal(
+        original.predict(probe, verbose=0), rebuilt.predict(probe, verbose=0)
+    )
+
+
+def test_a_model_written_by_another_keras_still_loads(tmp_path, monkeypatch):
+    """End to end: the artifact loads even when Keras refuses to read it.
+
+    Keras is made to fail the way a version mismatch makes it fail, which is
+    the only part of the situation that cannot be reproduced on one machine.
+    """
+    pytest.importorskip("keras")
+    import keras
+    import numpy as np
+
+    from hamlet.training.guided import TrainingRun
+
+    run, destination, _ = _tiny_keras_artifact(tmp_path, hidden_units=[4])
+    probe = np.random.default_rng(2).normal(
+        size=(4, run.models[0].input_shape[1])
+    ).astype("float32")
+    expected = run.predict(probe)
+
+    def refuse(*args, **kwargs):
+        raise TypeError(
+            "GlorotUniform.__init__() got an unexpected keyword argument 'input_axes'"
+        )
+
+    monkeypatch.setattr(keras.saving, "load_model", refuse)
+    recovered = TrainingRun.load(destination)
+    np.testing.assert_allclose(recovered.predict(probe), expected, rtol=0, atol=0)
+
+
+def test_an_artifact_that_cannot_be_rebuilt_still_explains_the_versions(tmp_path):
+    """When the rescue fails too, the message says both things that went wrong."""
+    from hamlet.training.guided import _keras_load_error
+
+    error = _keras_load_error(
+        {"file": "m.keras", "keras_version": "3.15.1"},
+        "3.11.3",
+        TypeError("unexpected keyword argument 'input_axes'"),
+        None,
+        ValueError("no such option: filters"),
+    )
+    message = str(error)
+    assert "3.15.1" in message and "3.11.3" in message
+    assert "Rebuilding it from the manifest was tried first" in message
+    assert "no such option: filters" in message
