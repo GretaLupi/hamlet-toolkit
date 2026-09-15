@@ -266,6 +266,12 @@ class ProjectConfig:
     allow_development_artifacts: bool = False
     max_validation_mae_mev: float | None = None
     max_test_mae_mev: float | None = None
+    # What the measured sample physically is, where the system type does not
+    # say. A model trained on a chain with three S=1 impurities is not
+    # reusable on a chain without them, and nothing in a dI/dV map reveals
+    # which one was measured -- so it is declared, in the same recipe shape a
+    # generation recipe uses, and compared rather than assumed.
+    experiment_conditions: Mapping[str, Any] | None = None
     verbose: int = 1
 
     def __post_init__(self) -> None:
@@ -392,6 +398,7 @@ class ProjectConfig:
                 payload.get("config_schema_version", PROJECT_CONFIG_SCHEMA_VERSION)
             ),
             system_type=system_type,
+            experiment_conditions=_experiment_conditions(experiment),
             experiment_csv=(
                 _resolve_path(base, experiment_value) if experiment_value is not None else None
             ),
@@ -1304,11 +1311,35 @@ class HamiltonianLearningProject:
                 allow_development_artifacts=self.config.allow_development_artifacts,
                 max_validation_mae_mev=self.config.max_validation_mae_mev,
                 max_test_mae_mev=self.config.max_test_mae_mev,
+                experiment_conditions=self.config.experiment_conditions,
             )
             decision_dir = self.config.output_dir / "preflight"
             self.workflow_decision.save_json(decision_dir / "workflow_decision.json")
             self.workflow_decision.save_html(decision_dir / "workflow_decision.html")
             if not self.workflow_decision.can_use_existing_model:
+                # "Generate a dataset and train a model" is the right advice
+                # when nothing fits. It is the wrong advice when the model
+                # does fit and the only missing thing is a statement about
+                # the sample, which is a sentence in the configuration rather
+                # than a week of simulation.
+                undeclared = [
+                    reason
+                    for assessment in self.workflow_decision.artifact_assessments
+                    for reason in assessment.reasons
+                    if "has not declared" in reason
+                ]
+                if undeclared and len(undeclared) == sum(
+                    len(item.reasons) for item in self.workflow_decision.artifact_assessments
+                ):
+                    raise RuntimeError(
+                        "this model was trained for a chain with specific "
+                        f"impurities, and the measurement has not said whether "
+                        f"it has them: {undeclared[0]}. If the measured sample "
+                        "does have exactly those, declare them under "
+                        "experiment.conditions -- the interface offers a "
+                        "confirmation for this. If it does not, the model does "
+                        f"not apply to it. Details in {decision_dir}"
+                    )
                 raise RuntimeError(
                     f"existing artifact preflight decision: {self.workflow_decision.action}; "
                     f"{self.workflow_decision.summary}; inspect {decision_dir}"
@@ -1569,6 +1600,26 @@ def resolve_dynamics_mode(recipe: DatasetGenerationConfig, family: Any) -> str:
     # A sampled chain only to read its shape; the couplings do not enter the
     # Hilbert dimension, so the seed here cannot change the answer.
     return recommended_dynamics_mode(family.sample(np.random.default_rng(0)))
+
+
+def _experiment_conditions(experiment: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The sample conditions declared under ``experiment.conditions``.
+
+    Kept in the same shape a generation recipe uses -- an ``impurities`` list
+    and ``transverse_field_mev`` -- so the declaration and the artifact's own
+    record are canonicalised by one function and cannot drift apart.
+    """
+    declared = experiment.get("conditions")
+    if declared is None:
+        return None
+    if not isinstance(declared, Mapping):
+        raise ValueError("experiment.conditions must be a mapping")
+    unknown = set(declared) - {"impurities", "transverse_field_mev"}
+    if unknown:
+        raise ValueError(
+            f"experiment.conditions has unknown fields: {sorted(unknown)}"
+        )
+    return dict(declared)
 
 
 def _resolved_workers(workers: int) -> int:

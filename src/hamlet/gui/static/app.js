@@ -628,6 +628,50 @@ function renderAnalysisModels() {
       chosenAnalysisModel = c.dataset.model;
       renderAnalysisModels();
     }));
+  renderAnalysisConditions();
+}
+
+/** Some models only describe a chain that was physically built a certain way.
+ *
+ * Nothing in a dI/dV map says whether the measured sample is that chain, so
+ * the page has to ask. Without this the model could be selected and then
+ * refused at run time by a check the interface gave no way to satisfy.
+ */
+function renderAnalysisConditions() {
+  const box = el("an-conditions");
+  const model = knownModels.find((m) => (m.label || m.name) === chosenAnalysisModel);
+  const conditions = model && model.declared_conditions;
+  if (!conditions || !Object.keys(conditions).length) {
+    box.innerHTML = "";
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  const impurities = conditions.impurities || [];
+  const rows = impurities.map((imp) => `<tr>
+      <td class="num">${esc(imp.site)}</td>
+      <td>${esc(imp.spin || "S=1")}</td>
+      <td class="num">${num(imp.axial_mev ?? 0, 3)}</td>
+      <td class="num">${num(imp.transverse_mev ?? 0, 3)}</td>
+      <td class="num">${num(imp.transverse_angle_rad ?? 0, 3)}</td>
+    </tr>`).join("");
+  box.innerHTML = `<div class="box">
+    <div class="verdict">This model describes one particular kind of sample</div>
+    <p>It was trained on a chain built with the impurities below, and the
+      spectra of a chain without them are different. Nothing in a measurement
+      reveals which chain it came from, so this is the one thing the interface
+      has to ask you.</p>
+    ${rows ? `<table>
+      <tr><th class="num">Site</th><th>Spin</th><th class="num">D (meV)</th>
+        <th class="num">E (meV)</th><th class="num">angle (rad)</th></tr>
+      ${rows}</table>` : ""}
+    <p>Transverse field:
+      <b>${num(conditions.transverse_field_mev ?? 0, 3)} meV</b></p>
+    <label><input type="checkbox" id="an-confirm-conditions">
+      my sample has exactly these impurities</label>
+    <p class="hint">If it does not, this model does not describe it, and the
+      honest answer is to train one for the sample you actually have.</p>
+  </div>`;
 }
 
 el("an-go").addEventListener("click", async () => {
@@ -637,11 +681,13 @@ el("an-go").addEventListener("click", async () => {
   if (!chosenAnalysisModel) { showError(out, new Error("choose a model first")); return; }
   busy(out, "Checking the model against this measurement…");
   try {
+    const confirm = document.getElementById("an-confirm-conditions");
     const built = await api("/api/build-analysis", {
       path,
       model: chosenAnalysisModel,
       name: el("an-name").value.trim(),
       allow_development_artifacts: el("an-allow-dev").checked,
+      confirm_conditions: Boolean(confirm && confirm.checked),
     });
     const job = await api("/api/run-analysis", { config_path: built.config_path });
     out.innerHTML = `<div class="box">

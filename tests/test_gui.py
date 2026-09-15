@@ -1874,7 +1874,9 @@ def test_an_analysis_copies_every_contract_term_from_the_model(tmp_path):
     name = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
     measurement = tmp_path / "chain.csv"
     measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
-    built = api.build_analysis_config(measurement, name, workspace=tmp_path / "out")
+    built = api.build_analysis_config(
+        measurement, name, workspace=tmp_path / "out", confirm_conditions=True
+    )
     payload = yaml.safe_load(Path(built["config_path"]).read_text())
 
     manifest = json.loads((api._published_root() / name / "manifest.json").read_text())
@@ -1895,10 +1897,12 @@ def test_two_analyses_of_the_same_name_do_not_collide(tmp_path):
     measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
     name = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
     first = api.build_analysis_config(
-        measurement, name, name="same", workspace=tmp_path / "out"
+        measurement, name, name="same", workspace=tmp_path / "out",
+        confirm_conditions=True,
     )
     second = api.build_analysis_config(
-        measurement, name, name="same", workspace=tmp_path / "out"
+        measurement, name, name="same", workspace=tmp_path / "out",
+        confirm_conditions=True,
     )
     assert first["run_dir"] != second["run_dir"] or first["config_path"] != second[
         "config_path"
@@ -1918,6 +1922,7 @@ def test_analysing_a_measurement_that_does_not_exist_says_so(tmp_path):
             tmp_path / "nope.csv",
             "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1",
             workspace=tmp_path,
+            confirm_conditions=True,
         )
 
 
@@ -1978,7 +1983,8 @@ def test_a_model_outside_the_workspace_can_still_be_applied(tmp_path):
     measurement = tmp_path / "chain.csv"
     measurement.write_text("site,bias_meV,didv_A\n1,0,0\n")
     built = api.build_analysis_config(
-        measurement, str(elsewhere), workspace=tmp_path / "out"
+        measurement, str(elsewhere), workspace=tmp_path / "out",
+        confirm_conditions=True,
     )
     assert built["artifact_path"] == str(elsewhere)
 
@@ -2809,3 +2815,76 @@ def test_the_models_page_can_be_refreshed_without_restarting_the_server():
     guarded = script[script.index("data-delete-model") - 200:]
     guarded = guarded[: guarded.index("data-delete-model")]
     assert 'm.origin === "yours" ?' in guarded
+
+
+def test_a_model_with_fixed_conditions_can_actually_be_used(tmp_path, monkeypatch):
+    """The refusal was right and the interface offered no way to satisfy it.
+
+    The DMI artifact only describes a chain physically built with three S=1
+    impurities. Nothing in a dI/dV map says whether the measured sample is
+    that chain, so the preflight refuses until someone declares it -- and
+    nothing in the configuration, the API, or the page could declare it. The
+    model was selectable, and selecting it always failed, with advice to
+    generate a dataset and train a model that had nothing to do with the
+    actual problem.
+    """
+    import json
+
+    from hamlet.gui import api
+    from hamlet.workflow import _canonical_fixed_conditions
+
+    manifest = json.loads(
+        (
+            api._published_root()
+            / "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+            / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    declared = api._artifact_conditions(manifest)
+    assert declared, "this artifact is the one that fixes conditions"
+
+    # What a confirmation declares must canonicalise to exactly what the
+    # artifact recorded, or confirming would swap one refusal for another.
+    recipe = manifest["dataset_metadata"]["generation_recipe"]
+    assert _canonical_fixed_conditions(declared) == _canonical_fixed_conditions(recipe)
+
+    # It reads as something a person can check against a sample.
+    sentence = api._conditions_sentence(declared)
+    assert "site 1" in sentence and "S=1" in sentence and "E=2" in sentence
+
+
+def test_applying_such_a_model_without_confirming_says_what_to_do(
+    tmp_path, monkeypatch, measurement_csv
+):
+    from hamlet.gui import api
+
+    monkeypatch.setenv("HAMLET_WORKSPACE", str(tmp_path))
+    measurement = measurement_csv
+    model = "homogeneous_xxz_j1j2j3_dmi_impurity_l8_ridge_standard_v1"
+
+    with pytest.raises(ValueError, match="specific impurities"):
+        api.build_analysis_config(measurement, model, workspace=tmp_path)
+
+    # Confirming writes the declaration into the configuration the run reads,
+    # which is what the preflight was asking for.
+    built = api.build_analysis_config(
+        measurement, model, confirm_conditions=True, workspace=tmp_path
+    )
+    import yaml
+
+    payload = yaml.safe_load(Path(built["config_path"]).read_text(encoding="utf-8"))
+    assert payload["experiment"]["conditions"]["impurities"]
+    from hamlet.project import ProjectConfig
+
+    config = ProjectConfig.from_file(built["config_path"])
+    assert config.experiment_conditions is not None
+
+
+def test_the_page_asks_before_it_lets_such_a_model_run():
+    """The confirmation has to be in front of the person who knows the sample."""
+    html = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
+    script = (STATIC_ROOT / "app.js").read_text(encoding="utf-8")
+    assert 'id="an-conditions"' in html
+    assert "renderAnalysisConditions" in script
+    assert "an-confirm-conditions" in script
+    assert "confirm_conditions:" in script

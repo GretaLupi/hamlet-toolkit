@@ -421,6 +421,10 @@ def describe_available_models() -> dict[str, Any]:
                 "per_target_test": test_metrics.get("per_target", []),
                 "parameters": per_parameter,
                 "fixed_conditions": conditions,
+                # The same conditions in the shape a confirmation
+                # declares, so the page shows exactly what the
+                # compatibility check will compare against.
+                "declared_conditions": _artifact_conditions(manifest),
                 "has_model_card": (directory / "MODEL_CARD.md").exists(),
                 "model_card": str(directory / "MODEL_CARD.md"),
             }
@@ -1910,12 +1914,62 @@ def _artifact_for(name_or_path: str) -> Path:
     )
 
 
+def _artifact_conditions(manifest: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The sample conditions an artifact fixes, in the shape a config declares.
+
+    Read straight from the generation recipe it was trained with, so a
+    confirmation asserts exactly what the compatibility check will compare
+    against and cannot disagree with it by a rounding.
+    """
+    recipe = (manifest.get("dataset_metadata") or {}).get("generation_recipe") or {}
+    impurities = recipe.get("impurities")
+    field = recipe.get("transverse_field_mev") or 0.0
+    declared: dict[str, Any] = {}
+    if isinstance(impurities, (list, tuple)) and impurities:
+        declared["impurities"] = [dict(item) for item in impurities if isinstance(item, Mapping)]
+    elif isinstance(recipe.get("impurity_sites"), (list, tuple)):
+        # The other recipe shape: parallel impurity_* fields, as the
+        # generation scripts wrote them.
+        declared["impurities"] = [
+            {
+                "site": int(site),
+                "spin": str(recipe.get("impurity_spin", "S=1")),
+                "axial_mev": float(recipe.get("impurity_axial_mev", 0.0) or 0.0),
+                "transverse_mev": float(recipe.get("impurity_transverse_mev", 0.0) or 0.0),
+                "transverse_angle_rad": float(
+                    recipe.get("impurity_transverse_angle_rad", 0.0) or 0.0
+                ),
+            }
+            for site in recipe["impurity_sites"]
+        ]
+    if field:
+        declared["transverse_field_mev"] = float(field)
+    if not declared:
+        return None
+    declared.setdefault("transverse_field_mev", float(field))
+    return declared
+
+
+def _conditions_sentence(declared: Mapping[str, Any]) -> str:
+    """The declared conditions as something a person can check against a sample."""
+    parts = [
+        f"site {item.get('site')} {item.get('spin', 'S=1')} "
+        f"D={float(item.get('axial_mev', 0.0)):g} "
+        f"E={float(item.get('transverse_mev', 0.0)):g} meV "
+        f"at {float(item.get('transverse_angle_rad', 0.0)):g} rad"
+        for item in declared.get("impurities", [])
+    ]
+    parts.append(f"transverse field {float(declared.get('transverse_field_mev', 0.0)):g} meV")
+    return "; ".join(parts)
+
+
 def build_analysis_config(
     measurement_path: str | Path,
     model: str,
     *,
     name: str | None = None,
     allow_development_artifacts: bool = False,
+    confirm_conditions: bool = False,
     workspace: Path | None = None,
 ) -> dict[str, Any]:
     """Assemble a project that applies one saved model to one measurement.
@@ -1954,6 +2008,21 @@ def build_analysis_config(
         )
     cutoff = preprocessing["bias_cutoff_mev"]
 
+    # Some artifacts are specific to a chain that was physically built a
+    # certain way -- impurities at named sites, a field -- and nothing in a
+    # dI/dV map says whether the measured sample is that chain. The user is
+    # the only one who knows, so the confirmation is theirs to give, and it
+    # copies the artifact's own record rather than asking anyone to retype
+    # five numbers per impurity correctly.
+    declared_conditions = _artifact_conditions(manifest)
+    if declared_conditions and not confirm_conditions:
+        raise ValueError(
+            "this model was trained for a chain with specific impurities "
+            f"({_conditions_sentence(declared_conditions)}). Confirm that the "
+            "measured sample has exactly those before applying it; if it does "
+            "not, this model does not describe it."
+        )
+
     measurement, _ = prepare_measurement_input(measurement_path)
 
     label = str(name or "").strip() or f"{measurement.stem} with {artifact.name}"
@@ -1977,7 +2046,11 @@ def build_analysis_config(
         "system_type": str(manifest["system_type"]),
         "artifact": str(artifact),
         "output_dir": str(run_dir / "run"),
-        "experiment": {"measurement": str(measurement)},
+        "experiment": (
+            {"measurement": str(measurement), "conditions": declared_conditions}
+            if declared_conditions
+            else {"measurement": str(measurement)}
+        ),
         "training": {
             "cutoffs_mev": [float(cutoff)],
             "manual_cutoff_mev": float(cutoff),
@@ -2008,6 +2081,7 @@ def build_analysis_config(
         "n_sites": manifest.get("n_sites"),
         "preset": (manifest.get("training_preset") or {}).get("name"),
         "measurement_path": str(measurement),
+        "declared_conditions": declared_conditions,
     }
 
 

@@ -196,6 +196,9 @@ class _Handler(BaseHTTPRequestHandler):
                         allow_development_artifacts=bool(
                             payload.get("allow_development_artifacts", False)
                         ),
+                        confirm_conditions=bool(
+                            payload.get("confirm_conditions", False)
+                        ),
                     )
                 )
             elif route == "/api/run-analysis":
