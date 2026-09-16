@@ -4,7 +4,7 @@
 
 # HamLeT
 
-[![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg?color=087f8c)](https://pypi.org/project/hamlet-toolkit/)
+[![PyPI](https://img.shields.io/pypi/v/hamlet-toolkit.svg?color=087f8c&cacheSeconds=300)](https://pypi.org/project/hamlet-toolkit/)
 [![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-087f8c.svg)](https://www.python.org/downloads/)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-087f8c.svg)](https://github.com/GretaLupi/hamlet-toolkit/blob/main/LICENSE)
 
