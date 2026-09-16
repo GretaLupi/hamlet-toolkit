@@ -240,6 +240,7 @@ def advise_experiment(
             max_validation_mae_mev,
             max_test_mae_mev,
             _canonical_fixed_conditions(experiment_conditions),
+            experiment_conditions is not None,
         )
         for path in discovered_artifacts
     )
@@ -418,6 +419,7 @@ def _assess_artifact(
     max_validation_mae: float | None,
     max_test_mae: float | None,
     experiment_conditions: tuple[Any, ...] | None = None,
+    conditions_declared: bool = False,
 ) -> ResourceAssessment:
     reasons: list[str] = []
     warnings: list[str] = []
@@ -483,7 +485,16 @@ def _assess_artifact(
         manifest.get("dataset_metadata", {}).get("generation_recipe", {})
     )
     if artifact_conditions is not None:
-        if experiment_conditions is None:
+        if experiment_conditions is None and conditions_declared:
+            # The sample was described, and described as carrying nothing. That
+            # is an answer, not a silence, and saying "has not declared" to
+            # someone who just declared reads as the interface ignoring them.
+            reasons.append(
+                "artifact was trained on a chain with "
+                f"{_describe_conditions(artifact_conditions)}, but the measured "
+                "sample is declared to have no impurities and no field"
+            )
+        elif experiment_conditions is None:
             reasons.append(
                 "artifact fixes physical conditions that the experiment has not "
                 f"declared ({_describe_conditions(artifact_conditions)}); pass "

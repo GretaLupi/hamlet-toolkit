@@ -650,3 +650,41 @@ def test_a_model_that_fixes_conditions_is_still_refused_without_them(
         "fixes physical conditions" in reason
         for reason in decision.artifact_assessments[0].reasons
     )
+
+
+def test_a_clean_chain_is_an_answer_not_a_silence(workflow_resources, tmp_path):
+    """"Declared clean" and "nobody said" reach the same value, not the same meaning.
+
+    Both canonicalise to no impurities and no field, so an impurity model is
+    rightly refused either way. But telling someone who has just described
+    their sample as clean that they "have not declared" reads as the interface
+    ignoring them, and leaves them with no idea what to do next.
+    """
+    _, _, artifact, experiment = workflow_resources
+    impurity = tmp_path / "impurity-model"
+    shutil.copytree(artifact, impurity)
+    manifest = json.loads((artifact / "manifest.json").read_text())
+    manifest.setdefault("dataset_metadata", {})["generation_recipe"] = {
+        "impurities": [{"site": 1, "spin": "S=1", "axial_mev": 0.0,
+                        "transverse_mev": 2.0, "transverse_angle_rad": 0.0}],
+        "transverse_field_mev": 0.0,
+    }
+    (impurity / "manifest.json").write_text(json.dumps(manifest))
+
+    def reasons(conditions):
+        decision = advise_experiment(
+            experiment,
+            manual_cutoff_mev=50.0,
+            artifact_roots=[impurity],
+            experiment_conditions=conditions,
+        )
+        assert not decision.artifact_assessments[0].compatible
+        return " ".join(decision.artifact_assessments[0].reasons)
+
+    silent = reasons(None)
+    assert "has not declared" in silent
+
+    clean = reasons({"impurities": [], "transverse_field_mev": 0.0})
+    assert "has not declared" not in clean, "they did declare; they said none"
+    assert "no impurities and no field" in clean
+    assert "trained on a chain with" in clean, "say what the model needs"
