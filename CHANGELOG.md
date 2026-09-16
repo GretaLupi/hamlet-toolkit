@@ -8,6 +8,51 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 Nothing yet.
 
+## [0.1.1] - 2026-09-16
+
+Corrections found while publishing 0.1.0, on the same day.
+
+### Fixed
+
+- **The reuse check no longer assumes which family of Hamiltonian produced a
+  measurement.** A measurement declares no family, and the advisor defaulted to
+  `inhomogeneous_heisenberg`, then rejected every homogeneous model for a
+  "system mismatch" the data had never asserted -- while inference itself ran
+  those same models happily. Whether a chain is treated as homogeneous or
+  bond-inhomogeneous is a modelling choice, so an undeclared family now
+  constrains nothing and each model is judged against the view it was trained
+  for. Naming a family, as every project configuration and `--system` does,
+  still narrows the search exactly as before.
+- **What a model needs of the *sample* can now be declared.** Impurities are
+  never recognised from data -- nothing in a dI/dV map reveals them -- and the
+  only way to declare them was a checkbox confirming a model's own list, on the
+  analysis page. The reuse check had no way at all, so a model trained with
+  impurities was refused there every time, with a reason the page gave no means
+  of answering. Both pages now carry one declaration of the measured chain: a
+  clickable chain diagram with each impurity's spin, axial and transverse
+  anisotropy and angle, plus a transverse field. A sample declared as clean is
+  told so, rather than being told it "has not declared".
+- **A model's required sample is shown as the chain it describes**, with a row
+  per impurity, instead of the training recipe printed as JSON, and each row is
+  marked against the declared sample. A one-line form appears on the model
+  cards and in the compatibility table, so what a model demands is visible
+  before it is selected.
+- **Timing claims name the right stage.** Three places said training takes
+  hours. Generating the dataset is the slow stage; fitting a model to it is
+  minutes.
+- Coupling estimates are no longer printed on top of their own error bars.
+- Formulas in `docs/theory.md` used LaTeX thin spaces, which GitHub renders as
+  commas and semicolons.
+
+### Changed
+
+- The README states which install gives which capability, next to the install
+  command rather than forty lines below it. The base package can use the ridge
+  and random-forest reference models but cannot generate a dataset; `[ml]` adds
+  the Keras models including the variable-length local-window one, and
+  `[simulation]` adds generation. An environment that already has TensorFlow or
+  DMRGPy needs no extra.
+
 ## [0.1.0] - 2026-09-16
 
 First public release. HamLeT infers spin-chain Hamiltonians from scanning

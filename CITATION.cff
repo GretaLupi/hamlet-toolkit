@@ -6,7 +6,7 @@ abstract: "An experimental-facing framework for learning Hamiltonians and physic
 authors:
   - family-names: Lupi
     given-names: Greta
-version: 0.1.0
+version: 0.1.1
 date-released: 2026-09-16
 license: GPL-3.0-or-later
 repository-code: "https://github.com/GretaLupi/hamlet-toolkit"
