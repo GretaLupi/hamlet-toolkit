@@ -28,6 +28,70 @@ from typing import Any
 GPU_CAPABLE_MODELS = frozenset({"keras_mlp", "keras_cnn"})
 
 
+# --- importing TensorFlow ---------------------------------------------------
+#
+# TensorFlow's own `and-cuda` wheels ship libcusolver in
+# `nvidia/cusolver/lib`, and that directory is in the RUNPATH of
+# libtensorflow_cc.so.2 but not of libtensorflow_framework.so.2, which is where
+# the load actually happens. The loader therefore never finds it, TensorFlow
+# logs "Cannot dlopen some GPU libraries" and reports no GPU at all -- on a
+# machine whose driver and CUDA wheels are both fine. Every other CUDA library
+# resolves; removing them one at a time shows cusolver is the only one that
+# matters (reported by @joselado, issue #1).
+#
+# Loading it into the process before TensorFlow is imported fixes it with no
+# environment variable and no change for the user. Every import of TensorFlow
+# or Keras in this package goes through the two helpers below so that this
+# cannot be forgotten at a new call site.
+
+
+def preload_cuda_libraries() -> tuple[str, ...]:
+    """Put TensorFlow's own CUDA libraries where its loader will find them.
+
+    Returns the libraries loaded, for diagnostics. Does nothing at all when the
+    pip CUDA wheels are absent, when TensorFlow has already been imported (too
+    late to matter), or off Linux, so it is safe to call unconditionally.
+    """
+    import ctypes
+    import importlib.util
+    import sys
+    from pathlib import Path as _Path
+
+    if sys.platform != "linux" or "tensorflow" in sys.modules:
+        return ()
+    try:
+        spec = importlib.util.find_spec("nvidia.cusolver")
+    except (ImportError, ValueError):  # pragma: no cover - absent is the norm
+        return ()
+    if spec is None or not spec.submodule_search_locations:
+        return ()
+    loaded: list[str] = []
+    directory = _Path(next(iter(spec.submodule_search_locations))) / "lib"
+    for library in sorted(directory.glob("libcusolver.so.*")):
+        try:
+            ctypes.CDLL(str(library), mode=ctypes.RTLD_GLOBAL)
+        except OSError:  # pragma: no cover - a broken wheel is not our failure
+            continue
+        loaded.append(str(library))
+    return tuple(loaded)
+
+
+def load_tensorflow():
+    """Import TensorFlow with its CUDA libraries reachable."""
+    preload_cuda_libraries()
+    import tensorflow as tf
+
+    return tf
+
+
+def load_keras():
+    """Import Keras with TensorFlow's CUDA libraries reachable."""
+    preload_cuda_libraries()
+    import keras
+
+    return keras
+
+
 def _why_no_gpu(built_with_cuda: bool | None) -> list[str]:
     """Why a working TensorFlow sees no GPU, which is not the same on every OS.
 
@@ -63,10 +127,10 @@ def _why_no_gpu(built_with_cuda: bool | None) -> list[str]:
     if built_with_cuda:
         return [
             "This TensorFlow is built with CUDA, so the card is missing at "
-            "runtime rather than unsupported: either no NVIDIA driver is "
-            "loaded, or the CUDA runtime libraries are absent. "
-            '`pip install "hamlet-toolkit[gpu]"` installs the libraries pip '
-            "can provide; the driver has to come from the system."
+            "runtime rather than unsupported. HamLeT already preloads the "
+            "CUDA libraries that ship in the pip wheels, so the likely cause "
+            "is the part pip cannot provide: no NVIDIA driver is loaded. "
+            "`nvidia-smi` says whether one is."
         ]
     return []
 
@@ -123,7 +187,7 @@ def describe_compute() -> ComputeReport:
     built_with_cuda: bool | None = None
 
     try:
-        import tensorflow as tf
+        tf = load_tensorflow()
 
         tensorflow_available = True
         try:
@@ -166,6 +230,87 @@ def describe_compute() -> ComputeReport:
         tensorflow_available=tensorflow_available,
         notes=tuple(notes),
     )
+
+
+def verify_accelerator(report: "ComputeReport | None" = None) -> dict[str, Any]:
+    """Actually train one convolution step on the GPU, rather than trusting the list.
+
+    A visible device proves the driver is loaded and nothing else. Two failures
+    survive that check and only appear once real work starts, both reported by
+    @joselado on a GTX 1060 (issue #1): XLA's autotuner finding no supported
+    configuration for a convolution, and a cuDNN too new to still support the
+    card. Either one kills a training run after the dataset has been generated,
+    which is the most expensive moment to discover it.
+
+    A Conv1D is the right probe because convolution is what breaks; a dense
+    layer passes on cards where ``keras_cnn`` cannot run. Returns what
+    happened, with advice when it fails, and never raises.
+    """
+    report = report if report is not None else describe_compute()
+    if not report.accelerators:
+        return {"ran": False, "ok": None, "reason": "no GPU is visible to TensorFlow"}
+    try:
+        import numpy as np
+
+        keras = load_keras()
+        tf = load_tensorflow()
+        with tf.device("/GPU:0"):
+            probe = keras.Sequential(
+                [
+                    keras.Input((16, 1)),
+                    keras.layers.Conv1D(4, 3, padding="same", activation="relu"),
+                    keras.layers.Flatten(),
+                    keras.layers.Dense(1),
+                ]
+            )
+            probe.compile(optimizer="adam", loss="mse", jit_compile=False)
+            probe.fit(
+                np.zeros((8, 16, 1), dtype="float32"),
+                np.zeros((8, 1), dtype="float32"),
+                epochs=1,
+                batch_size=8,
+                verbose=0,
+            )
+    except BaseException as exc:  # noqa: BLE001 - a broken GPU stack raises anything
+        message = f"{type(exc).__name__}: {exc}"
+        return {
+            "ran": True,
+            "ok": False,
+            "error": message,
+            "advice": _accelerator_advice(message),
+        }
+    return {"ran": True, "ok": True, "error": None, "advice": ()}
+
+
+def _accelerator_advice(message: str) -> tuple[str, ...]:
+    """What to try, for the failures that have actually been seen."""
+    lowered = message.lower()
+    advice: list[str] = []
+    if "autotun" in lowered or "xla" in lowered:
+        advice.append(
+            "XLA could not compile a convolution for this card. HamLeT keeps "
+            "XLA off by default, so something has turned it back on: check for "
+            "jit_compile in your model options."
+        )
+    if "cudnn" in lowered or "5003" in lowered or "convolution" in lowered:
+        advice.append(
+            "cuDNN refused a convolution on this card. Recent cuDNN releases "
+            "have dropped support for older GPUs; the version TensorFlow 2.21 "
+            "is built against still works: "
+            'pip install "nvidia-cudnn-cu12==9.3.0.75"'
+        )
+    if "out of memory" in lowered or "oom" in lowered:
+        advice.append(
+            "The card ran out of memory on a tiny probe, so something else is "
+            "using it. Check nvidia-smi."
+        )
+    if not advice:
+        advice.append(
+            "The GPU is visible but cannot run a convolution. Training with "
+            "device: cpu will work; the Keras models are the only ones that "
+            "would have used the card."
+        )
+    return tuple(advice)
 
 
 def gpu_unavailable_summary(report: "ComputeReport") -> str:
@@ -236,7 +381,7 @@ def configure_device(request: DeviceRequest | None = None) -> dict[str, Any]:
         "warnings": [],
     }
     try:
-        import tensorflow as tf
+        tf = load_tensorflow()
     except Exception:  # noqa: BLE001
         if settings.device == "gpu":
             outcome["warnings"].append(

@@ -73,8 +73,14 @@ def test_windows_is_told_the_wheel_cannot_use_a_gpu_at_all(fake_tf, monkeypatch)
 def test_a_cuda_build_with_no_card_blames_the_runtime_not_the_wheel(fake_tf, monkeypatch):
     """The Linux wheel is built with CUDA but ships no CUDA runtime.
 
-    So "no GPU" here means the driver or the libraries are missing, which is
-    fixable, and telling the user to reinstall TensorFlow would not fix it.
+    So "no GPU" here means the driver is missing, which is fixable, and telling
+    the user to reinstall TensorFlow would not fix it.
+
+    The note used to offer `pip install "hamlet-toolkit[gpu]"` as well, which
+    sent someone whose wheels were all present and whose driver was loaded off
+    reinstalling them (issue #1): the real cause was a library TensorFlow could
+    not find, which HamLeT now preloads. With that handled, the remaining cause
+    is the one pip cannot fix, so the note names it and nothing else.
     """
     monkeypatch.setattr(sys, "platform", "linux")
     fake_tf(built_with_cuda=True)
@@ -82,8 +88,11 @@ def test_a_cuda_build_with_no_card_blames_the_runtime_not_the_wheel(fake_tf, mon
     notes = _notes(compute.describe_compute())
 
     assert "missing at runtime rather than unsupported" in notes
-    assert "hamlet-toolkit[gpu]" in notes
-    assert "driver has to come from the system" in notes
+    assert "driver" in notes
+    assert "nvidia-smi" in notes, "say how to check, not just what to suspect"
+    assert "hamlet-toolkit[gpu]" not in notes, (
+        "reinstalling the extra does not fix a missing driver"
+    )
 
 
 def test_a_non_cuda_build_on_linux_is_told_to_reinstall(fake_tf, monkeypatch):
@@ -861,3 +870,135 @@ dataset:
     assert _fingerprint(_jsonable(recipe_for("ED"))) != _fingerprint(
         _jsonable(recipe_for("DMRG"))
     )
+
+
+# --- GPU stacks that are present but unusable (issue #1) ---------------------
+
+def test_cuda_libraries_are_preloaded_before_tensorflow(monkeypatch):
+    """TensorFlow ships libcusolver where its own loader will not look.
+
+    The and-cuda wheels put it in nvidia/cusolver/lib, which is in the RUNPATH
+    of libtensorflow_cc.so.2 but not of libtensorflow_framework.so.2, where the
+    load happens. TensorFlow then reports no GPU at all on a machine whose
+    driver and wheels are both fine. Loading it into the process first fixes
+    it with no environment variable.
+    """
+    import ctypes
+    import importlib.util
+    from pathlib import Path
+
+    from hamlet import compute
+
+    fake_lib = Path(__file__).parent / "_fake_cusolver"
+    fake_lib.mkdir(exist_ok=True)
+    (fake_lib / "lib").mkdir(exist_ok=True)
+    stub = fake_lib / "lib" / "libcusolver.so.11"
+    stub.write_bytes(b"")
+
+    spec = importlib.util.spec_from_loader("nvidia.cusolver", loader=None)
+    spec.submodule_search_locations = [str(fake_lib)]
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: spec)
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delitem(sys.modules, "tensorflow", raising=False)
+
+    opened: list[str] = []
+    monkeypatch.setattr(ctypes, "CDLL", lambda path, mode=0: opened.append(path))
+    loaded = compute.preload_cuda_libraries()
+
+    assert opened == [str(stub)], "the cusolver library must be loaded"
+    assert loaded == (str(stub),)
+    assert ctypes.RTLD_GLOBAL is not None  # loaded globally, or TF cannot see it
+
+    stub.unlink()
+    (fake_lib / "lib").rmdir()
+    fake_lib.rmdir()
+
+
+def test_preloading_is_harmless_where_it_does_not_apply(monkeypatch):
+    """It runs on every import, so it must be silent when it has no work."""
+    from hamlet import compute
+
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert compute.preload_cuda_libraries() == ()
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setitem(sys.modules, "tensorflow", types.ModuleType("tensorflow"))
+    assert compute.preload_cuda_libraries() == (), "too late once TF is imported"
+
+
+def test_no_module_imports_tensorflow_without_the_preload():
+    """One forgotten call site brings the bug back for every GPU user.
+
+    Every import of TensorFlow or Keras in the package goes through
+    compute.load_tensorflow / compute.load_keras, which preload first.
+    """
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "hamlet"
+    offenders = []
+    for module in sorted(root.rglob("*.py")):
+        if module.name == "compute.py":
+            continue  # where the helpers themselves live
+        for number, line in enumerate(module.read_text(encoding="utf-8").splitlines(), 1):
+            if re.match(r"\s*import (tensorflow|keras)\b", line):
+                offenders.append(f"{module.relative_to(root)}:{number}")
+    assert not offenders, (
+        "import TensorFlow through compute.load_tensorflow/load_keras, or the "
+        "CUDA preload is skipped: " + ", ".join(offenders)
+    )
+
+
+def test_a_visible_gpu_is_not_assumed_to_work():
+    """Listing a device proves the driver loaded and nothing else."""
+    from hamlet.compute import verify_accelerator
+
+    outcome = verify_accelerator()
+    assert set(outcome) >= {"ran", "ok"}
+    if not outcome["ran"]:
+        assert outcome["ok"] is None
+        assert "no GPU" in outcome["reason"]
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        ("Autotuner could not find any supported configs for HLO", "jit_compile"),
+        ("UNKNOWN: <unknown cudnn status: 5003>", "nvidia-cudnn-cu12==9.3.0.75"),
+        ("failed to allocate memory: out of memory", "nvidia-smi"),
+        ("something nobody has seen before", "device: cpu"),
+    ],
+)
+def test_a_failing_gpu_is_told_what_to_try(message, expected):
+    """A cuDNN traceback mid-run is not an answer; the fix is."""
+    from hamlet.compute import _accelerator_advice
+
+    advice = " ".join(_accelerator_advice(message))
+    assert expected in advice
+
+
+def test_xla_is_off_so_older_cards_can_train():
+    """Keras defaults jit_compile to "auto", which is XLA on a GPU.
+
+    XLA then autotunes the convolutions and finds no supported configuration
+    on pre-Volta cards, killing training before the first epoch. These models
+    are small enough that XLA wins little, so off is the default and a model
+    option turns it back on.
+    """
+    pytest.importorskip("keras")
+    from hamlet.models.supervised import CNNConfig, MLPConfig, create_supervised_model
+
+    assert MLPConfig().jit_compile is False
+    assert CNNConfig().jit_compile is False
+
+    mlp = create_supervised_model("keras_mlp", input_dim=32, output_dim=2)
+    assert mlp.jit_compile is False
+    cnn = create_supervised_model(
+        "keras_cnn", input_dim=32, output_dim=2, spectrum_shape=(1, 32)
+    )
+    assert cnn.jit_compile is False
+
+    opted_in = create_supervised_model(
+        "keras_mlp", input_dim=32, output_dim=2, jit_compile=True
+    )
+    assert opted_in.jit_compile is True

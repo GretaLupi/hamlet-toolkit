@@ -16,6 +16,7 @@ class MLPConfig:
     learning_rate: float = 3e-4
     batch_normalization: bool = True
     huber_delta: float = 0.02
+    jit_compile: bool = False
 
     def __post_init__(self) -> None:
         if not self.hidden_units or any(units < 1 for units in self.hidden_units):
@@ -39,6 +40,7 @@ class CNNConfig:
     learning_rate: float = 3e-4
     batch_normalization: bool = True
     huber_delta: float = 0.02
+    jit_compile: bool = False
 
     def __post_init__(self) -> None:
         if not self.filters or any(value < 1 for value in self.filters):
@@ -124,7 +126,9 @@ def _extract_config(options: dict[str, Any], config_type: type[Any]) -> Any:
 
 def _keras_modules():
     try:
-        import keras
+        from ..compute import load_keras
+
+        keras = load_keras()
         from keras import layers, regularizers
     except ImportError as exc:  # pragma: no cover
         raise ImportError(
@@ -151,7 +155,9 @@ def _build_keras_mlp(input_dim: int, output_dim: int, config: MLPConfig):
             if config.dropout:
                 model.add(layers.Dropout(config.dropout))
     model.add(layers.Dense(output_dim, activation="linear"))
-    return _compile_keras(model, keras, config.learning_rate, config.huber_delta)
+    return _compile_keras(
+        model, keras, config.learning_rate, config.huber_delta, config.jit_compile
+    )
 
 
 def _build_keras_cnn(
@@ -186,14 +192,37 @@ def _build_keras_cnn(
             x = layers.Dropout(config.dropout)(x)
     outputs = layers.Dense(output_dim, activation="linear")(x)
     model = keras.Model(inputs, outputs, name="spectroscopy_cnn")
-    return _compile_keras(model, keras, config.learning_rate, config.huber_delta)
+    return _compile_keras(
+        model, keras, config.learning_rate, config.huber_delta, config.jit_compile
+    )
 
 
-def _compile_keras(model: Any, keras: Any, learning_rate: float, huber_delta: float):
+def _compile_keras(
+    model: Any,
+    keras: Any,
+    learning_rate: float,
+    huber_delta: float,
+    jit_compile: bool = False,
+):
+    """Compile with XLA off by default.
+
+    Keras defaults ``jit_compile`` to ``"auto"``, which enables XLA for
+    TensorFlow on a GPU. XLA then autotunes the convolutions, and on pre-Volta
+    cards that autotuning finds no supported configuration at all: training
+    dies with "Autotuner could not find any supported configs" before the first
+    epoch (reported by @joselado on a GTX 1060, issue #1).
+
+    These models are small -- tens of thousands of parameters over a few
+    hundred bias points -- so XLA has little to win here and its compilation
+    cost is not obviously repaid. Off is therefore the honest default rather
+    than a workaround, and ``jit_compile: true`` in model options turns it back
+    on for anyone whose card and shapes benefit.
+    """
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
         loss=keras.losses.Huber(delta=huber_delta),
         metrics=[keras.metrics.MeanAbsoluteError()],
+        jit_compile=bool(jit_compile),
     )
     return model
 

@@ -6,7 +6,33 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **A GPU is no longer invisible because of one library.** TensorFlow's
+  `and-cuda` wheels ship `libcusolver` in a directory that is on the RUNPATH of
+  `libtensorflow_cc.so.2` but not of `libtensorflow_framework.so.2`, where the
+  load actually happens, so TensorFlow reported no GPU at all on machines whose
+  driver and CUDA wheels were both fine. HamLeT now loads it into the process
+  before importing TensorFlow, which needs no environment variable and no
+  action from the user. Every TensorFlow and Keras import in the package goes
+  through one helper so a new call site cannot skip it.
+- **XLA no longer stops `keras_cnn` training on older cards.** Keras defaults
+  `jit_compile` to `"auto"`, which turns XLA on for TensorFlow on a GPU; its
+  autotuner then finds no supported configuration for a convolution on
+  pre-Volta cards and training dies before the first epoch. These models are
+  small enough that XLA wins little, so it is off by default, and
+  `jit_compile: true` in a model's options turns it back on.
+- **`hamlet compute` trains a convolution on the card instead of trusting the
+  device list.** A visible GPU proves the driver loaded and nothing more; a
+  cuDNN too new for the card fails only once real work starts, which without
+  this check is after the dataset has been generated. When the probe fails the
+  command prints what to try, including the cuDNN pin for older GPUs.
+- The note explaining a missing GPU no longer suggests reinstalling
+  `[gpu]`, which could not have fixed a machine where every wheel was already
+  installed. It names the driver, and how to check for one.
+
+All three were found and diagnosed by [@joselado](https://github.com/joselado)
+in [#1](https://github.com/GretaLupi/hamlet-toolkit/issues/1), on a GTX 1060.
 
 ## [0.1.1] - 2026-09-16
 

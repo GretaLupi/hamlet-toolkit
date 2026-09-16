@@ -487,7 +487,9 @@ class ExperimentalChainAnalyzer:
         **kwargs: Any,
     ) -> "ExperimentalChainAnalyzer":
         try:
-            import keras
+            from ..compute import load_keras
+
+            keras = load_keras()
         except ImportError as exc:  # pragma: no cover
             raise ImportError("loading Keras artifacts requires the ml optional dependency") from exc
         resolved = [Path(path) for path in paths]

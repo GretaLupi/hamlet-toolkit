@@ -2947,7 +2947,9 @@ def _reference_rate() -> float:
 def describe_builder_options() -> dict[str, Any]:
     """Everything the guided form needs in order to render itself."""
     try:
-        import tensorflow  # noqa: F401
+        from ..compute import load_tensorflow
+
+        load_tensorflow()
 
         tensorflow_available = True
     except Exception:  # noqa: BLE001

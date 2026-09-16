@@ -156,7 +156,9 @@ class TrainingRun:
                 # deserialisation errors that name every layer except the
                 # version. Training on a cluster and applying the model on a
                 # laptop is the ordinary way to meet this.
-                import keras
+                from ..compute import load_keras
+
+                keras = load_keras()
 
                 record["keras_version"] = str(keras.__version__)
             model_records.append(record)
@@ -218,7 +220,9 @@ class TrainingRun:
         for record in manifest["models"]:
             if record["format"] == "keras":
                 try:
-                    import keras
+                    from ..compute import load_keras
+
+                    keras = load_keras()
                 except ImportError as exc:  # pragma: no cover
                     raise ImportError("loading this artifact requires the ml dependency") from exc
                 stored = source / record["file"]
@@ -463,7 +467,9 @@ def train_supervised(
             )
         if model.startswith("keras_"):
             try:
-                import keras
+                from ..compute import load_keras
+
+                keras = load_keras()
             except ImportError as exc:  # pragma: no cover
                 raise ImportError("neural training requires the ml optional dependency") from exc
             keras.utils.set_random_seed(seed)
@@ -583,7 +589,9 @@ class _StopWhenAsked:
     """
 
     def __new__(cls, should_stop: "Callable[[], bool]"):
-        import keras
+        from ..compute import load_keras
+
+        keras = load_keras()
 
         class _Callback(keras.callbacks.Callback):
             def on_epoch_end(self, epoch, logs=None):  # noqa: D102, ANN001

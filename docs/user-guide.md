@@ -655,6 +655,34 @@ python -m pip install "hamlet-toolkit[gpu]"
 
 The NVIDIA driver still has to come from the system; pip cannot supply it.
 
+`hamlet compute` does more than list the card: when it sees one, it trains a
+single convolution step on it. A visible device only proves the driver loaded,
+and two failures survive that check and would otherwise appear hours later,
+once the dataset has been generated and training starts.
+
+**Older cards and cuDNN.** TensorFlow's `and-cuda` extra installs the newest
+cuDNN, and recent releases have dropped support for pre-Volta GPUs. On a GTX
+1060 the card is visible, the driver is fine, and convolutions fail with
+`unknown cudnn status: 5003`. The version TensorFlow 2.21 is built against
+still works:
+
+```bash
+python -m pip install "nvidia-cudnn-cu12==9.3.0.75"
+```
+
+HamLeT does not pin this in `[gpu]`, because doing so would hold back cards
+that need a newer cuDNN. `hamlet compute` detects the failure and prints this
+command.
+
+**XLA is off.** Keras defaults `jit_compile` to `"auto"`, which enables XLA on
+a GPU; its autotuner then finds no supported configuration for a convolution on
+older cards and training dies before the first epoch. These models are small,
+so XLA wins little here. Set `jit_compile: true` in a model's options if your
+card and shapes benefit from it.
+
+Thanks to [@joselado](https://github.com/joselado) for the report that led to
+all three of these ([issue #1](https://github.com/GretaLupi/hamlet-toolkit/issues/1)).
+
 **On native Windows there is no GPU path at all.** TensorFlow dropped Windows
 GPU support at version 2.11, and its Windows wheels have been CPU-only since.
 No driver update, CUDA install, or environment variable changes that, and the

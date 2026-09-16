@@ -209,8 +209,13 @@ def build_parser() -> argparse.ArgumentParser:
     gui.add_argument("--host", default="127.0.0.1", help="localhost by default; it runs local compute")
     gui.add_argument("--no-browser", action="store_true", help="print the URL instead of opening it")
 
-    commands.add_parser(
+    compute_parser = commands.add_parser(
         "compute", help="report the CPU and GPU this machine can use"
+    )
+    compute_parser.add_argument(
+        "--skip-gpu-check",
+        action="store_true",
+        help="only list devices; do not train a probe step on the GPU",
     )
 
     commands.add_parser(
@@ -379,7 +384,12 @@ def _run_screen_dmi(args) -> int:
 
 def _run_compute(args) -> int:
     """Say what this machine can use, and which stage each part affects."""
-    from .compute import GPU_CAPABLE_MODELS, advise_device, describe_compute
+    from .compute import (
+        GPU_CAPABLE_MODELS,
+        advise_device,
+        describe_compute,
+        verify_accelerator,
+    )
 
     report = describe_compute()
     print(f"CPU cores        : {report.cpu_count}")
@@ -390,6 +400,21 @@ def _run_compute(args) -> int:
             print(f"GPU {index}            : {device.name}{detail}")
     else:
         print("GPU              : none visible")
+
+    # Listing a device proves the driver loaded and nothing more. A card can be
+    # visible and still be unable to run a convolution, which would otherwise
+    # surface hours later, after the dataset has been generated.
+    if report.accelerators and not getattr(args, "skip_gpu_check", False):
+        print("GPU check        : training one convolution step...", flush=True)
+        check = verify_accelerator(report)
+        if check["ok"]:
+            print("GPU check        : ok, the card trains convolutions")
+        else:
+            print("GPU check        : FAILED -- the card is visible but cannot train")
+            print(f"  {check['error']}")
+            for hint in check["advice"]:
+                print(f"  fix: {hint}")
+
     print()
     for model in sorted(GPU_CAPABLE_MODELS | {"ridge", "random_forest"}):
         advice = advise_device(model, report)
