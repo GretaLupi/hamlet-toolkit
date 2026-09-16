@@ -294,7 +294,10 @@ def workflow_overview() -> dict[str, Any]:
                     "the compute time, and lists the output files."
                 ),
                 "needs": "the physical system and measurement settings",
-                "cost": "configuration takes seconds; training may take hours",
+                "cost": (
+                    "seconds to configure; generating the dataset is the slow "
+                    "stage and is estimated before it starts"
+                ),
             },
             {
                 "id": "dmi",

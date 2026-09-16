@@ -1257,7 +1257,8 @@ function renderRunTarget() {
     ? "Submit to the cluster" : "Start on this machine";
   el("f-run-hint").textContent = chosenRunTarget === "cluster"
     ? "The project is copied, generation is submitted as an array, and training waits for it."
-    : "Generation and training take hours. It runs in the background.";
+    : "Generating the dataset is the slow stage; training after it is minutes. "
+      + "It runs in the background.";
 }
 
 el("f-run-targets").querySelectorAll("[data-run-target]").forEach((card) =>
@@ -1883,7 +1884,8 @@ el("f-run").addEventListener("click", async () => {
   // be a minute of simulation. Starting the next one during that window is
   // the usual way to end up with two heavy jobs sharing the cores and both
   // crawling, which reads as the interface having gone slow.
-  let warning = "Generation and training can take hours. Start it now?";
+  let warning = "Generating the dataset is the slow stage; the estimate above is "
+    + "for your settings, and training after it is minutes. Start it now?";
   try {
     const { jobs } = await api("/api/jobs");
     const busy = jobs.filter((j) => j.status === "running" && j.kind === "project");

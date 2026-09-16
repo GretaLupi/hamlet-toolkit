@@ -83,7 +83,7 @@ in the background. Close it with the **Stop server** button or `Ctrl+C`.
 </p>
 
 Every page says what it needs and how long it will take before you start, so a
-run that costs hours is never a surprise.
+long run is never a surprise.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/GretaLupi/hamlet-toolkit/main/assets/figures/interface-model-match.png" alt="The compatibility check: each model with the family it assumes, whether it is usable, and the reason it was refused" width="88%">
