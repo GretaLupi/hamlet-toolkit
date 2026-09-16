@@ -56,10 +56,42 @@ Every number in that figure is produced by this package; regenerate it with
 HamLeT needs **Python 3.10 or newer**. Check what you have with
 `python --version`.
 
+Pick the install that matches what you want to do — the difference is which
+models you can run, and whether you can simulate your own training data.
+
 ```bash
+# Look at measurements and use the shipped ridge and random-forest models
 python -m pip install hamlet-toolkit
+
+# ...and the Keras models, including the local-window model that works on
+# chains of any length
+python -m pip install "hamlet-toolkit[ml]"
+
+# ...and dataset generation, which you need to train a model for your own
+# system rather than reuse a shipped one
+python -m pip install "hamlet-toolkit[simulation]"
+
+# everything above at once
+python -m pip install "hamlet-toolkit[all]"
+```
+
+Then:
+
+```bash
 hamlet gui
 ```
+
+Two things worth knowing before choosing. **The base install cannot generate a
+dataset**, so training a model for your own system needs `[simulation]`, which
+pulls DMRGPy and through it Julia — the heaviest dependency here. And **if you
+already have TensorFlow or DMRGPy in your environment, the plain install is
+enough**: HamLeT imports whatever it finds, so the extras exist only to fetch
+those packages for people who do not have them, and naming one you already
+satisfy risks pip upgrading a build you chose deliberately.
+
+Of the three published models, two run on the base install; the
+variable-length local-window model is a Keras model and needs `[ml]`. Whichever
+you install, the interface lists exactly which models it can load.
 
 The local browser interface guides the full workflow:
 
@@ -119,7 +151,9 @@ which also covers why a GPU makes this stage *slower*.
 ## Installation options
 
 The base installation includes the interface, experimental I/O, plotting,
-ridge and random-forest models, and the published reference-model catalog.
+ridge and random-forest models, and the published reference-model catalog —
+all three model artifacts ship in the package, though loading the Keras one
+needs `[ml]`.
 
 ```bash
 python -m pip install "hamlet-toolkit[ml]"          # Keras MLP and CNN
