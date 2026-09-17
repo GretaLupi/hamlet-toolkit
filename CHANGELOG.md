@@ -6,6 +6,10 @@ the policy in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.2] - 2026-09-17
+
 ### Fixed
 
 - **A GPU is no longer invisible because of one library.** TensorFlow's

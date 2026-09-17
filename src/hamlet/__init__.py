@@ -119,6 +119,6 @@ __all__ = [
     "SpectroscopyDataset",
     "generate_dataset",
 ]
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 __brand__ = "HamLeT"
 __full_name__ = "Hamiltonian Learning Toolkit"

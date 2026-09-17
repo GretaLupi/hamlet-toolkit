@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hamlet-toolkit"
-version = "0.1.1"
+version = "0.1.2"
 description = "Experimental Hamiltonian inference from STM/STS data with simulation and machine learning"
 readme = "README.md"
 requires-python = ">=3.10"
